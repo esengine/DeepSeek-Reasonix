@@ -31,18 +31,19 @@ it("reads the host plan after reload, retains the composer entry, and follows to
     onSessionChanged={() => {}} pulse={0} findPulse={0} onSettings={() => {}} needsProject={false}
     onOpenProject={() => {}} onKeepHere={() => {}} theme="dark" dockW={560} dockMax={880} onDockW={() => {}} />);
   const fold = () => view.container.querySelector<HTMLButtonElement>('.studio-todo [data-action="plan.fold"]')!;
-  await waitFor(() => expect(view.container.querySelector(".studio-todo small")?.textContent).toBe("1/3"));
+  const title = () => view.container.querySelector(".studio-todo-sum b")?.textContent;
+  await waitFor(() => expect(title()).toBe("计划 · 第 2 / 3 步"));
   fireEvent.click(fold());
   expect(view.container.querySelector(".studio-todo-body")?.textContent).toContain("验证当前修复");
   expect(view.container.querySelector(".studio-todo-body")?.textContent).toContain("正在修复问题");
   expect(view.container.querySelector(".plan-peek")).toBeNull();
   todos = todos.map((todo, index) => ({ ...todo, status: index < 2 ? "completed" : "in_progress" }));
   await act(async () => emit({ kind: "todo_progress" } as WireEvent));
-  await waitFor(() => expect(view.container.querySelector(".studio-todo small")?.textContent).toBe("2/3"));
+  await waitFor(() => expect(title()).toBe("计划 · 第 3 / 3 步"));
   expect(view.container.querySelector(".studio-todo-body")?.textContent).toContain("修复问题");
   expect(view.container.querySelector(".studio-todo-body")?.textContent).not.toContain("正在修复问题");
   todos = todos.map((todo) => ({ ...todo, status: "completed" }));
   await act(async () => emit({ kind: "todo_progress" } as WireEvent));
-  await waitFor(() => expect(view.container.querySelector(".studio-todo small")).toBeNull());
+  await waitFor(() => expect(title()).toBe("目标"));
   expect(view.container.querySelector(".studio-todo")?.textContent).toContain("验证当前修复");
 });

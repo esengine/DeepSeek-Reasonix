@@ -219,9 +219,9 @@ const planProgressListeners = new Set<() => void>();
 
 export function showsPlanProgress(): boolean {
   try {
-    return localStorage.getItem(PLAN_PROGRESS_KEY) === "on";
+    return localStorage.getItem(PLAN_PROGRESS_KEY) !== "off";
   } catch {
-    return false;
+    return true;
   }
 }
 

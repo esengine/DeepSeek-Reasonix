@@ -53,10 +53,10 @@ interface Props {
   waiting: Waiting;
   scroll: RefObject<HTMLDivElement | null>;
   hidden: boolean;
-  // A request from outside to show one tool call — the run graph asking for the
-  // node you clicked. The nonce, not the id, is what makes asking twice land
-  // twice; null while nothing has been asked for.
-  focus: { call: string; n: number } | null;
+  // A request from outside to show one tool call or row — the run graph asking for
+  // the node you clicked, the plan strip for its card. The nonce, not the id, is
+  // what makes asking twice land twice; null while nothing has been asked for.
+  focus: { call: string; n: number } | { item: string; n: number } | null;
   find?: { id: string; nth: number; n: number; mode?: { regex?: boolean; caseSensitive?: boolean } } | null;
   query?: string;
   onApprove: (itemId: string, id: string, v: ApprovalVerdict) => Promise<void>;
@@ -430,9 +430,10 @@ export function Transcript({ items, port, historyPaging, entering, onEntered, br
     const at = new Map<string, { block: number; into: number }>();
     blocks.forEach((block, b) =>
       block.forEach((it, i) => {
-        if (it.t !== "tool") return;
         const into = block.length > 1 ? i / block.length : 0;
-        for (const id of [it.tool.id, ...it.children.map((c) => c.id)]) if (id) at.set(id, { block: b, into });
+        at.set(`[data-item="${CSS.escape(it.id)}"]`, { block: b, into });
+        if (it.t !== "tool") return;
+        for (const id of [it.tool.id, ...it.children.map((c) => c.id)]) if (id) at.set(`[data-call="${CSS.escape(id)}"]`, { block: b, into });
       }),
     );
     return at;
@@ -445,9 +446,10 @@ export function Transcript({ items, port, historyPaging, entering, onEntered, br
   useEffect(() => {
     if (hidden || !focus || landed.current === focus.n) return;
     landed.current = focus.n;
-    const where = callBlock.get(focus.call);
-    revealNested(focus.call);
-    if (where) land(where.block, where.into, `[data-call="${CSS.escape(focus.call)}"]`);
+    const selector = "item" in focus ? `[data-item="${CSS.escape(focus.item)}"]` : `[data-call="${CSS.escape(focus.call)}"]`;
+    if ("call" in focus) revealNested(focus.call);
+    const where = callBlock.get(selector);
+    if (where) land(where.block, where.into, selector);
   }, [hidden, focus, callBlock, land]);
 
   // Drawn is spent. Not "the animation finished" — reduced motion runs none,
@@ -678,7 +680,6 @@ const ActivityGroup = memo(function ActivityGroup({
         )}
         {(showEarlier ? items : fold.recent).map((item) => <Row key={item.id} it={item} activity {...rowProps} cp={checkpoints.get(item.id)} />)}
       </div>
-      <p className="activity-note">{t("点击步骤可原位查看详情、结果或文件差异")}</p>
     </details>
   );
 });
@@ -775,7 +776,7 @@ const Row = memo(function Row({
     case "guardian":
       return <GuardianCard g={it.g} />;
     case "approval":
-      return <ApprovalCard item={it} onApprove={onApprove} onFullAccess={onFullAccess} onPlan={onPlan} />;
+      return <><ApprovalCard item={it} onApprove={onApprove} onFullAccess={onFullAccess} onPlan={onPlan} />{afterAnswer}</>;
     case "ask":
       return it.ask.questions.some(q => q.surface) ? <SurfaceCard item={it} onAnswer={onAnswer} port={port} /> : it.ask.origin ? <ElicitCard item={it} onAnswer={onAnswer} /> : <AskCard item={it} onAnswer={onAnswer} onEngage={port?.engageQuestion?.bind(port)} refine={port?.refinePrompt?.bind(port)} />;
     case "compaction":

@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import "./testkit";
@@ -41,12 +41,23 @@ describe("putting the open plan away", () => {
     expect(document.activeElement).toBe(bar);
   });
 
-  it("says what is running and what is waiting in the open list's header", async () => {
+  it("titles the open list once, with where the plan stands", async () => {
     render(<PlanFold plan={plan} shown />);
     await userEvent.click(screen.getByRole("button", { expanded: false }));
-    const body = document.querySelector(".studio-todo-body")!;
-    expect(body.textContent).toContain("1 进行中");
-    expect(body.textContent).toContain("2 待处理");
+    const head = document.querySelector(".studio-todo-head")!;
+    expect(head.textContent).toContain("计划 · 第 1 / 3 步");
+    expect(head.textContent).not.toContain("待处理");
+    expect(screen.queryByRole("button", { name: "跳到卡片 ↑" })).toBeNull();
+  });
+
+  it("takes the reader back to the plan's card and puts the list away", async () => {
+    const onJump = vi.fn();
+    render(<PlanFold plan={plan} shown onJump={onJump} />);
+    const bar = screen.getByRole("button", { expanded: false });
+    await userEvent.click(bar);
+    await userEvent.click(screen.getByRole("button", { name: "跳到卡片 ↑" }));
+    expect(onJump).toHaveBeenCalledTimes(1);
+    expect(bar.getAttribute("aria-expanded")).toBe("false");
   });
 
   it("puts the list away when the press lands outside it, and keeps it for a press on the bar itself", async () => {

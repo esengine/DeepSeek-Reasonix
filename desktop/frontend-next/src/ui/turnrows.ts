@@ -1,6 +1,7 @@
 import { visibleSurfaceOfTool } from "./surface/call";
 import type { Item } from "../state/session";
 import { chartOfTool } from "./chart/spec";
+import { isPlanGate } from "./planLive";
 
 export type Row = { item: Item; activity?: Item[] } | { activity: Item[] };
 export type FoldRow = { fold: Row[]; id: string };
@@ -11,6 +12,14 @@ export type Shown = Row | FoldRow;
 export function drawn(item: Item): boolean {
   return item.t === "say" && Boolean(item.text.trim() || item.reasoning?.trim());
 }
+
+/** hosts reports whether work after an item reads as its own. A started plan's
+ *  card is what the work after it is doing, as a sentence is what its work did. */
+function hosts(item: Item): boolean {
+  return drawn(item) || (item.t === "approval" && item.verdict === "start" && isPlanGate(item.a));
+}
+
+const restatesPlan = (item: Item) => item.t === "tool" && item.tool.name === "todo_write" && !item.tool.parentId && !item.tool.err;
 
 /** repeatedSpeakers names the sentences that continue one the same model just
  *  said: the speaker is already on screen, so only a change of model is worth a
@@ -61,10 +70,12 @@ export function transcriptRows(all: Item[], foldWork?: { running: boolean }): Sh
       if ("item" in row) continue;
       // The sentence this work followed, else the one it was for. A message the
       // model sent with no words yet is the speaker only when neither exists.
-      const host = nearest(turn, i, drawn) ?? nearest(turn, i, (item) => item.t === "say") ?? -1;
+      const host = nearest(turn, i, hosts) ?? nearest(turn, i, (item) => item.t === "say") ?? -1;
       if (host < 0) continue;
       const into = turn[host] as { item: Item; activity?: Item[] };
-      into.activity = [...row.activity, ...(into.activity ?? [])];
+      // A plan's card already draws its list; the calls that rewrote it say so a second time.
+      const work = into.item.t === "approval" ? row.activity.filter((it) => !restatesPlan(it)) : row.activity;
+      if (work.length > 0) into.activity = [...work, ...(into.activity ?? [])];
       turn.splice(i, 1);
     }
     rows.push(...(foldWork && !(foldWork.running && end >= items.length) ? foldTurn(turn) : turn));
@@ -79,9 +90,13 @@ export function transcriptRows(all: Item[], foldWork?: { running: boolean }): Sh
  *  tool work and the sentences before the last; a question, an approval, a plan,
  *  a steer or a notice is something to read or act on and stays where it was. A
  *  turn still running, or with no sentence to leave out, is left as it is. */
-function foldTurn(turn: Row[]): Shown[] {
-  const final = lastIndex(turn, (row) => "item" in row && row.item.t === "say" && row.item.text.trim() !== "");
-  if (final < 0) return turn;
+function foldTurn(rows: Row[]): Shown[] {
+  const answers = (row: Row) => "item" in row && row.item.t === "say" && row.item.text.trim() !== "";
+  const last = lastIndex(rows, answers);
+  if (last < 0) return rows;
+  // Work a card hosts is process like any other; the card itself stays.
+  const turn = rows.flatMap((row, i): Row[] => (i < last && "item" in row && row.activity && !foldable(row) ? [{ item: row.item }, { activity: row.activity }] : [row]));
+  const final = lastIndex(turn, answers);
   const out: Shown[] = [];
   for (let i = 0; i < turn.length; i++) {
     const row = turn[i];

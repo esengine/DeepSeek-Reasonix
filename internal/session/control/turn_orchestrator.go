@@ -378,8 +378,9 @@ func (o *turnOrchestrator) gatePlanApproval(ctx context.Context) error {
 	}
 	c.sharePlanRuntime()
 	// The plan is already visible as the assistant's answer, so the request
-	// carries no subject — it's purely the gate.
-	allow, err := c.planApproved(ctx)
+	// carries no subject; its input is the list approving will seed.
+	steps := PlanTodosJSON(proposal)
+	allow, err := c.planApproved(ctx, steps)
 	if err != nil {
 		// A stop or timeout leaves the plan unapproved, which is the same state
 		// as a revise: awaiting approval has no card left to answer it.
@@ -406,7 +407,7 @@ func (o *turnOrchestrator) gatePlanApproval(ctx context.Context) error {
 		c.plan().Transition(executing, planmode.Exit)
 		c.sharePlanRuntime()
 	}()
-	todoArgs := c.seedPlanTodos(proposal)
+	todoArgs := c.seedTodoArgs(steps)
 	execStart := c.sessionMessageCount()
 	// Starting plan execution is a real Recovery Episode boundary even though
 	// the follow-up turn is synthetic.

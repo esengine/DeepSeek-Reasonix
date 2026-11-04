@@ -6,10 +6,9 @@ import { useState } from "react";
 import { decisionSource } from "../source";
 import { RememberChoice, RememberWhere, type Remembered } from "./RememberChoice";
 import { useViewer } from "../../state/viewer";
+import { isPlanGate } from "../planLive";
+import { PlanCard } from "./PlanCard";
 
-// The Tool name the kernel puts on a plan gate; its own comment says frontends
-// key their plan UI on it. `kind` says the same thing on newer kernels.
-const PLAN_TOOL = "exit_plan_mode";
 // Widening a delegated run's write confinement. Not a tool the run calls: the
 // answer moves the fence rather than performing anything, so the card says that
 // instead of "about to run extend_write_paths".
@@ -129,7 +128,7 @@ export function ApprovalCard({ item, onApprove, onFullAccess, onPlan }: Props) {
       setSwitchingFullAccess(false);
     }
   };
-  if (item.a.kind === "plan" || item.a.tool === PLAN_TOOL) return <PlanGate item={item} onPlan={onPlan} />;
+  if (isPlanGate(item.a)) return <PlanCard item={item} onPlan={onPlan} />;
   return (
     // 咨询与授权此前共用 data-k="ask" 和同一个「?」：一个是模型想听你的意见，
     // 另一个是它要动你的文件。授权借「写」的类别 —— 它本来就是一次写权限。
@@ -212,80 +211,6 @@ export function ApprovalCard({ item, onApprove, onFullAccess, onPlan }: Props) {
                   <><b>{t("允许这一次。")}</b>{t("下次同样的操作仍会请求确认。")}</>
                 )}
                 {settledBy && <span className="apv-by">{settledBy}</span>}
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// A plan is not a tool call, and the generic card said so in the wrong words:
-// 「允许这一次 / 始终允许此类操作，不再询问 / 拒绝」. Two of those are wrong for a plan —
-// nothing here is repeatable, so there is no class to stop asking about, and the
-// kernel refuses a remembered grant for this gate anyway. And the vocabulary hid
-// the outcome people actually wanted: denying keeps planning, which is how you
-// change the plan. So the card names the three the kernel really distinguishes
-// (control.PlanDecisionAction), including the one Studio never offered.
-function PlanGate({ item, onPlan }: { item: Props["item"]; onPlan: Props["onPlan"] }) {
-  const sealed = item.verdict !== undefined;
-  const [submitting, setSubmitting] = useState<PlanAction | "">("");
-  const decide = async (action: PlanAction) => {
-    if (submitting) return;
-    setSubmitting(action);
-    try {
-      await onPlan(item.id, item.a.id, action);
-    } finally {
-      setSubmitting("");
-    }
-  };
-  const said =
-    item.verdict === "start"
-      ? [t("已开始执行。"), t("计划模式已关闭，进入执行阶段。")]
-      : item.verdict === "exit"
-        ? [t("暂不执行。"), t("已退出计划模式，计划保留在上方，可随时重新下达。")]
-        : item.verdict === "revise" || item.verdict === "deny"
-          ? [t("继续规划。"), t("在下方说明需要修改的内容，规划者将据此重写该计划。")]
-          : [t("已在其他窗口处理。"), t("请以最新运行状态为准。")];
-  return (
-    <div className="call" data-k="ask" data-prompt={sealed ? "settled" : "pending"}>
-      <div className="g">
-        <Sym glyph="?" />
-      </div>
-      <div className="c">
-        <div className="hl">
-          <span className="nm">{t("计划待确认")}</span>
-          <span className="tag">{item.a.tool}</span>
-        </div>
-        <div className="out">
-          <div className="apv" data-sealed={sealed ? item.verdict : undefined} aria-busy={!!submitting}>
-            <div className="apv-dt">{item.a.reason || t("计划已生成，如何执行由你决定。")}</div>
-            {!sealed && (
-              <>
-                <div className="apv-ft">
-                  <button className="btn" data-primary data-action="decision.plan" data-target={item.a.id} data-value="start"
-                    disabled={!!submitting} onClick={() => void decide("start")}>
-                    {submitting === "start" ? t("正在提交…") : t("开始执行")}
-                  </button>
-                  <button className="btn" data-action="decision.plan" data-target={item.a.id} data-value="revise"
-                    disabled={!!submitting} onClick={() => void decide("revise")}>
-                    {t("修改计划")}
-                  </button>
-                  <button className="btn" data-action="decision.plan" data-target={item.a.id} data-value="exit"
-                    disabled={!!submitting} onClick={() => void decide("exit")}>
-                    {t("暂不执行")}
-                  </button>
-                </div>
-                {/* 这一句就是这张卡存在的理由：过去只有「拒绝」，而它其实是
-                    「继续规划」—— 想改计划的人以为自己把计划扔了。 */}
-                <div className="apv-note">{t("「修改计划」将保持在计划模式中，请在下方说明需要修改之处。")}</div>
-              </>
-            )}
-            {sealed && (
-              <div className="apv-done">
-                <b>{said[0]}</b>
-                {said[1]}
               </div>
             )}
           </div>

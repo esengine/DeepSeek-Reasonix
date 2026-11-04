@@ -37,6 +37,24 @@ describe("what a turn looks like once it is laid out", () => {
       .toEqual(["user", "say", "say+3", "say"]);
   });
 
+  it("files a started plan's work under its card, and a proposal's nowhere but its sentence", () => {
+    const plan = (verdict?: string): Item => ({ t: "approval", id: "p1", a: { id: "a1", tool: "exit_plan_mode", subject: "", kind: "plan" }, verdict });
+    expect(shape([me("u1", "go"), said("s1", "plan:"), plan("start"), ran("t1"), ran("t2"), said("s2", "done")]))
+      .toEqual(["user", "say", "approval+2", "say"]);
+    expect(shape([me("u1", "go"), said("s1", "plan:"), plan(), ran("t1")])).toEqual(["user", "say+1", "approval"]);
+    expect(shape([me("u1", "go"), said("s1", "plan:"), plan("revise"), ran("t1")])).toEqual(["user", "say+1", "approval"]);
+  });
+
+  it("leaves the plan's own list updates out of the work its card hosts, but not a refused one, and not elsewhere", () => {
+    const plan: Item = { t: "approval", id: "p1", a: { id: "a1", tool: "exit_plan_mode", subject: "", kind: "plan" }, verdict: "start" };
+    const todo = (id: string, err?: string): Item => ({ t: "tool", id, tool: { id, name: "todo_write", err } as never, running: false, children: [] });
+    expect(shape([me("u1", "go"), said("s1", "plan:"), plan, todo("w1"), ran("t1"), todo("w2"), said("s2", "done")]))
+      .toEqual(["user", "say", "approval+1", "say"]);
+    expect(shape([me("u1", "go"), said("s1", "plan:"), plan, todo("w1"), said("s2", "done")])).toEqual(["user", "say", "approval", "say"]);
+    expect(shape([me("u1", "go"), said("s1", "plan:"), plan, todo("w1", "refused")])).toEqual(["user", "say", "approval+1"]);
+    expect(shape([me("u1", "go"), said("s1", "on it"), todo("w1"), ran("t1")])).toEqual(["user", "say+2"]);
+  });
+
   it("keeps work under the model that did it while no sentence has come yet", () => {
     const blank: Item = { t: "say", id: "s0", text: "", reasoning: "\n", done: true };
     expect(shape([me("u1", "go"), blank, ran("t1"), ran("t2")])).toEqual(["user", "say+2"]);
@@ -49,6 +67,12 @@ describe("folding a turn's work under one line", () => {
 
   it("leaves only the last sentence outside, with the work and the earlier sentences folded", () => {
     expect(folded([me("u", "q"), said("s1", "let me look"), ran("t1"), said("s2", "found it"), ran("t2"), said("s3", "done")])).toEqual(["user", "fold(2)", "say"]);
+  });
+
+  it("folds the work a plan's card hosts and leaves the card where it was", () => {
+    const plan: Item = { t: "approval", id: "p1", a: { id: "a1", tool: "exit_plan_mode", subject: "", kind: "plan" }, verdict: "start" };
+    expect(folded([me("u", "q"), said("s1", "plan:"), plan, ran("t1"), ran("t2"), said("s2", "found it"), ran("t3"), said("s3", "done")]))
+      .toEqual(["user", "fold(1)", "approval", "fold(2)", "say"]);
   });
 
   it("folds nothing when the turn is just a question and its answer", () => {

@@ -33,13 +33,14 @@ func (c *Controller) SavePlanApprovalSettings(auto bool) error {
 	return cfg.SaveTo(path)
 }
 
-// planApproved answers the plan card: the user's standing choice when they made
-// one, the card otherwise. An automatic start leaves a notice in the transcript.
-func (c *Controller) planApproved(ctx context.Context) (bool, error) {
+// planApproved answers the plan card for these steps: the user's standing choice
+// when they made one, the card otherwise. An automatic start leaves a notice in
+// the transcript.
+func (c *Controller) planApproved(ctx context.Context, steps string) (bool, error) {
 	if c.PlanApprovalSettings().Auto {
 		c.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Code: event.NoticeCodePlanAutoApproved, Text: i18n.M.PlanAutoApproved})
 		return true, nil
 	}
-	allow, _, err := c.requestApproval(ctx, approvalRequest{tool: planApprovalTool})
+	allow, _, err := c.requestApproval(ctx, planApprovalRequest(steps, ""))
 	return allow, err
 }

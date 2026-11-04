@@ -25,12 +25,14 @@ describe("default intent for messages sent during a run", () => {
 });
 
 describe("collapsed plan progress on this machine", () => {
-  it("is off by default and only accepts an explicit on preference", () => {
-    expect(showsPlanProgress()).toBe(false);
-    for (const raw of ["", "true", "off", "garbage"]) {
+  it("is on by default, as the strip is drawn, and only an explicit off hides it", () => {
+    expect(showsPlanProgress()).toBe(true);
+    for (const raw of ["", "true", "garbage"]) {
       localStorage.setItem("rx-plan-progress", raw);
-      expect(showsPlanProgress()).toBe(false);
+      expect(showsPlanProgress()).toBe(true);
     }
+    localStorage.setItem("rx-plan-progress", "off");
+    expect(showsPlanProgress()).toBe(false);
     setShowsPlanProgress(true);
     expect(showsPlanProgress()).toBe(true);
     expect(localStorage.getItem("rx-plan-progress")).toBe("on");
@@ -51,9 +53,9 @@ describe("collapsed plan progress on this machine", () => {
     const get = vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => { throw new Error("unavailable"); });
     const set = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => { throw new Error("unavailable"); });
     try {
-      expect(showsPlanProgress()).toBe(false);
-      expect(() => setShowsPlanProgress(true)).not.toThrow();
-      expect(showsPlanProgress()).toBe(false);
+      expect(showsPlanProgress()).toBe(true);
+      expect(() => setShowsPlanProgress(false)).not.toThrow();
+      expect(showsPlanProgress()).toBe(true);
     } finally {
       get.mockRestore();
       set.mockRestore();

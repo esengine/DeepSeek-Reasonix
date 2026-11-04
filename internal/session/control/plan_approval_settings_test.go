@@ -104,3 +104,59 @@ func TestPlanApprovalCanBeTakenBack(t *testing.T) {
 		t.Fatal("returning to ask did not reach the user file")
 	}
 }
+
+// The card a person answers names itself a plan and lists the steps approving
+// will seed, in the todo_write shape the seed uses, so the list they approve is
+// the list that runs.
+func TestPlanCardCarriesTheStepsApprovingSeeds(t *testing.T) {
+	t.Setenv("REASONIX_HOME", testenv.TempDir(t))
+	proposal := "Plan:\n1. a\n2. b"
+	prov := &scriptedTurns{turns: [][]provider.Chunk{textTurn(proposal), textTurn("done")}}
+	ag := agent.New(prov, tool.NewRegistry(), sessionstore.NewSession(""), agent.Options{}, event.Discard)
+	cards := make(chan event.Approval, 1)
+	seeds := make(chan string, 4)
+	done := make(chan struct{}, 4)
+	c := New(Options{Runner: ag, Executor: ag, Sink: event.FuncSink(func(e event.Event) {
+		switch e.Kind {
+		case event.ApprovalRequest:
+			cards <- e.Approval
+		case event.ToolDispatch:
+			if e.Tool.ID == "plan-seed" {
+				seeds <- e.Tool.Args
+			}
+		case event.TurnDone:
+			done <- struct{}{}
+		}
+	})})
+	c.SetPlanMode(true)
+	c.Send("plan something")
+	var card event.Approval
+	select {
+	case card = <-cards:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the plan card never opened")
+	}
+	want := PlanTodosJSON(proposal)
+	if want == "" {
+		t.Fatal("the proposal parsed to no steps")
+	}
+	if card.Kind != "plan" {
+		t.Fatalf("card kind = %q, want plan", card.Kind)
+	}
+	if string(card.RawInput) != want {
+		t.Fatalf("card steps = %s, want %s", card.RawInput, want)
+	}
+	replayed, _ := c.approval.snapshotPrompts()
+	if len(replayed) != 1 || replayed[0].Kind != "plan" || string(replayed[0].RawInput) != want {
+		t.Fatalf("replayed card = %+v, want the same kind and steps", replayed)
+	}
+	c.Approve(card.ID, true, false, false)
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the approved plan never finished")
+	}
+	if seed := <-seeds; seed != want {
+		t.Fatalf("seeded %s, want the steps the card showed %s", seed, want)
+	}
+}

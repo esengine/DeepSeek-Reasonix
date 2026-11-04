@@ -315,14 +315,15 @@ func (c *Controller) RunSubagentProfile(ctx context.Context, name, task string, 
 
 func (p plannerPlanApprover) RunWithPlannerApproval(ctx context.Context, plan string, run func(context.Context) error) error {
 	c := p.c
-	allow, _, err := c.requestApproval(ctx, approvalRequest{tool: planApprovalTool, reason: "Planner requested host approval before execution."})
+	steps := PlanTodosJSON(plan)
+	allow, _, err := c.requestApproval(ctx, planApprovalRequest(steps, "Planner requested host approval before execution."))
 	if err != nil {
 		return err
 	}
 	if !allow {
 		return nil
 	}
-	todoArgs := c.seedPlanTodos(plan)
+	todoArgs := c.seedTodoArgs(steps)
 	execStart := c.sessionMessageCount()
 	c.approval.setPlanAutoApprove(true)
 	defer c.approval.setPlanAutoApprove(false)

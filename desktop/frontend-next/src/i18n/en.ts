@@ -595,8 +595,6 @@ export const EN: Record<string, string> = {
   "本会话": "This session",
   "计划": "Plan",
   "收起计划": "Collapse the plan",
-  "{n} 进行中": "{n} in progress",
-  "{n} 待处理": "{n} pending",
   "执行计划中": "Executing plan",
   "正在执行已批准的计划": "Executing an approved plan",
   "尚未制定": "None yet",

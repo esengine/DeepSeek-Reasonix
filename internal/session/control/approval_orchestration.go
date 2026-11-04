@@ -617,11 +617,11 @@ func (c *Controller) requestApprovalDecision(ctx context.Context, req approvalRe
 	c.approval.promptEmitMu.Lock()
 	var id string
 	var reply chan approvalReply
+	kind := ""
+	if req.tool == planApprovalTool {
+		kind = "plan"
+	}
 	if req.fresh || req.requireHuman || req.tool == planApprovalTool {
-		kind := ""
-		if req.tool == planApprovalTool {
-			kind = "plan"
-		}
 		id, reply = c.approval.registerDecisionKindWithInput(req.tool, req.subject, req.reason, req.args, req.fresh, req.requireHuman, kind, nil)
 	} else {
 		id, reply = c.approval.registerWithInput(req.tool, req.subject, req.reason, req.args)
@@ -631,7 +631,7 @@ func (c *Controller) requestApprovalDecision(ctx context.Context, req approvalRe
 	c.sink.Emit(c.approvalRequestEvent(event.Approval{
 		ID: id, Tool: req.tool, Subject: req.subject, Reason: req.reason, ReasonCode: ExplicitApprovalCode(req.tool, req.subject),
 		RawInput: append(json.RawMessage(nil), req.args...), Fresh: req.fresh,
-		AllowsSession: session, AllowsPersist: c.offersPersist(req.tool, persist),
+		AllowsSession: session, AllowsPersist: c.offersPersist(req.tool, persist), Kind: kind,
 	}))
 	c.approval.promptEmitMu.Unlock()
 	// The agent now needs the user's attention; a Notification hook can ping an

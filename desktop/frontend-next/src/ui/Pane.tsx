@@ -42,6 +42,7 @@ import { useSurfaceReplay } from "./surface-replay";
 import { MeterRail } from "./MeterRail";
 import { useAgentRequest } from "./useAgentRequest";
 import { PlanFold } from "./PlanFold";
+import { latestPlanGate, PlanLiveContext, type PlanLive } from "./planLive";
 import { useBroughtResults } from "./useBroughtResults";
 import { RunLine } from "./RunLine";
 import { AgentCompositionPicker } from "./AgentCompositionPicker";
@@ -449,6 +450,11 @@ function PaneView({ port, hub, rt, title, active, visible, sideHost, side, onFoc
   // Chinese literals that the reducer had written — a translation key deciding
   // whether the run reads as moving.
   const blocked = hasPendingDecision(status);
+  const planGate = useMemo(() => latestPlanGate(s.items), [s.items]);
+  const [planSeen, setPlanSeen] = useState(false);
+  const [planFocus, setPlanFocus] = useState<{ item: string; n: number } | null>(null);
+  const planLive = useMemo<PlanLive>(() => ({ plan: s.plan, running, blocked, latest: planGate?.id, onSeen: setPlanSeen }), [s.plan, running, blocked, planGate?.id]);
+  const planStarted = planGate?.verdict === "start" ? planGate.id : undefined;
   const browserSize = useBrowserFull(docked, active && visible, blocked);
   const run = runState({ blocked, running, hasItems: s.items.length > 0, terminal: s.terminal });
   const cost = s.metrics.coverage === "none" ? NO_COST : s.metrics.cost;
@@ -506,6 +512,7 @@ function PaneView({ port, hub, rt, title, active, visible, sideHost, side, onFoc
       <PaneShown.Provider value={shown}>
       <LiveWork.Provider value={live}>
       <NewAnswerAnchor.Provider value={marker ? newAnswerAt : null}>
+      <PlanLiveContext.Provider value={planLive}>
       <Transcript port={port} historyPaging={historyPaging}
         scope={rt.sessionPath}
         onSettings={onSettings}
@@ -522,7 +529,7 @@ function PaneView({ port, hub, rt, title, active, visible, sideHost, side, onFoc
         waiting={s.waiting}
         scroll={flow}
         hidden={tab !== "flow" || !!worktreePhase}
-        focus={null}
+        focus={planFocus}
         find={find.at}
         query={find.query}
         onApprove={onApprove}
@@ -541,6 +548,7 @@ function PaneView({ port, hub, rt, title, active, visible, sideHost, side, onFoc
         onOpenProject={onOpenProject}
         onKeepHere={onKeepHere}
       />
+      </PlanLiveContext.Provider>
       </NewAnswerAnchor.Provider>
       </LiveWork.Provider>
       </PaneShown.Provider>
@@ -599,7 +607,8 @@ function PaneView({ port, hub, rt, title, active, visible, sideHost, side, onFoc
         </span>
         {/* Everything stacked above the input box shares one ceiling, so no
             child of this region may grow without bound. */}
-        <PlanFold plan={s.plan} goal={status?.goal} goalStatus={status?.goalStatus} goalRuntime={status?.goalRuntime} shown={tab === "flow"} paused={blocked} />
+        <PlanFold plan={s.plan} goal={status?.goal} goalStatus={status?.goalStatus} goalRuntime={status?.goalRuntime} shown={tab === "flow"} running={running} paused={blocked}
+          cardInView={!!planStarted && planSeen} onJump={planStarted ? () => setPlanFocus((was) => ({ item: planStarted, n: (was?.n ?? 0) + 1 })) : undefined} />
         {tab === "flow" && <RunLine label={worktreePhase ? t(["failed", "cleanup_failed"].includes(worktreePhase) ? "创建失败" : worktreePhase === "cancelled" ? "创建已取消" : "准备工作目录") : chipLabel(s, running)} running={running} blocked={blocked} since={s.running ? s.runSince : undefined} sent={sent} received={received} estimated={s.outLive > 0}>
           <AgentCompositionPicker port={port} binding={status?.agentComposition} locked={status?.agentCompositionLocked} running={running} onChanged={refreshStatus} onSettings={() => onSettings("persona")} onError={notify} />
         </RunLine>}

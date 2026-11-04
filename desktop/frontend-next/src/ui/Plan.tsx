@@ -1,22 +1,7 @@
 import { useLayoutEffect, useRef, useState } from "react";
 import { t } from "../i18n";
 import { currentStep, stepDone, stepLabel, type PlanStep } from "../state/session";
-
-// Keyed by text, not index: todo_write rewrites the whole list every call, and
-// under index keys row one morphs into a different sentence instead of the old
-// row leaving and a new one arriving. Duplicates get a suffix so React still
-// sees one key per row.
-// Depth is a number, so it is spent as one rather than as a class per level.
-const indent = (s: PlanStep) => (s.level ? Math.min(s.level, 4) * 12 : undefined);
-
-function keys(steps: PlanStep[]): string[] {
-  const seen = new Map<string, number>();
-  return steps.map((s) => {
-    const n = (seen.get(s.text) ?? 0) + 1;
-    seen.set(s.text, n);
-    return n === 1 ? s.text : `${s.text}#${n}`;
-  });
-}
+import { stepIndent as indent, stepKeys as keys } from "./PlanSteps";
 
 export function Plan({ steps, shownElsewhere, paused }: { steps: PlanStep[]; shownElsewhere?: boolean; paused?: boolean }) {
   const wrap = useRef<HTMLDivElement>(null);

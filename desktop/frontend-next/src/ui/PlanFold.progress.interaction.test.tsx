@@ -46,9 +46,9 @@ describe("optional progress below the collapsed plan", () => {
 
   it("follows live canonical statuses, including resetting the plan and completing all steps", () => {
     setShowsPlanProgress(true);
-    const view = render(<PlanFold plan={plan} shown paused />);
+    const view = render(<PlanFold plan={plan} shown />);
     for (const status of ["pending", "in_progress", "completed"] as const) {
-      view.rerender(<PlanFold plan={plan.map((s) => ({ ...s, status }))} shown paused />);
+      view.rerender(<PlanFold plan={plan.map((s) => ({ ...s, status }))} shown />);
       const progress = screen.getByRole("progressbar");
       expect(progress.getAttribute("aria-valuenow")).toBe(status === "completed" ? "3" : "0");
       expect(progress.querySelector("i")?.style.width).toBe(status === "completed" ? "100%" : "0%");
@@ -61,7 +61,7 @@ describe("optional progress below the collapsed plan", () => {
     const bar = screen.getByRole("button", { expanded: false });
     await userEvent.click(bar);
     expect(screen.queryByRole("progressbar")).toBeNull();
-    expect(document.querySelector(".studio-todo-body .prog2 i")?.getAttribute("style")).toContain("33%");
+    expect([...document.querySelectorAll(".studio-todo-body .plan-step")].map((row) => row.getAttribute("data-state"))).toEqual(["done", "now", "todo"]);
     await userEvent.click(screen.getByText("Verify result"));
     expect(bar.getAttribute("aria-expanded")).toBe("true");
     await userEvent.click(screen.getByRole("button", { name: "收起计划" }));
@@ -86,6 +86,30 @@ describe("optional progress below the collapsed plan", () => {
     expect(view.container.innerHTML).toBe("");
     view.rerender(<PlanFold plan={plan} shown={false} />);
     expect(view.container.innerHTML).toBe("");
+  });
+
+  it("gives way to the plan's card on screen and to a decision waiting on a person, and closes when it does", async () => {
+    setShowsPlanProgress(true);
+    const view = render(<PlanFold plan={plan} shown />);
+    await userEvent.click(screen.getByRole("button", { expanded: false }));
+    view.rerender(<PlanFold plan={plan} shown cardInView />);
+    expect(view.container.innerHTML).toBe("");
+    view.rerender(<PlanFold plan={plan} shown />);
+    expect(screen.getByRole("button", { expanded: false })).toBeTruthy();
+    view.rerender(<PlanFold plan={plan} shown paused />);
+    expect(view.container.innerHTML).toBe("");
+    view.rerender(<PlanFold plan={[]} goal="Deliver a working feature" shown paused cardInView />);
+    expect(screen.getByRole("button", { expanded: false }).textContent).toContain("Deliver a working feature");
+  });
+
+  it("names the step in hand and spins only while the run moves", () => {
+    const view = render(<PlanFold plan={plan} shown />);
+    expect(view.container.querySelector(".studio-todo-sum b")?.textContent).toBe("计划 · 第 2 / 3 步");
+    expect(view.container.querySelector(".studio-todo-sum .plan-spin")).toBeNull();
+    view.rerender(<PlanFold plan={plan} shown running />);
+    expect(view.container.querySelector(".studio-todo-sum .plan-spin")).not.toBeNull();
+    view.rerender(<PlanFold plan={plan.map((s) => ({ ...s, status: "pending" as const }))} shown running />);
+    expect(view.container.querySelector(".studio-todo-sum b")?.textContent).toBe("计划 · 第 1 / 3 步");
   });
 
   it("draws one segment per step in the strip, done, current and waiting", () => {

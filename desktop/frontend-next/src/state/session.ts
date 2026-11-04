@@ -20,6 +20,7 @@ import { splitProviderSearch } from "./providersearch";
 export type { CurrencyAmount, Item, Metrics, PlanStep, RememberedFact, RuntimeNotice, SessionState, TodoStatus, TurnTerminal, Waiting };
 export { currentStep, stepDone, stepLabel };
 import { askAnnounced, askEngaged, askFromCall, promptOpen, prompted, sealByReceipt } from "./prompts";
+import { stampPlan } from "./plan_card";
 import { nameTurnStart, othersSteer } from "./turn_start";
 import { appendText, foldMessage, sealSay } from "./say";
 import { nextId } from "./ids";
@@ -314,12 +315,12 @@ function apply(s: SessionState, ev: SessionEvent): SessionState {
   if (ev.kind === "__history_prepend") return prependHistory(s, ev);
   if (ev.kind === "__restore") {
     const merged = rebuild(s, ev);
-    return ev.plan ? { ...merged, plan: livePlan(ev.plan) } : merged;
+    return ev.plan ? { ...merged, plan: livePlan(ev.plan), items: stampPlan(merged.items, ev.plan) } : merged;
   }
   // The kernel's canonical task list, asked for rather than re-derived: the
   // advances are not todo_write calls, and the refused writes are.
   if (ev.kind === "__todos") {
-    return { ...s, plan: livePlan(ev.plan) };
+    return { ...s, plan: livePlan(ev.plan), items: stampPlan(s.items, ev.plan) };
   }
   // The session's own running totals, read back from the kernel rather than
   // restarted here: a count that begins at zero makes the next request the whole
@@ -436,7 +437,7 @@ function apply(s: SessionState, ev: SessionEvent): SessionState {
         executions,
         doing: handedBack ? WAITING_MODEL : s.doing,
         waiting: handedBack ? { ...s.waiting, ttftSince: Date.now() } : s.waiting,
-        items: mergeReads(foldTool(s.items, capToolOutput(ev.tool), false)),
+        items: stampPlan(mergeReads(foldTool(s.items, capToolOutput(ev.tool), false)), plan !== s.plan ? plan : null),
       };
     }
 

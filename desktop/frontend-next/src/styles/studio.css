@@ -790,10 +790,6 @@ body { background: var(--page) !important; }
 .activity-body .hl :is(.src, .who, .tag) { order: -7; flex: 0 3 auto; min-width: 0; max-width: 12em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-micro); }
 .activity-body .cost { order: -6; margin-left: auto; gap: 5px; color: var(--ghost); font-size: var(--fs-micro); }
 .activity-body .cost .took { display: none; }
-.activity-note {
-  margin: 0; padding: 3px 12px 7px; border-top: 0;
-  color: var(--faint); font: var(--w-read, var(--w-reg)) var(--fs-micro)/1.5 var(--ui);
-}
 .flow { --out-peek: 4rem; }
 .flow .call:not([data-k="me"]):not([data-k="say"]) { margin-block: 0 2px; }
 .flow .call:not([data-k="me"]):not([data-k="say"]) > .c {
@@ -2610,7 +2606,6 @@ button, input, textarea { font-size: var(--fs-ui); }
 .activity-call-result b { color: var(--text); }
 .activity-count,
 .activity-fold-icon,
-.activity-note,
 .activity-body .hl .arg,
 .activity-call-result { color: var(--faint); }
 

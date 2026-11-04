@@ -27,7 +27,17 @@ type seedTodo struct {
 // The model still flips item status as it works (only it knows its own
 // progress); this just makes the list exist. No-op when the plan has no list.
 func (c *Controller) seedPlanTodos(plan string) string {
-	args := PlanTodosJSON(plan)
+	return c.seedTodoArgs(PlanTodosJSON(plan))
+}
+
+// planApprovalRequest is the card for a plan. Its input is the starter list
+// approving seeds, so the steps a person approves are the steps that run.
+func planApprovalRequest(steps, reason string) approvalRequest {
+	return approvalRequest{tool: planApprovalTool, reason: reason, args: json.RawMessage(steps)}
+}
+
+// seedTodoArgs seeds an already-parsed starter list; see seedPlanTodos.
+func (c *Controller) seedTodoArgs(args string) string {
 	if args == "" {
 		return ""
 	}

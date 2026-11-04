@@ -21,7 +21,6 @@
 .activity-group .activity-title { color: inherit; font: inherit; }
 .activity-group .activity-running { display: inline-flex; align-items: center; gap: 4px; height: 20px; padding: 0 8px; box-sizing: border-box; border-radius: var(--r-pill); background: var(--net-wash); color: var(--net-ink); font: var(--w-med) var(--fs-micro)/1 var(--ui); white-space: nowrap; }
 .activity-group .activity-count { color: var(--faint); font: var(--w-reg) var(--fs-meta)/1 var(--ui); }
-.activity-group .activity-note { padding: 2px 10px 6px; color: var(--faint); font: var(--w-reg) var(--fs-micro)/1.5 var(--ui); }
 
 .activity-body { margin: 0; padding: 0; }
 .activity-body .call { min-height: 0; }

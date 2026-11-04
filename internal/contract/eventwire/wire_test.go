@@ -572,3 +572,17 @@ func TestToWireSubagentStatusCarriesItsRate(t *testing.T) {
 		t.Fatalf("a status with no rate wrote one: %s", quiet)
 	}
 }
+
+// A plan card's input is the list approving starts, so it rides with the card
+// although a plan declares no scope; a plain tool's arguments still do not.
+func TestApprovalWireCarriesAPlansSteps(t *testing.T) {
+	steps := json.RawMessage(`{"todos":[{"content":"a","status":"in_progress"}]}`)
+	plan := ToWire(event.Event{Kind: event.ApprovalRequest, Approval: event.Approval{ID: "1", Tool: "exit_plan_mode", Kind: "plan", RawInput: steps}})
+	if plan.Approval == nil || string(plan.Approval.Input) != string(steps) {
+		t.Fatalf("plan card input = %+v, want %s", plan.Approval, steps)
+	}
+	call := ToWire(event.Event{Kind: event.ApprovalRequest, Approval: event.Approval{ID: "2", Tool: "bash", RawInput: json.RawMessage(`{"command":"ls"}`)}})
+	if call.Approval == nil || call.Approval.Input != nil {
+		t.Fatalf("unscoped call input = %+v, want none", call.Approval)
+	}
+}

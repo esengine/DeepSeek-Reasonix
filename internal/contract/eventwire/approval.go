@@ -20,7 +20,8 @@ type Approval struct {
 	Kind          string            `json:"kind,omitempty"` // tool | plan | recovery
 	Recovery      *RecoveryApproval `json:"recovery,omitempty"`
 	// Scope is what approving authorizes beyond the call; Input, the call's
-	// arguments, rides only with a scope, since they are what it applies to.
+	// arguments, rides only with a scope, since they are what it applies to. A
+	// plan's input is the list approving starts, so it rides with the plan.
 	Scope string          `json:"scope,omitempty"`
 	Input json.RawMessage `json:"input,omitempty"`
 }
@@ -48,7 +49,7 @@ func toWireApproval(a event.Approval) *Approval {
 		Reason: a.Reason, ReasonCode: a.ReasonCode, Fresh: a.Fresh, Kind: a.Kind,
 		AllowsSession: a.AllowsSession, AllowsPersist: a.AllowsPersist,
 	}
-	if a.Scope != "" {
+	if a.Scope != "" || a.Kind == "plan" {
 		out.Scope = a.Scope
 		out.Input = append(json.RawMessage(nil), a.RawInput...)
 	}

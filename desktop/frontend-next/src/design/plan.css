@@ -1,0 +1,99 @@
+.plan-spin { width: 14px; height: 14px; flex: none; display: block; color: var(--net); }
+.plan-spin path {
+  fill: none; stroke: currentColor; stroke-width: 2.9; stroke-linecap: round; stroke-linejoin: round;
+  stroke-dasharray: 100; stroke-dashoffset: 0; animation: plan-spin-stem 1.6s cubic-bezier(.65, 0, .35, 1) infinite;
+}
+.plan-spin path:nth-child(2) { animation-name: plan-spin-bowl; }
+.plan-spin path:nth-child(3) { animation-name: plan-spin-leg; }
+@keyframes plan-spin-stem { 0% { stroke-dashoffset: 100; } 22%, 78% { stroke-dashoffset: 0; } 100% { stroke-dashoffset: -100; } }
+@keyframes plan-spin-bowl { 0%, 18% { stroke-dashoffset: 100; } 48%, 82% { stroke-dashoffset: 0; } 100% { stroke-dashoffset: -100; } }
+@keyframes plan-spin-leg { 0%, 44% { stroke-dashoffset: 100; } 62%, 86% { stroke-dashoffset: 0; } 100% { stroke-dashoffset: -100; } }
+@media (prefers-reduced-motion: reduce) { .plan-spin path { animation: none; } }
+:root[data-effects="reduced"] .plan-spin path { animation: none; }
+
+.plan-steps { margin: 0; padding: 0; list-style: none; }
+.plan-step { display: flex; align-items: flex-start; gap: 10px; padding: 7px 8px; border-radius: var(--r-sm); }
+.plan-step-mark {
+  width: 18px; height: 18px; flex: none; box-sizing: border-box; display: grid; place-items: center;
+  border: 1.5px solid var(--border); border-radius: 50%; color: var(--faint);
+  font: var(--w-med) var(--fs-micro)/1 var(--ui); font-variant-numeric: tabular-nums;
+}
+.plan-step[data-state="done"] .plan-step-mark { border: 0; background: var(--ok); color: var(--accent-fg); }
+.plan-step[data-state="done"] .plan-step-mark .studio-icon { width: 11px; height: 11px; stroke-width: 2.4; }
+.plan-steps[data-state="moving"] .plan-step[data-state="now"] .plan-step-mark { border: 0; }
+.plan-steps[data-state="waiting"] .plan-step[data-state="now"] .plan-step-mark { border: 2px solid var(--warn); background: color-mix(in srgb, var(--warn) 18%, transparent); }
+.plan-step-text { flex: 1; min-width: 0; color: var(--text); font: var(--w-reg) var(--fs-ui)/1.4 var(--ui); overflow-wrap: anywhere; }
+.plan-step[data-state="done"] .plan-step-text { color: var(--muted); }
+.plan-step[data-state="now"] .plan-step-text { font-weight: var(--w-med); }
+
+.flow .call[data-k="plan"] { display: block; margin: 8px 0 0; padding: 0; border: 0; border-radius: 0; background: transparent; box-shadow: none; }
+.flow .call[data-k="plan"]:hover { background: transparent; }
+.plan-card { border: 1px solid var(--border); border-radius: var(--r-md); background: var(--raised); overflow: hidden; }
+.plan-card[data-phase="waiting"] { border-color: var(--warn); }
+.plan-card-head { display: flex; flex-direction: column; gap: 3px; padding: 12px 14px 8px; }
+.plan-card-title { display: flex; align-items: center; gap: 8px; }
+.plan-card-title > b { flex: 1; min-width: 0; color: var(--text); font: var(--w-semi) var(--fs-lead)/1.4 var(--ui); }
+.plan-card-badge {
+  display: inline-flex; align-items: center; height: 20px; padding: 0 8px; box-sizing: border-box; flex: none;
+  border-radius: var(--r-pill); background: var(--overlay); color: var(--muted);
+  font: var(--w-med) var(--fs-micro)/1 var(--ui); white-space: nowrap;
+}
+.plan-card[data-phase="running"] .plan-card-badge { background: var(--net-wash); color: var(--net); }
+.plan-card[data-phase="waiting"] .plan-card-badge { background: color-mix(in srgb, var(--warn) 16%, transparent); color: var(--warn-ink); }
+.plan-card[data-phase="done"] .plan-card-badge { background: color-mix(in srgb, var(--ok) 14%, transparent); color: var(--ok-ink); }
+.plan-card-sub { display: flex; align-items: center; gap: 6px; min-width: 0; color: var(--muted); font: var(--w-reg) var(--fs-meta)/1.5 var(--ui); }
+.plan-card > .plan-steps { padding: 0 6px 6px; }
+.plan-card-foot { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 10px 14px; border-top: 1px solid var(--hair); background: var(--page); }
+.plan-card-btn {
+  display: inline-flex; align-items: center; gap: 5px; height: 32px; padding: 0 14px; box-sizing: border-box; flex: none;
+  border: 1px solid var(--border); border-radius: var(--r-sm); background: var(--raised); color: var(--text);
+  font: var(--w-reg) var(--fs-ui)/1 var(--ui); white-space: nowrap; cursor: pointer;
+}
+.plan-card-btn:hover:not(:disabled) { background: var(--overlay); }
+.plan-card-btn[data-primary] { border-color: var(--accent); background: var(--accent); color: var(--accent-fg); }
+.plan-card-btn[data-primary]:hover:not(:disabled) { background: var(--accent); filter: brightness(1.18); }
+.plan-card-btn[data-quiet] { height: 24px; padding: 0 10px; border-color: transparent; border-radius: var(--r-pill); background: transparent; color: var(--muted); font-size: var(--fs-meta); }
+.plan-card-btn[data-quiet]:hover:not(:disabled) { background: var(--overlay); color: var(--text); }
+.plan-card-btn:disabled { opacity: .6; cursor: default; }
+.plan-card-btn:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.plan-card-hint { flex: 1 1 220px; min-width: 0; color: var(--faint); font: var(--w-reg) var(--fs-meta)/1.5 var(--ui); text-align: right; }
+
+.compose > .studio-todo {
+  position: absolute; inset: auto 14px 100%; margin: 0; z-index: 7;
+  border: 1px solid var(--border); border-bottom: 0; border-radius: var(--r-md) var(--r-md) 0 0;
+  background: var(--page); box-shadow: none;
+}
+.compose > .studio-todo[data-open] { background: var(--raised); box-shadow: var(--shadow-float); }
+.compose > .studio-todo[data-open] > .studio-todo-sum { display: none; }
+.compose > .studio-todo .studio-todo-sum {
+  height: 34px; min-height: 34px; gap: 8px; padding: 0 8px 0 12px; border-radius: inherit;
+  color: var(--muted); font: var(--w-reg) var(--fs-meta)/1 var(--ui);
+}
+.compose > .studio-todo .studio-todo-sum:hover { background: var(--overlay); }
+.compose > .studio-todo .studio-todo-sum > .studio-icon:first-child { display: none; }
+.compose > .studio-todo .studio-todo-sum b { flex: none; color: var(--text); font: var(--w-med) var(--fs-meta)/1 var(--ui); letter-spacing: 0; text-transform: none; white-space: nowrap; }
+.compose > .studio-todo .studio-todo-sum > span { flex: 1; min-width: 0; color: var(--muted); }
+.compose > .studio-todo .studio-todo-steps { display: flex; gap: 3px; flex: none; }
+.compose > .studio-todo .studio-todo-steps > i { width: 14px; height: 4px; border-radius: 2px; background: var(--border); }
+.compose > .studio-todo .studio-todo-steps > i[data-state="done"] { background: var(--ok); }
+.compose > .studio-todo .studio-todo-steps > i[data-state="current"] { background: var(--net); }
+.compose > .studio-todo .studio-todo-fold { width: 16px; height: 16px; margin: 0 6px; flex: none; color: var(--muted); }
+.compose > .studio-todo > .studio-todo-body {
+  position: static; inset: auto; max-height: min(46vh, 380px); padding: 0;
+  border: 0; border-radius: inherit; background: transparent; box-shadow: none;
+}
+.compose .studio-todo-head {
+  position: sticky; top: 0; z-index: 1; display: flex; align-items: center; gap: 8px; height: 34px; margin: 0; padding: 0 8px 0 12px;
+  box-sizing: border-box; border-bottom: 1px solid var(--hair); background: var(--raised);
+}
+.compose .studio-todo-head b { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); font: var(--w-med) var(--fs-meta)/1 var(--ui); letter-spacing: 0; text-transform: none; }
+.compose .studio-todo-jump {
+  height: 24px; padding: 0 6px; flex: none; border: 0; border-radius: var(--r-xs); background: transparent;
+  color: var(--accent-ink); font: var(--w-med) var(--fs-meta)/1 var(--ui); white-space: nowrap; cursor: pointer;
+}
+.compose .studio-todo-jump:hover { background: var(--overlay); }
+.compose .studio-todo-jump:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+.compose .studio-todo-close { width: 28px; height: 28px; color: var(--muted); }
+.compose .studio-todo-close .studio-icon { width: 16px; height: 16px; }
+.compose .studio-todo-body > :is(.studio-todo-goal, .studio-todo-usage) { margin: 10px 14px 0; }
+.compose .studio-todo-body > .plan-steps { padding: 4px 6px 6px; }

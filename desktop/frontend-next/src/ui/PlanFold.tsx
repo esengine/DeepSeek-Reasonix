@@ -1,32 +1,58 @@
-import { useRef, useState, useSyncExternalStore } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { t } from "../i18n";
 import { currentStep, stepDone, stepLabel, type PlanStep } from "../state/session";
 import { onPlanProgressChange, showsPlanProgress } from "../state/prefs";
-import { Plan } from "./Plan";
+import { PlanSteps, stepOrdinal } from "./PlanSteps";
 import type { GoalRuntime } from "../port/session";
 import { goalStatusText, goalStopText, goalUsageText } from "./goalusage";
 import { StudioIcon } from "./StudioIcon";
+import { RMark } from "./RMark";
 import { useDismiss } from "./dismiss";
 
-/** The list belongs above the line that narrates the turn, because that is
- *  what it is about. Mounted whether or not it is shown, so the fold survives a
+interface Props {
+  plan: PlanStep[];
+  goal?: string;
+  goalStatus?: string;
+  goalRuntime?: GoalRuntime;
+  shown: boolean;
+  running?: boolean;
+  paused?: boolean;
+  /** The plan's own card is on screen, so this strip would say it twice. */
+  cardInView?: boolean;
+  /** Brings the plan's card back; absent when the transcript holds none. */
+  onJump?: () => void;
+}
+
+/** The plan's stand-in above the input box while its card is out of view. A
+ *  question waiting on a person is read at the transcript's end, so the strip
+ *  gives way to it. Mounted whether or not it is shown, so the fold survives a
  *  visit to another view. */
-export function PlanFold({ plan, goal, goalStatus, goalRuntime, shown, paused }: { plan: PlanStep[]; goal?: string; goalStatus?: string; goalRuntime?: GoalRuntime; shown: boolean; paused?: boolean }) {
+export function PlanFold({ plan, goal, goalStatus, goalRuntime, shown, running, paused, cardInView, onJump }: Props) {
   const [open, setOpen] = useState(false);
   const progress = useSyncExternalStore(onPlanProgressChange, showsPlanProgress, showsPlanProgress);
   const bar = useRef<HTMLButtonElement>(null);
   const root = useRef<HTMLDivElement>(null);
-  const put = () => { setOpen(false); bar.current?.focus(); };
+  const refocus = useRef(false);
+  const put = () => { refocus.current = true; setOpen(false); };
   useDismiss(open, root, put);
-  if ((plan.length === 0 && !goal) || !shown) return null;
+  const yields = plan.length > 0 && (!!cardInView || !!paused);
+  const hidden = (plan.length === 0 && !goal) || !shown || yields;
+  useEffect(() => {
+    if (hidden) setOpen(false);
+  }, [hidden]);
+  // The bar is not drawn while the list is open, so focus returns once it is.
+  useEffect(() => {
+    if (open || !refocus.current) return;
+    refocus.current = false;
+    bar.current?.focus();
+  }, [open]);
+  if (hidden) return null;
   const done = plan.filter(stepDone).length;
-  const running = plan.filter((s) => !stepDone(s) && plan.indexOf(s) === currentStep(plan)).length;
-  const waiting = plan.length - done - running;
+  const now = currentStep(plan);
+  const title = plan.length ? t("计划 · 第 {n} / {total} 步", { n: stepOrdinal(plan), total: plan.length }) : t("目标");
+  const moving = !!running && !paused;
   return (
     <div className="studio-todo" data-open={open ? "" : undefined} ref={root}>
-      {/* One line by default. The composer already carries the run line,
-          the outbox and its own toolbar; a plan opened over all of them
-          pushes the box a person types in off the bottom of a laptop. */}
       <button
         type="button"
         ref={bar}
@@ -35,13 +61,12 @@ export function PlanFold({ plan, goal, goalStatus, goalRuntime, shown, paused }:
         aria-expanded={open}
         onClick={() => setOpen((on) => !on)}
       >
-        <StudioIcon name="list" />
-        <b>{t(plan.length ? "计划" : "目标")}</b>
-        <span>{plan.length ? stepLabel(plan[currentStep(plan)] ?? plan[0]) : goal}</span>
-        {plan.length > 0 && <small>{done}/{plan.length}</small>}
-        {!open && progress && plan.length > 0 && (
+        {moving && plan.length > 0 ? <RMark className="plan-spin" /> : <StudioIcon name="list" />}
+        <b>{title}</b>
+        <span>{plan.length ? stepLabel(plan[now] ?? plan[0]) : goal}</span>
+        {progress && plan.length > 0 && (
           <span className="studio-todo-steps" aria-hidden="true">
-            {plan.map((step, i) => <i key={i} data-state={stepDone(step) ? "done" : i === currentStep(plan) ? "current" : "todo"} />)}
+            {plan.map((step, i) => <i key={i} data-state={stepDone(step) ? "done" : i === now ? "current" : "todo"} />)}
           </span>
         )}
         <StudioIcon name="down" className="studio-todo-fold" />
@@ -55,8 +80,14 @@ export function PlanFold({ plan, goal, goalStatus, goalRuntime, shown, paused }:
       {open && (
         <div className="studio-todo-body">
           <div className="studio-todo-head">
-            <b>{t(plan.length ? "计划" : "目标")}</b>
-            {plan.length > 0 && <span>{t("{n} 进行中", { n: running })} · {t("{n} 待处理", { n: waiting })}</span>}
+            {moving && plan.length > 0 && <RMark className="plan-spin" />}
+            <b>{title}</b>
+            {onJump && plan.length > 0 && (
+              <button type="button" className="studio-todo-jump" data-action="plan.jump"
+                onClick={() => { setOpen(false); onJump(); }}>
+                {t("跳到卡片 ↑")}
+              </button>
+            )}
             <button type="button" className="studio-todo-close" data-action="plan.collapse" aria-label={t("收起计划")} title={t("收起计划")}
               onClick={put}>
               <StudioIcon name="down" />
@@ -70,7 +101,7 @@ export function PlanFold({ plan, goal, goalStatus, goalRuntime, shown, paused }:
               {goalRuntime.lastReason && <p>{t("最近一次判断：{reason}", { reason: goalRuntime.lastReason })}</p>}
             </div>
           )}
-          {plan.length > 0 && <Plan steps={plan} paused={paused} />}
+          <PlanSteps steps={plan} state={moving ? "moving" : "still"} />
         </div>
       )}
     </div>

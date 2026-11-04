@@ -40,8 +40,9 @@ export type Item =
   | { t: "reads"; id: string; tools: StateTool[] }
   | { t: "guardian"; id: string; g: Guardian }
   // by is who settled it when that was not this screen: the device named on
-  // the kernel's receipt, or the window when the receipt names none.
-  | { t: "approval"; id: string; a: Approval; verdict?: string; by?: Via | "window" }
+  // the kernel's receipt, or the window when the receipt names none. A started
+  // plan's steps are the last list the kernel reported for it.
+  | { t: "approval"; id: string; a: Approval; verdict?: string; by?: Via | "window"; steps?: PlanStep[] }
   // An ask answered on another screen keeps who answered it and what the
   // kernel recorded they said, since this screen never saw the selection.
   // recorded is the call's result when the card is rebuilt from history: the
