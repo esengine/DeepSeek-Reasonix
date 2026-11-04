@@ -4300,22 +4300,8 @@
   .panes-empty button:hover { border-color: var(--faint) }
 
   .wsnode { padding-bottom: 7px; padding-left: 12px }
-  .wsnode[data-missing] .wsname { color: var(--err-ink); text-decoration: line-through }
-
-  .wsrow {
-    position: relative; display: grid; gap: 0 7px; align-items: center;
-    grid-template-columns: 10px 5px minmax(0, 1fr) auto;
-    padding: 5px 7px 6px; border-radius: var(--r-md); cursor: pointer;
-    font: var(--w-med) var(--fs-ui) var(--ui); color: var(--muted);
-    transition: background var(--m-line), color var(--m-line);
-  }
-  .wsrow .twist { grid-area: 1 / 1 }
   .wsdot { grid-area: 1 / 2 }
-  .wsname { grid-area: 1 / 3 }
   .wsmeta { grid-area: 2 / 3; justify-self: start; margin-top: 1px }
-
-  .wsacts { grid-area: 1 / 4; align-self: center }
-  .wsrow:hover { background: var(--overlay); color: var(--text) } .wsrow[data-dragging] { opacity: .5 } .wsrow[data-drop="before"] { box-shadow: 0 -2px 0 var(--accent) } .wsrow[data-drop="after"] { box-shadow: 0 2px 0 var(--accent) }
 
   .twist {
     flex: none; width: 10px; height: 10px; display: grid; place-items: center;
@@ -4325,12 +4311,10 @@
     width: 10px; height: 10px; fill: none; stroke: currentColor; stroke-width: 1.8;
     stroke-linecap: round; stroke-linejoin: round; transition: transform var(--t-card) var(--ease, ease);
   }
-  .wsrow[aria-expanded="true"] .twist svg, .machrow[aria-expanded="true"] .twist svg,
-  .rmtwsrow[aria-expanded="true"] .twist svg { transform: rotate(90deg) }
+  .machrow[aria-expanded="true"] .twist svg, .rmtwsrow[aria-expanded="true"] .twist svg { transform: rotate(90deg) }
   .twist:hover { color: var(--text) }
 
   .wsdot { width: 5px; height: 5px; border-radius: 50%; background: var(--ghost); opacity: .45 }
-  .wsname { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
 
   .wsmeta {
     display: flex; align-items: center; gap: 5px; min-width: 0;
@@ -4340,22 +4324,18 @@
     font-style: normal; flex: none; padding: 0 4px; border-radius: var(--r-xs);
     background: var(--overlay); color: var(--faint);
   }
-  .wsacts { display: flex; align-items: center; gap: 2px }
 
-  .wsadd, .wsdel, .wsmore {
+  .wsdel {
     flex: none; width: 20px; height: 20px; display: grid; place-items: center;
     border: 0; padding: 0; border-radius: var(--r-xs); cursor: pointer;
     background: transparent; color: var(--faint);
     transition: background var(--m-line), color var(--m-line);
   }
-  .wsadd svg, .wsdel svg {
+  .wsdel svg {
     width: 13px; height: 13px; fill: none; stroke: currentColor;
     stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round;
   }
-  .wsadd:hover:not(:disabled) { background: var(--overlay); color: var(--text) }
-  .wsadd:focus-visible, .wsdel:focus-visible, .wsmore:focus-visible { outline: 2px solid var(--focus); outline-offset: -1px }
-  .wsadd:disabled { opacity: .4; cursor: default }
-  .wsadd[data-busy] { opacity: .5; pointer-events: none }
+  .wsdel:focus-visible { outline: 2px solid var(--focus); outline-offset: -1px }
   .wsdel { color: var(--ghost) }
   .wsdel:hover { background: var(--overlay); color: var(--err) }
 
@@ -5027,17 +5007,6 @@
   .tabconfirm .a button:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px }
   .tabconfirm .a button[data-danger] { color: var(--err-ink); border-color: color-mix(in srgb, var(--err) 45%, var(--border)) }
   .tabconfirm .a button[data-danger]:hover { background: var(--err); border-color: var(--err); color: var(--err-fg) }
-
-  .wsrow .wsdel {
-    position: static; top: auto; right: auto; flex: none;
-    background: transparent;
-  }
-
-  .wsrow .wsdel, .wsrow .wsmore { opacity: .45 }
-  .wsrow:hover .wsdel, .wsrow .wsdel:focus-visible, .wsrow:hover .wsmore, .wsrow .wsmore:focus-visible, .wsmore[aria-expanded="true"] { opacity: 1 }
-  .wsmore:hover, .wsmore[aria-expanded="true"] { background: var(--overlay); color: var(--text) }
-  .wsmore .studio-icon { width: 14px; height: 14px; stroke-width: 2.4 }
-  .wsrow .wsdel:hover { background: var(--border); color: var(--err) }
 
   .ptab { user-select: none }
   .ptab-in { user-select: text }

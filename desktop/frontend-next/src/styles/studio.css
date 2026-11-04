@@ -195,7 +195,6 @@ body { background: var(--page); }
 .wsfind:hover,
 .wsfind:focus-within { border-color: var(--hair); background: var(--raised); }
 .machrow { margin-inline: 7px; border-radius: var(--r-sm); }
-.wsrow { margin-inline: 7px; border-radius: var(--r-sm); }
 .railfoot { padding: 8px; border-top-color: var(--hair); }
 .acctrow { border-radius: var(--r-md); }
 
@@ -643,11 +642,6 @@ body { background: var(--page) !important; }
 .rail .wsfind:is(:focus-within, [data-query]) { position: relative; left: auto; right: auto; width: calc(100% - 38px); margin: 0 19px 7px; transform: none; opacity: 1; pointer-events: auto; }
 .rail .wsfind:is(:focus-within, [data-query]) { background: var(--overlay); box-shadow: 0 0 0 1px var(--border); }
 .rail .scroll { padding-bottom: 8px; }
-.rail .wsrow { margin-inline: 15px; min-height: 35px; border-radius: var(--r-sm); }
-.rail .wsnode[data-current] > .wsrow .wsname { color: var(--text); font-weight: var(--w-med); }
-.rail .wsnode[data-current] > .wsrow .wsdot { background: var(--accent-ink); opacity: 1; }
-.rail .wsrow:hover { background: var(--overlay); }
-.rail .wsname { color: var(--text); font-size: var(--fs-meta); letter-spacing: -.01em; }
 .rail .wsmeta { color: var(--faint); }
 .rail .kids { margin-left: 18px; border-left-color: var(--hair); }
 .rail .sessmore { width: calc(100% - 36px); margin: 4px 18px; color: var(--faint); }
@@ -1861,7 +1855,6 @@ button, input, textarea { font-size: var(--fs-ui); }
 
 .rail .wsnode { padding-left: 0; }
 .rail .kids { margin-left: 19px; padding-left: 0; border-left: 1px solid var(--hair); }
-.rail .wsacts > .unread-count { flex: none; min-width: 16px; height: 16px; margin-inline-end: 3px; padding-inline: 4px; box-sizing: border-box; display: inline-grid; place-items: center; border: 1px solid var(--border); border-radius: var(--r-pill); color: var(--muted); font: var(--w-med) var(--fs-micro)/1 var(--ui); }
 @keyframes studio-session-run { 55%, 100% { transform: translateX(110%); } }
 @keyframes studio-session-wait { 50% { background: color-mix(in srgb, var(--warn) 8%, transparent); } }
 @keyframes studio-session-done { from { background: color-mix(in srgb, var(--ok) 18%, transparent); } }
@@ -2936,8 +2929,6 @@ button, input, textarea { font-size: var(--fs-ui); }
 .studio-permission-check { color: var(--accent); }
 
 .rail .wsfind { background: var(--overlay); }
-.rail .wsrow:hover { background: var(--overlay); color: var(--text); }
-.rail .wsname { color: var(--muted); }
 .rail .kids { border-color: var(--hair); }
 
 .hero .mk { color: var(--faint); }

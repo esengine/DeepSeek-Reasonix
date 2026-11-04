@@ -185,11 +185,11 @@ function RemoteHostsView({ hub, hosts, runtimes, active, onOpen, onFocus, reload
           return (
             <div key={key} className="wsnode rmtws-node" data-state={host.status}
               data-current={current ? "" : undefined}>
-              <div className="wsrow rmtwsrow" role="treeitem" aria-level={1} aria-expanded={hasChildren ? !folded : undefined}
+              <div className="wsrow rmtwsrow ds-proj" role="treeitem" aria-level={1} aria-expanded={hasChildren ? !folded : undefined}
                 data-action-click="tree.navigate" data-target={key} onClick={() => { if (hasChildren) { if (onFold) onFold(key, !folded); else fold(key); } }}>
-                <StudioIcon name="folder" className="wsfolder" />
-                <span className="wsname" title={host.name + " · " + ws.root} dir="ltr">{ws.name}</span>
-                <span className="project-source" title={host.target}>{host.name}</span>
+                <StudioIcon name="folder" className="wsfolder ds-folder" />
+                <span className="wsname ds-title" title={host.name + " · " + ws.root} dir="ltr">{ws.name}</span>
+                <span className="project-source ds-host" title={host.target}>{host.name}</span>
                 {currentPane && <span className="bound-workspace" title={currentPane.root} dir="ltr">{t("连接目录：{path}", { path: currentPane.root })}</span>}
                 <span className="wsacts">
                   {folded && <UnreadCount n={ws.sessions.filter((session) => session.unread).length} />}

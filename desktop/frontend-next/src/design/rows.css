@@ -57,3 +57,22 @@
 .ds-row.sesscopy .ds-title { font-style: normal; color: var(--muted); }
 .ds-title em.sessarch { margin-left: 6px; font-style: normal; font-size: var(--fs-micro); color: var(--faint); }
 .ds-title mark.hit { background: color-mix(in srgb, var(--warn) 22%, transparent); color: inherit; border-radius: 5px; padding: 0 1px; }
+.ds-proj { position: relative; cursor: pointer; margin: 1px 0; }
+.ds-proj:hover { background: color-mix(in srgb, var(--overlay) 60%, transparent); }
+.ds-proj:focus-visible { outline: 1px solid var(--focus); outline-offset: -1px; }
+.ds-proj .ds-chev { width: 12px; height: 12px; flex: none; color: var(--faint); transform: rotate(-90deg); transition: transform var(--m-line); }
+.ds-proj .ds-chev[data-open] { transform: none; }
+.ds-proj .ds-chev[data-leaf] { visibility: hidden; }
+.ds-proj .ds-folder { width: 14px; height: 14px; flex: none; color: var(--muted); }
+.ds-proj .wsmeta, .ds-proj .project-source { flex: none; font: 500 11px var(--ds-ui); color: var(--faint); }
+.ds-proj .wsacts { flex: none; display: flex; align-items: center; margin-left: auto; }
+.ds-proj .rowswap { display: flex; align-items: center; }
+.ds-proj .rowcount { font: 500 11px var(--ds-ui); color: var(--faint); font-variant-numeric: tabular-nums; }
+.ds-proj .rowbtns { display: none; align-items: center; }
+.ds-proj:is(:hover, :focus-within) .rowbtns, .ds-proj:has([aria-expanded="true"]) .rowbtns { display: flex; }
+.ds-proj:is(:hover, :focus-within) .rowcount, .ds-proj:has([aria-expanded="true"]) .rowcount { display: none; }
+.ds-proj :is(.wsadd, .wsmore) { width: 28px; height: 28px; padding: 0; border: 0; border-radius: 7px; background: transparent; color: var(--muted); display: grid; place-items: center; flex: none; cursor: pointer; }
+.ds-proj :is(.wsadd, .wsmore):hover { background: var(--overlay); color: var(--text); }
+.ds-proj :is(.wsadd, .wsmore) .studio-icon { width: 16px; height: 16px; }
+.ds-proj :is(.wsadd, .wsmore):disabled { opacity: .4; cursor: default; }
+.ds-proj .wsacts > .unread-count { flex: none; min-width: 16px; height: 16px; margin-inline-end: 3px; padding-inline: 4px; box-sizing: border-box; display: inline-grid; place-items: center; border: 1px solid var(--border); border-radius: var(--r-pill); color: var(--muted); font: var(--w-med) var(--fs-micro)/1 var(--ui); }

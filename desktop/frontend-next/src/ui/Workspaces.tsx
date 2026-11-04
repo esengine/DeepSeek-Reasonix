@@ -408,7 +408,7 @@ function WorkspacesView({ hub, tree, treeRead, answered = null, runtimes, active
                     onDragLeave={() => drag.leave(ws.root)}
                     onDrop={(ev) => drag.drop(ev, ws.root)}
                     onDragEnd={drag.end}
-                    className="wsrow"
+                    className="wsrow ds-proj"
                     role="treeitem"
                     aria-level={1}
                     aria-haspopup="menu"
@@ -429,7 +429,7 @@ function WorkspacesView({ hub, tree, treeRead, answered = null, runtimes, active
                     }}
                   >
                     <WsMark open={hasChildren ? !shut : undefined} />
-                    <span className="wsname" title={ws.root}>
+                    <span className="wsname ds-title" title={ws.root}>
                       {ws.name}
                     </span>
                     {/* A tag is this project's identity, so it takes a second line and
