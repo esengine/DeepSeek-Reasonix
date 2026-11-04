@@ -4200,3 +4200,4 @@ svg.studio-icon[data-kind="image"] { color: var(--ok); }
 .workbench-launcher-recent .studio-icon { width: 14px; height: 14px; flex: none; color: var(--faint); }
 .workbench-launcher-recent button > span { flex: none; max-width: 55%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .workbench-launcher-recent button > i { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--faint); font-style: normal; font-size: var(--fs-micro); }
+.studio-quicknav .qv { margin-left: auto; padding-right: 8px; color: var(--faint); font: var(--w-reg) var(--fs-micro)/1 var(--ui); font-style: normal; font-variant-numeric: tabular-nums; }

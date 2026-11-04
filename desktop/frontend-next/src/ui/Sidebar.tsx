@@ -151,6 +151,7 @@ export function Sidebar({
     () => (remotes ?? []).filter((host) => !hiddenHosts.includes(host.name)),
     [remotes, hiddenHosts],
   );
+  const online = (remotes ?? []).filter((h) => h.status === "connected" || h.status === "degraded").length;
   const newSessionRoot = activeWorkspace?.root;
   const startConversation = () => {
     if (onNew) return onNew();
@@ -319,6 +320,7 @@ export function Sidebar({
             ) : (
               <button key={mark} data-action="settings.section" data-value={section} onClick={() => onSettings(section)}>
                 <span aria-hidden="true"><svg viewBox="0 0 16 16" width={15} height={15} fill="none" stroke="currentColor" strokeWidth={1} strokeLinecap="round" strokeLinejoin="round">{ICON[mark as Section]}</svg></span><b>{t(label)}</b>
+                {section === "remote" && online > 0 && <em className="qv">{t("{n} 台在线", { n: online })}</em>}
               </button>
             ))}
           </div>
