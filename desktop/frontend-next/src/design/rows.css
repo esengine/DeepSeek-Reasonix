@@ -1,4 +1,4 @@
-.ds-row, .ds-proj { --ds-ui: var(--ui, Inter, 'PingFang SC', 'Microsoft YaHei UI', system-ui, sans-serif); --ds-mono: var(--mono, 'IBM Plex Mono', ui-monospace, Menlo, Consolas, monospace); }
+.ds-row, .ds-proj { --ds-ui: var(--ui, 'Inter Studio', 'PingFang SC', 'Microsoft YaHei UI', system-ui, sans-serif); --ds-mono: var(--mono, 'IBM Plex Mono', ui-monospace, Menlo, Consolas, monospace); }
 .ds-row { display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 8px 0 14px; border-radius: 7px; background: transparent; color: var(--muted); font: 500 13px var(--ds-ui); min-width: 0; box-sizing: border-box; }
 .ds-row[data-chk] { padding-left: 12px; }
 .ds-row[data-hover] { background: color-mix(in srgb, var(--overlay) 60%, transparent); }

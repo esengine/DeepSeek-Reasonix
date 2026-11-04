@@ -4,21 +4,21 @@
   font-family: "Inter Studio";
   src: url("/fonts/inter-studio-400.ttf") format("truetype");
   font-style: normal;
-  font-weight: var(--w-reg);
+  font-weight: 400;
   font-display: swap;
 }
 @font-face {
   font-family: "Inter Studio";
   src: url("/fonts/inter-studio-500.ttf") format("truetype");
   font-style: normal;
-  font-weight: var(--w-reg);
+  font-weight: 500;
   font-display: swap;
 }
 @font-face {
   font-family: "Inter Studio";
   src: url("/fonts/inter-studio-600.ttf") format("truetype");
   font-style: normal;
-  font-weight: var(--w-med);
+  font-weight: 600;
   font-display: swap;
 }
 @font-face {
@@ -1847,7 +1847,7 @@ body { background: var(--page) !important; }
    No !important: this sheet already loads after the tokens it is replacing, and
    marking one would outrank the reader's own font and size as well. */
 :root {
-  --ui: Inter, "PingFang SC", "Microsoft YaHei UI", "Inter Studio", "Noto Studio", "Noto Studio Full", system-ui, sans-serif;
+  --ui: "Inter Studio", "PingFang SC", "Microsoft YaHei UI", "Noto Studio", "Noto Studio Full", system-ui, sans-serif;
   --mono: "Studio Mono", "Noto Studio", "Noto Studio Full", Consolas, monospace;
   --fs-lead: calc(14px * var(--fs-scale, 1));
 }
