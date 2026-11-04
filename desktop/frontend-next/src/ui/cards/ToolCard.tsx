@@ -7,7 +7,7 @@ import type { ExtensionSurface, Tool } from "../../port/wire";
 import type { RewindPlan, RewindResult } from "../../port/port";
 import { categoryOf, labelFor, mcpOrigin, runLabelFor } from "../icons";
 import { Sym, glyphFor } from "../Sym";
-import { verbOf } from "../activityEarlier";
+import { activityVerb } from "../activityEarlier";
 import { GOAL_STATUS, argOf, goalUpdate, shortArgs } from "../args";
 import { Cost } from "../Cost";
 import { bytes, count, seconds, tokens } from "../../i18n/format";
@@ -98,7 +98,8 @@ export function ToolCard({
   const from = mcpOrigin(shown);
   // Running and settled are two different lines: the category says what it is
   // doing now, the label says what it was once it is done.
-  const head = activity ? (from?.tool || t(verbOf(shown))) : running ? runLabelFor(shown) : labelFor(shown);
+  const verb = activityVerb(shown);
+  const head = activity ? (from?.tool || (verb ? t(verb) : labelFor(shown))) : running ? runLabelFor(shown) : labelFor(shown);
   // A write's payload streams as arguments, and the provider only reports how
   // many characters have landed — the JSON is unparseable until the last one.
   // Showing that count is the difference between a card that is visibly filling

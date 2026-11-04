@@ -89,3 +89,24 @@
 @container conversation (max-width: 420px) {
   .compose .studio-effort-reading, .compose .studio-model-sep { display: none; }
 }
+
+.compose > .studio-todo {
+  position: relative; inset: auto; margin: 0; z-index: 7;
+  border: 0; border-bottom: 1px solid var(--hair); border-radius: var(--r-lg) var(--r-lg) 0 0;
+  background: var(--page); box-shadow: none;
+}
+.compose > .studio-todo .studio-todo-sum {
+  height: 36px; min-height: 36px; gap: 8px; padding: 0 8px 0 12px; border-radius: inherit;
+  color: var(--muted); font: var(--w-reg) var(--fs-ui)/1 var(--ui);
+}
+.compose > .studio-todo .studio-todo-sum:hover { background: var(--overlay); }
+.compose > .studio-todo .studio-todo-sum > .studio-icon:first-child { display: none; }
+.compose > .studio-todo .studio-todo-sum b { order: 0; color: var(--text); font: var(--w-med) var(--fs-ui)/1 var(--ui); letter-spacing: 0; text-transform: none; }
+.compose > .studio-todo .studio-todo-sum small { order: 1; color: var(--text); font: var(--w-med) var(--fs-ui)/1 var(--ui); }
+.compose > .studio-todo .studio-todo-sum small::before { content: "· "; }
+.compose > .studio-todo .studio-todo-sum > span { order: 2; color: var(--muted); }
+.compose > .studio-todo .studio-todo-steps { order: 3; display: flex; gap: 3px; flex: none; }
+.compose > .studio-todo .studio-todo-steps > i { width: 14px; height: 4px; border-radius: 2px; background: var(--border); }
+.compose > .studio-todo .studio-todo-steps > i[data-state="done"] { background: var(--ok); }
+.compose > .studio-todo .studio-todo-steps > i[data-state="current"] { background: var(--net); }
+.compose > .studio-todo .studio-todo-fold { order: 4; width: 14px; height: 14px; margin-left: 6px; color: var(--muted); }

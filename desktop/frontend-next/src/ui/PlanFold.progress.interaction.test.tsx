@@ -87,4 +87,12 @@ describe("optional progress below the collapsed plan", () => {
     view.rerender(<PlanFold plan={plan} shown={false} />);
     expect(view.container.innerHTML).toBe("");
   });
+
+  it("draws one segment per step in the strip, done, current and waiting", () => {
+    setShowsPlanProgress(true);
+    const { container } = render(<PlanFold plan={plan} shown />);
+    const steps = [...container.querySelectorAll(".studio-todo-steps > i")].map((i) => i.getAttribute("data-state"));
+    expect(steps).toEqual(["done", "current", "todo"]);
+    expect(container.querySelector(".studio-todo-steps")?.getAttribute("aria-hidden")).toBe("true");
+  });
 });

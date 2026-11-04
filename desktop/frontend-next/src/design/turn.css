@@ -49,3 +49,12 @@
 .activity-body .tool-state[data-state="failed"] { color: var(--err-ink); }
 .activity-body .tool-fold { order: 10; }
 .activity-body .tool-disclosure > .out { margin: 2px 10px 6px 32px; padding: 6px 10px 8px; border: 1px solid var(--hair); border-radius: var(--r-sm); }
+
+.think { margin-top: 6px; }
+.think > summary .fold { gap: 6px; color: var(--muted); font: var(--w-med) var(--fs-ui)/1.4 var(--ui); }
+.think[open] > summary .fold { color: var(--muted); }
+.think > summary .fold::before { width: 10px; height: 10px; color: var(--faint); }
+.think > summary:hover .fold { color: var(--text); }
+.think .thinking-preview { margin: 4px 0 0 16px; color: var(--faint); font: var(--w-reg) var(--fs-meta)/1.5 var(--ui); }
+.think .tk { margin-top: 8px; padding-left: 18px; color: var(--muted); font: var(--w-reg) var(--fs-ui)/1.75 var(--ui); }
+.think[open] { margin-bottom: 8px; }

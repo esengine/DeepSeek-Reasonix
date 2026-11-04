@@ -39,10 +39,15 @@ export function PlanFold({ plan, goal, goalStatus, goalRuntime, shown, paused }:
         <b>{t(plan.length ? "计划" : "目标")}</b>
         <span>{plan.length ? stepLabel(plan[currentStep(plan)] ?? plan[0]) : goal}</span>
         {plan.length > 0 && <small>{done}/{plan.length}</small>}
+        {!open && progress && plan.length > 0 && (
+          <span className="studio-todo-steps" aria-hidden="true">
+            {plan.map((step, i) => <i key={i} data-state={stepDone(step) ? "done" : i === currentStep(plan) ? "current" : "todo"} />)}
+          </span>
+        )}
         <StudioIcon name="down" className="studio-todo-fold" />
       </button>
       {!open && progress && plan.length > 0 && (
-        <div className="prog2 studio-todo-progress" role="progressbar" aria-label={t("计划进度")}
+        <div className="prog2 studio-todo-progress sr-only" role="progressbar" aria-label={t("计划进度")}
           aria-valuemin={0} aria-valuemax={plan.length} aria-valuenow={done}>
           <span className="track"><i style={{ width: `${Math.round((done / plan.length) * 100)}%` }} /></span>
         </div>
