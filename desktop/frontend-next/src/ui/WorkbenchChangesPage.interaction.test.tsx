@@ -67,3 +67,16 @@ describe("the changes page, as the WB-Frame board draws it", () => {
     expect(onOpen).toHaveBeenCalledWith("internal/config/credentials.go");
   });
 });
+
+describe("the explorer's changes section", () => {
+  it("opens the changes page from its title and folds its rows from its arrow", async () => {
+    const { WorkbenchChanges } = await import("./WorkbenchChanges");
+    const onOpenPage = vi.fn();
+    render(<WorkbenchChanges port={new MockPort()} changes={changes} current="" onOpen={vi.fn()} onChanged={vi.fn()} commit={{ button: null, card: null }} onOpenPage={onOpenPage} />);
+    await userEvent.click(screen.getByRole("button", { name: "改动" }));
+    expect(onOpenPage).toHaveBeenCalled();
+    expect(document.querySelectorAll(".workbench-change").length).toBeGreaterThan(0);
+    await userEvent.click(screen.getByRole("button", { name: "收起改动" }));
+    expect(document.querySelectorAll(".workbench-change")).toHaveLength(0);
+  });
+});

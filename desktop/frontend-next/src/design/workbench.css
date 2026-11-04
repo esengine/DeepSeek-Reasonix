@@ -152,3 +152,21 @@
 .wb-diff-line[data-mark="+"] .wb-diff-mark { color: var(--add); }
 .wb-diff-text { white-space: pre; overflow: hidden; text-overflow: ellipsis; }
 .wb-changes-hint { margin: 0; padding: 10px 12px; color: var(--faint); font: var(--w-reg) var(--fs-micro)/1.5 var(--ui); }
+
+.workbench-explorer :is(.workbench-explorer-head, .workbench-history > summary) {
+  height: 34px; padding: 0 10px 0 6px; gap: 6px; justify-content: flex-start; border-bottom: 0; background: var(--page);
+  color: var(--text); font: var(--w-semi) var(--fs-ui)/1 var(--ui); text-transform: none;
+}
+.workbench-explorer .workbench-explorer-head small, .workbench-history > summary small { margin-left: auto; color: var(--faint); font: var(--w-med) var(--fs-meta)/1 var(--ui); }
+.workbench-explorer .workbench-explorer-head small + .btn, .workbench-explorer .workbench-explorer-head small ~ .btn { flex: none; }
+.workbench-section-fold { width: 18px; height: 18px; padding: 0; display: grid; place-items: center; flex: none; border: 0; background: none; color: var(--faint); cursor: pointer; }
+.workbench-section-fold .studio-icon, .gh-fold { width: 12px; height: 12px; flex: none; color: var(--faint); transition: transform var(--t-line) ease; }
+.workbench-history:not([open]) > summary .gh-fold { transform: rotate(-90deg); }
+.workbench-section-title { padding: 0; border: 0; background: none; color: inherit; font: inherit; cursor: pointer; }
+.workbench-section-title:hover { text-decoration: underline; text-underline-offset: 3px; }
+.workbench-history { border-bottom: 0; }
+.gh-hash { flex: none; width: 58px; color: var(--faint); font: var(--w-reg) var(--fs-micro)/1 var(--mono); }
+.gh-row .gh-subject { color: var(--text); }
+.gh-row .gh-meta { margin-left: auto; flex: none; color: var(--faint); }
+.workbench-explorer .commit-open { border-color: var(--text); background: var(--text); color: var(--surface); }
+.workbench-files-head { position: static; }

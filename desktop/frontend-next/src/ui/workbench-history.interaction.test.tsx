@@ -11,14 +11,15 @@ import type { GitHistory } from "../port/workspace";
 
 afterEach(cleanup);
 
-const open = () => userEvent.click(screen.getByText("提交历史"));
+const open = async () => {
+  if (!document.querySelector<HTMLDetailsElement>("details.workbench-history")!.open) await userEvent.click(screen.getByText("提交历史"));
+};
 
-it("reads nothing until it is opened, then draws one row per commit with its refs", async () => {
+it("is open from the start, as the board draws it, and draws one row per commit with its hash and refs", async () => {
   const port = new MockPort();
   const read = vi.spyOn(port, "workspaceGitLog");
-  render(<WorkbenchHistory port={port as AgentPort} />);
-  expect(read).not.toHaveBeenCalled();
-  await open();
+  render(<WorkbenchHistory port={port as AgentPort} branch="main" />);
+  expect(document.querySelector(".gh-branch")!.textContent).toBe("main");
   await waitFor(() => expect(screen.getByText("feat(studio): show the commit graph")).toBeTruthy());
   expect(read).toHaveBeenCalledOnce();
   expect(document.querySelectorAll(".gh-row")).toHaveLength(7);
@@ -28,7 +29,8 @@ it("reads nothing until it is opened, then draws one row per commit with its ref
   const merge = screen.getByText("Merge branch 'retry-backoff'").closest(".gh-row")!;
   expect(merge.querySelectorAll("svg path").length).toBeGreaterThanOrEqual(2);
   expect(merge.querySelector("svg circle")).toBeTruthy();
-  expect(merge.querySelector(".gh-meta")?.textContent).toMatch(/ada/);
+  expect(merge.querySelector(".gh-meta")?.getAttribute("title")).toMatch(/ada/);
+  expect(merge.querySelector(".gh-hash")?.textContent).toBe("a2");
 });
 
 it("says so for a folder that is not under git, and offers no graph", async () => {

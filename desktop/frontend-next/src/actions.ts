@@ -633,6 +633,8 @@ export const ACTIONS: UIAction[] = [
   { id: "workbench.launch-recent", kind: "view", target: "entity", proof: "interaction" },
   { id: "workbench.change-fold", kind: "view", target: "none", proof: "interaction" },
   { id: "workbench.change-open", kind: "view", target: "none", proof: "interaction" },
+  { id: "workbench.section-fold", kind: "view", target: "none", proof: "interaction" },
+  { id: "workbench.changes-page", kind: "view", target: "none", proof: "interaction" },
   { id: "workbench.launch-find", kind: "view", target: "none", proof: "interaction" },
   { id: "workbench.dismiss", kind: "view", target: "none", proof: "interaction" },
   { id: "workbench.launch-browser", kind: "view", target: "none", proof: "interaction" },

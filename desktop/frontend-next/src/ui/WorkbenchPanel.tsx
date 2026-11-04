@@ -736,6 +736,7 @@ export function WorkbenchPanel({
             }}
             onChanged={onTreeChanged}
             remote={remote}
+            onOpenPage={changes.length > 0 ? openChanges : undefined}
           />
           <WorkbenchFileTree rows={rows} collapsed={collapsed} workspaceRoot={workspaceRoot} changes={changes}
             current={active?.kind === "file" ? active.path : ""} onFolder={(path) => void toggleFolder(path)} onFile={openFile} onMenu={offerMenu} />

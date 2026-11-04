@@ -1,4 +1,4 @@
-import { useMemo, type MouseEvent } from "react";
+import { useMemo, useState, type MouseEvent } from "react";
 import { t } from "../i18n";
 import type { WorkspaceChange } from "../port/port";
 import { workspaceDrag } from "./filedrag";
@@ -18,8 +18,17 @@ export function WorkbenchFileTree({ rows, collapsed, workspaceRoot, changes, cur
   onMenu: (e: MouseEvent<HTMLElement>, path: string, folder: boolean) => void;
 }) {
   const status = useMemo(() => new Map(changes.map((c) => [c.path, c.status])), [changes]);
+  const [folded, setFolded] = useState(false);
   return (
-    <div className="workbench-filelist">
+    <>
+    <div className="workbench-explorer-head workbench-files-head">
+      <button type="button" className="workbench-section-fold" data-action="workbench.section-fold" data-target="files" aria-expanded={!folded}
+        aria-label={t(folded ? "workbench.expand_section" : "workbench.collapse_section", { name: t("common.files") })} onClick={() => setFolded(!folded)}>
+        <StudioIcon name={folded ? "chevron" : "down"} />
+      </button>
+      <span>{t("common.files")}</span>
+    </div>
+    <div className="workbench-filelist" hidden={folded}>
       {rows.map((row) =>
         row.kind === "folder" ? (
           <button
@@ -65,5 +74,6 @@ export function WorkbenchFileTree({ rows, collapsed, workspaceRoot, changes, cur
         <p className="workbench-no-files">{t("workbench.no_matching_files")}</p>
       )}
     </div>
+    </>
   );
 }

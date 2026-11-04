@@ -22,6 +22,8 @@ interface Props {
   // What the head carries beyond the commit button: the push of this repository.
   actions?: ReactNode;
   below?: ReactNode;
+  // Opens the changes page from this section's title; absent where no page can show this repository.
+  onOpenPage?: () => void;
 }
 
 // A discard goes back to the last commit, so only a file that commit holds and
@@ -37,7 +39,8 @@ const withRepo = (repo: string | undefined, req: StageRequest): StageRequest => 
 // What differs as a folder tree, without opening anything, and which of it the next
 // commit will record: the index is what a commit reads, so it is shown and changed
 // here, a folder at a time or a file at a time. A change can also be thrown away.
-export function WorkbenchChanges({ port, workspaceRoot, changes, repo, current, onOpen, onChanged, commit, actions, below }: Props) {
+export function WorkbenchChanges({ port, workspaceRoot, changes, repo, current, onOpen, onChanged, commit, actions, below, onOpenPage }: Props) {
+  const [folded, setFolded] = useState(false);
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState("");
   const [shut, setShut] = useState<Set<string>>(new Set());
@@ -144,8 +147,14 @@ export function WorkbenchChanges({ port, workspaceRoot, changes, repo, current, 
   return (
     <div className="workbench-changes">
       <div className="workbench-explorer-head">
-        <span>{t("common.changes")}</span>
-        <small>{changes.length}</small>
+        <button type="button" className="workbench-section-fold" data-action="workbench.section-fold" data-target="changes" aria-expanded={!folded}
+          aria-label={t(folded ? "workbench.expand_section" : "workbench.collapse_section", { name: t("common.changes") })} onClick={() => setFolded(!folded)}>
+          <StudioIcon name={folded ? "chevron" : "down"} />
+        </button>
+        {onOpenPage ? (
+          <button type="button" className="workbench-section-title" data-action="workbench.changes-page" onClick={onOpenPage}>{t("common.changes")}</button>
+        ) : <span>{t("common.changes")}</span>}
+        <small>{t("common.n_files", { n: changes.length })}</small>
         {onChanged && (
           <button type="button" className="btn sm workbench-stage-all" data-action="workbench.stage-all" disabled={busy}
             onClick={() => void stage({ all: true, unstage: settled })}>
@@ -158,8 +167,8 @@ export function WorkbenchChanges({ port, workspaceRoot, changes, repo, current, 
       {commit.card}
       {below}
       {failure && <p className="refine-error workbench-stage-error" role="alert">{failure}</p>}
-      {rows(tree, 0)}
-      {drawn.left <= 0 && changes.length > drawn.files && (
+      {!folded && rows(tree, 0)}
+      {!folded && drawn.left <= 0 && changes.length > drawn.files && (
         <div className="workbench-change-more">
           <span>{t("workbench.n_more_not_shown", { n: changes.length - drawn.files })}</span>
           <button type="button" className="btn sm" data-weak="" data-action="workbench.more-changes" onClick={() => setLimit((n) => n + ROW_PAGE)}>

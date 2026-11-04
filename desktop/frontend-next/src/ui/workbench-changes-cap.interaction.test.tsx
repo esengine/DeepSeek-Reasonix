@@ -28,7 +28,7 @@ describe("a workspace with very many changes", () => {
   it("draws a bounded number of rows and says how many it left out", () => {
     const { container } = draw(many(5000));
     expect(rowCount(container)).toBeLessThanOrEqual(600);
-    expect(container.querySelector(".workbench-explorer-head small")?.textContent).toBe("5000");
+    expect(container.querySelector(".workbench-explorer-head small")?.textContent).toBe("5000 个文件");
     expect(screen.getByRole("button", { name: /再显示/ })).toBeTruthy();
     expect(container.textContent).toMatch(/还有 \d+ 项没有显示/);
   });

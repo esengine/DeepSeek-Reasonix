@@ -159,8 +159,8 @@ function ChangedFile({ port, change: c, shown, busy, onOpen, onStage, onDiscard 
               <div className="wb-diff" role="table" aria-label={c.path}>
                 {diffLines(diff.text).map((l, i) => (
                   <div key={i} className="wb-diff-line" data-mark={l.mark} role="row">
-                    <button type="button" className="wb-diff-n" tabIndex={-1} aria-hidden="true" onClick={() => onOpen(c.path)}>{l.old ?? ""}</button>
-                    <button type="button" className="wb-diff-n" tabIndex={-1} aria-hidden="true" onClick={() => onOpen(c.path)}>{l.now ?? ""}</button>
+                    <button type="button" className="wb-diff-n" data-action="workbench.change-open" data-target={c.path} tabIndex={-1} aria-hidden="true" onClick={() => onOpen(c.path)}>{l.old ?? ""}</button>
+                    <button type="button" className="wb-diff-n" data-action="workbench.change-open" data-target={c.path} tabIndex={-1} aria-hidden="true" onClick={() => onOpen(c.path)}>{l.now ?? ""}</button>
                     <span className="wb-diff-mark">{l.mark === "@" ? "" : l.mark.trim()}</span>
                     <span className="wb-diff-text">{l.text}</span>
                   </div>
