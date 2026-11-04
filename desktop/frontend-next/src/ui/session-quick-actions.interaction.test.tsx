@@ -120,9 +120,8 @@ it("allows keyboard activation and keeps the version badge independently usable"
   archive().focus();
   await userEvent.keyboard("{Enter}");
   expect(onArchive).toHaveBeenCalledExactlyOnceWith(PATH, true, undefined);
-  const badge = within(row()).getByRole("button", { name: "+1" });
-  await userEvent.click(badge);
-  expect(badge.getAttribute("aria-expanded")).toBe("true");
+  fireEvent.contextMenu(row());
+  await userEvent.click(await screen.findByRole("menuitem", { name: "早先版本（1）" }));
   expect(screen.getByText("早先版本 · 2 轮")).toBeTruthy();
   expect(row().querySelector(".unread-dot")).toBeTruthy();
   expect(onOpen).not.toHaveBeenCalled();

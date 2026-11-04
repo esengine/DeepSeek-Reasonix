@@ -64,3 +64,5 @@
 :root[data-theme] .rail .sessrow > .pip { display: block; }
 :root[data-theme] .rail .kids { margin: 0; padding-left: 0; border-left: 0; }
 :root[data-theme] .rail .sessrow { border-left-width: 0; }
+:root[data-theme] .rail .sessrow.sesscopy { min-height: 28px; height: 28px; }
+:root[data-theme] .rail .sessrow.sesscopy .sesstitle { padding-inline-start: 36px; font-size: var(--fs-meta); font-style: normal; color: var(--muted); }

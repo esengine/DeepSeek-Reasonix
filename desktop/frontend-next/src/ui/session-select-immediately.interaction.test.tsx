@@ -271,7 +271,8 @@ describe("a version row that is being opened", () => {
         adder={{ add: () => {}, close: () => {}, at: null } as never}
       />,
     );
-    await userEvent.click(screen.getByRole("button", { name: "+1" }));
+    fireEvent.contextMenu(screen.getByRole("treeitem", { name: /the conversation/ }));
+    await userEvent.click(await screen.findByRole("menuitem", { name: "早先版本（1）" }));
     const copy = screen.getByText("早先版本 · 4 轮").closest("[role=treeitem]") as HTMLElement;
     const main = within(document.body).getByRole("treeitem", { name: /the conversation/ });
 

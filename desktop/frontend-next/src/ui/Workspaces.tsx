@@ -617,30 +617,6 @@ function WorkspacesView({ hub, tree, treeRead, answered = null, runtimes, active
                         )}
                         <PeerThreadMark path={session.path} />
                         <SessionTail run={run} at={session.lastActiveAt} unread={session.unread} />
-                        {kept.length > 0 && (
-                          <button
-                            className="sesscopies"
-                            aria-expanded={open}
-                            title={
-                              versions.length && copies.length
-                                ? t("早先版本与恢复副本")
-                                : versions.length
-                                  ? t("编辑、重新生成或回退之前的对话版本")
-                                  : t("本次对话被外部程序改写时留下的副本")
-                            }
-                            onClick={(ev) => {
-                              ev.stopPropagation();
-                              setSpread((prev) => {
-                                const next = new Set(prev);
-                                if (open) next.delete(session.path);
-                                else next.add(session.path);
-                                return next;
-                              });
-                            }}
-                          >
-                            {`+${kept.length}`}
-                          </button>
-                        )}
                         {session.legacy && (
                           <span className="sesslegacy" title={t("由 Reasonix 1.x 创建：Studio 只读打开，继续对话会另存为新会话")} aria-label={t("由 Reasonix 1.x 创建：Studio 只读打开，继续对话会另存为新会话")}>{t("旧")}</span>
                         )}
@@ -669,6 +645,7 @@ function WorkspacesView({ hub, tree, treeRead, answered = null, runtimes, active
                             onBranch={onBranch && session.runtimeId ? () => { setSessionMenu(""); void onBranch(session.runtimeId!, `${rowLabel(session)} · ${t("分支")}`).catch(onError); } : undefined}
                             onCopyInfo={() => { void copyText(sessionInfoText(session, session.workspaceRoot || ws.root)).catch(onError); setSessionMenu(""); }}
                             onExport={(format) => void saveSession(session, format)}
+                            keptCount={kept.length} keptOpen={open} onKept={() => { setSpread((prev) => { const next = new Set(prev); if (open) next.delete(session.path); else next.add(session.path); return next; }); setSessionMenu(""); }}
                             onDelete={() => { askDelete(session.path); setSessionMenu(""); }}
                             onMove={(direction) => { setSessionMenu(""); void order.move(session, direction); }}
                             canMove={order.canMove(ws, session)}

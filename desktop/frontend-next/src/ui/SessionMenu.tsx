@@ -29,13 +29,16 @@ export interface SessionMenuProps {
   canMove?: { up: boolean; down: boolean };
   /** Opens the choice of another project; absent where a conversation cannot move (a copy, a version). */
   onMoveTo?: () => void;
+  keptCount?: number;
+  keptOpen?: boolean;
+  onKept?: () => void;
 }
 
 /** What can be done to one conversation, drawn at the document root so the
  *  sidebar's clipping cannot cut it. Every action closes the menu itself:
  *  the parent's handlers do that, this only says which one was chosen. */
 export const SessionMenu = forwardRef<HTMLDivElement, SessionMenuProps>(function SessionMenu(
-  { session, label, live, pinned, exporting, autoNaming, onPin, onMarkRead, onRename, onAutoName, onPause, onClose, onArchive, onBranch, onCopyInfo, onExport, onDelete, onMove, canMove, onMoveTo },
+  { session, label, live, pinned, exporting, autoNaming, onPin, onMarkRead, onRename, onAutoName, onPause, onClose, onArchive, onBranch, onCopyInfo, onExport, onDelete, onMove, canMove, onMoveTo, keptCount = 0, keptOpen, onKept },
   ref,
 ) {
   const target = session.path;
@@ -99,6 +102,11 @@ export const SessionMenu = forwardRef<HTMLDivElement, SessionMenuProps>(function
       </div>
       <div className="session-pop-divider" />
       <div className="session-pop-group">
+        {keptCount > 0 && onKept && (
+          <button role="menuitem" data-action="session.kept" data-target={target} aria-expanded={keptOpen} onClick={onKept}>
+            <StudioIcon name="clock" /><span>{t("早先版本（{n}）", { n: keptCount })}</span>
+          </button>
+        )}
         {onMoveTo && (
           <button role="menuitem" aria-label={t("移动到项目…")} aria-describedby={session.runtimeId ? `${why}-move` : undefined} data-action="session.move-to-start" data-target={target} disabled={!!session.runtimeId} onClick={onMoveTo}>
             <StudioIcon name="folder" /><span>{t("移动到项目…")}{session.runtimeId && <small className="session-pop-why" id={`${why}-move`}>{t("先关闭这个会话，再移动它")}</small>}</span>

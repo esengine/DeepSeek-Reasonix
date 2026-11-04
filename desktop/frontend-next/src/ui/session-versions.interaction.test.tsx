@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, expect, it, vi } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import "./testkit";
 import { Workspaces } from "./Workspaces";
@@ -45,12 +45,17 @@ function draw(onOpen = vi.fn(async (_: { root?: string; sessionPath?: string }) 
   return onOpen;
 }
 
+const openVersions = async (row: HTMLElement) => {
+  fireEvent.contextMenu(row);
+  await userEvent.click(await screen.findByRole("menuitem", { name: /早先版本（\d+）/ }));
+};
+
 // What an edit, regenerate or rewind cut stays under its conversation: folded
 // until asked for, named as a version, and opened as a whole conversation.
 it("folds an earlier version under its conversation and opens it", async () => {
   const onOpen = draw();
   expect(screen.queryByText("早先版本 · 4 轮")).toBeNull();
-  await userEvent.click(screen.getByRole("button", { name: "+1" }));
+  await openVersions(screen.getAllByRole("treeitem").find((e) => e.getAttribute("aria-level") === "2")!);
   expect(screen.getByTitle(VERSION_TITLE).textContent).toBe("早先版本 · 4 轮");
   await userEvent.click(screen.getByText("早先版本 · 4 轮"));
   expect(onOpen).toHaveBeenCalledWith(expect.objectContaining({ sessionPath: VERSION }));
