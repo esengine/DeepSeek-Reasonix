@@ -39,7 +39,7 @@ describe("the folders listed under a remote machine", () => {
     const project = { ...far("/srv/train", 2), workspaceRoots: ["/srv/train", "/state/worktrees/train"] };
     const warm = remoteWorkspaces(host({ workspaces: ["/state/worktrees/train"] }), [project]);
     expect(roots(warm)).toEqual(["/srv/train"]);
-    expect(warm[0].booked).toBe(true);
+    expect(warm[0].sessions).toHaveLength(2);
   });
 
   it("keeps a folder added here that has never been opened over there", () => {
@@ -81,17 +81,20 @@ describe("a host row that predates the list", () => {
   });
 });
 
-// Only what this window wrote down can be dropped from the sidebar. A folder
-// the far kernel reports is that machine's own note: removing it here would
-// take away a row that comes straight back on the next read.
-describe("which of a machine's folders this window may drop", () => {
-  it("marks the ones its own book holds", () => {
-    const warm = remoteWorkspaces(host({ workspaces: ["/srv/train"] }), [far("/srv/train"), far("/srv/ad-hoc")]);
-    expect(warm.map((ws) => ws.booked)).toEqual([true, false]);
+describe("removed remote directories", () => {
+  it("filters refreshed history and leftover panes without hiding sibling projects or other hosts", () => {
+    const tree = [far("/root", 1), far("/srv/keep", 1)];
+    const removed = host({ hiddenWorkspaces: ["/root"] });
+    const pane = { id: "r", host: removed.name, root: "/root", name: "old", base: "" };
+    expect(roots(remoteWorkspaces(removed, tree, [pane]))).toEqual(["/srv/keep"]);
+    expect(remoteWorkspaces(removed, undefined, [pane])).toEqual([]);
+    expect(roots(remoteWorkspaces(host({ name: "other" }), tree))).toEqual(["/root", "/srv/keep"]);
   });
 
-  it("marks every row while nothing is connected, because they all came from the book", () => {
-    const cold = remoteWorkspaces(host({ workspaces: ["/srv/train", "/srv/eval"] }), undefined);
-    expect(cold.every((ws) => ws.booked)).toBe(true);
+  it("restores a grouped project when one of its worktrees is explicitly added again", () => {
+    const tree = [{ ...far("/srv/train", 1), workspaceRoots: ["/srv/train", "/worktrees/train"] }];
+    const removed = host({ hiddenWorkspaces: ["/srv/train", "/worktrees/train"] });
+    expect(remoteWorkspaces(removed, tree)).toEqual([]);
+    expect(roots(remoteWorkspaces({ ...removed, workspaces: ["/worktrees/train"], hiddenWorkspaces: ["/srv/train"] }, tree))).toEqual(["/srv/train"]);
   });
 });

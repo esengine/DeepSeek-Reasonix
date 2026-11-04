@@ -1,0 +1,2 @@
+- 修复：远程目录可从项目列表移除，保留主机、文件和会话；重新添加或打开目录可恢复显示。远程项目支持整行右键、Shift+F10 和菜单键，Esc 关闭菜单并恢复焦点。修复 #14615。
+- Fixed: remote folders support list removal and right-click/Shift+F10 menus. Hosts, files and sessions stay intact; add or open the folder again to restore it. Fixes #14615.

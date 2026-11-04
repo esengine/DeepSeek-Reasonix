@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import { t } from "../i18n";
 import { useDismiss } from "./dismiss";
@@ -6,31 +6,40 @@ import { pinToViewport } from "./place";
 import { StudioIcon } from "./StudioIcon";
 import { workspaceMenuKeys } from "./WorkspaceOrder";
 
-export function RemoteProjectMenu({ name, root, host, defaultRoot, busy, onRefresh, onRemove, onMove }: {
+export interface RemoteProjectMenuAnchor {
+  key: string;
+  trigger: HTMLElement;
+  point?: { x: number; y: number };
+}
+
+export function RemoteProjectMenu({ name, root, host, defaultRoot, busy, anchor, onOpen, onClose, onRefresh, onRemove, onMove }: {
   name: string;
   root: string;
   host: string;
   defaultRoot?: string;
   busy: boolean;
+  anchor?: RemoteProjectMenuAnchor;
+  onOpen: (trigger: HTMLElement) => void;
+  onClose: () => void;
   onRefresh: () => void;
-  onRemove?: () => void;
+  onRemove: () => void;
   // Steps this row's machine up or down the book; a direction with no neighbour is absent.
   onMove?: Partial<Record<-1 | 1, () => void>>;
 }) {
-  const [open, setOpen] = useState(false);
+  const open = !!anchor;
   const trigger = useRef<HTMLButtonElement>(null);
   const menu = useRef<HTMLDivElement>(null);
-  const close = () => { setOpen(false); trigger.current?.focus(); };
+  const close = () => { onClose(); anchor?.trigger.focus(); };
   useDismiss(open, trigger, close, menu);
   useLayoutEffect(() => {
-    const rect = trigger.current?.getBoundingClientRect();
-    if (open && rect && menu.current) pinToViewport(menu.current, rect.right + 8, rect.top, 12);
-  }, [open]);
-  useEffect(() => { if (open) menu.current?.querySelector<HTMLElement>("button:not(:disabled)")?.focus(); }, [open]);
+    const rect = anchor?.trigger.getBoundingClientRect();
+    if (anchor && rect && menu.current) pinToViewport(menu.current, anchor.point?.x ?? rect.right + 8, anchor.point?.y ?? rect.top - 7, 12);
+  }, [anchor]);
+  useEffect(() => { if (anchor) menu.current?.querySelector<HTMLElement>("button:not(:disabled)")?.focus(); }, [anchor]);
   return <>
     <button ref={trigger} className="wsmore" data-action="workspace.menu" data-target={host + ":" + root}
       title={t("更多操作")} aria-label={t("项目操作：{name}", { name: name + " · " + host })}
-      aria-haspopup="menu" aria-expanded={open} onClick={(event) => { event.stopPropagation(); setOpen((value) => !value); }}>
+      aria-haspopup="menu" aria-expanded={open} onClick={(event) => { event.stopPropagation(); if (open) close(); else onOpen(event.currentTarget); }}>
       <StudioIcon name="more" />
     </button>
     {open && createPortal(<div ref={menu} className="session-pop" role="menu" aria-label={t("项目操作")}
@@ -48,8 +57,8 @@ export function RemoteProjectMenu({ name, root, host, defaultRoot, busy, onRefre
             <span>{t(direction === -1 ? "上移 {name}" : "下移 {name}", { name: host })}</span>
           </button>
         ))}
-        {onRemove && <button role="menuitem" data-action="remote-host.remove" disabled={busy}
-          onClick={() => { close(); onRemove(); }}><StudioIcon name="close" /><span>{t("从列表移除")}</span><small>{t("不删除文件")}</small></button>}
+        <button className="danger" role="menuitem" data-action="remote-host.remove" disabled={busy}
+          onClick={() => { close(); onRemove(); }}><StudioIcon name="close" /><span>{t("从列表移除")}</span><small>{t("不删除文件")}</small></button>
       </div>
     </div>, document.body)}
   </>;

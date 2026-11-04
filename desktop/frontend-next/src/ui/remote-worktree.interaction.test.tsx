@@ -23,18 +23,19 @@ it.each([undefined, "gpu"])("quick switching retains a grouped session's actual 
   expect(onOpenSession).toHaveBeenCalledWith("/sessions/task", expect.objectContaining({ root: copy, host: source }));
 });
 
-function draw(open = false, source: RemoteHost = host) {
+function draw(open = false, source: RemoteHost = host, removeRemoteWorkspace = vi.fn().mockResolvedValue(undefined)) {
   const onOpen = vi.fn().mockResolvedValue(undefined);
   const onClose = vi.fn().mockResolvedValue(undefined);
-  const removeRemoteWorkspace = vi.fn().mockResolvedValue(undefined);
+  const onError = vi.fn();
+  const reload = vi.fn().mockResolvedValue(undefined);
   const tree: TreeWorkspace[] = [{ root, name: "site", workspaceRoots: [root, copy], sessions: [
     { path: "/sessions/task", name: "Isolated task", workspaceRoot: copy, isolated: true },
   ] }];
   render(<RemoteHosts hub={{ removeRemoteWorkspace } as never} hosts={[source]} trees={{ gpu: tree }}
     runtimes={open ? [{ id: "r1", host: "gpu", base: "", root: copy, name: "site", sessionPath: "/sessions/task" }] : []}
     active={open ? "r1" : ""} onOpen={onOpen} onFocus={vi.fn()} onClose={onClose} liveIds={() => []}
-    reload={async () => {}} reloadTrees={async () => {}} readTree={async () => {}} onError={vi.fn()} />);
-  return { onOpen, onClose, removeRemoteWorkspace };
+    reload={reload} reloadTrees={async () => {}} readTree={async () => {}} onError={onError} />);
+  return { onOpen, onClose, removeRemoteWorkspace, onError, reload };
 }
 
 it("keeps SSH worktree history in its source project and opens its actual directory", async () => {
@@ -54,7 +55,19 @@ it("marks the grouped SSH project current and removes all its booked directories
   await userEvent.click(screen.getByRole("button", { name: "项目操作：site · gpu" }));
   await userEvent.click(screen.getByRole("menuitem", { name: /从列表移除/ }));
   expect(onClose).toHaveBeenCalledWith(["r1"]);
-  expect(removeRemoteWorkspace.mock.calls).toEqual([["gpu", root], ["gpu", copy]]);
+  expect(removeRemoteWorkspace.mock.calls).toEqual([["gpu", root, [root, copy]]]);
+  expect(removeRemoteWorkspace.mock.invocationCallOrder[0]).toBeLessThan(onClose.mock.invocationCallOrder[0]);
+});
+
+it("keeps every pane and project when the kernel refuses removal", async () => {
+  const error = new Error("workspace.running");
+  const { onClose, onError, reload } = draw(true, host, vi.fn().mockRejectedValue(error));
+  await userEvent.click(screen.getByRole("button", { name: "项目操作：site · gpu" }));
+  await userEvent.click(screen.getByRole("menuitem", { name: /从列表移除/ }));
+  expect(onClose).not.toHaveBeenCalled();
+  expect(reload).not.toHaveBeenCalled();
+  expect(onError).toHaveBeenCalledWith(error);
+  expect(screen.getByText("Isolated task")).toBeTruthy();
 });
 
 it("shows the active SSH directory separately from the host's default read target", async () => {
@@ -62,6 +75,13 @@ it("shows the active SSH directory separately from the host's default read targe
   expect(screen.getByText("连接目录：" + copy)).toBeTruthy();
   await userEvent.click(screen.getByRole("button", { name: "项目操作：site · gpu" }));
   expect(screen.getByText("默认连接目录：" + root)).toBeTruthy();
+});
+
+it("removes an unbooked remote project while offline", async () => {
+  const { removeRemoteWorkspace } = draw(false, { ...host, status: "idle", workspace: undefined, workspaces: [] });
+  await userEvent.click(screen.getByRole("button", { name: "项目操作：site · gpu" }));
+  await userEvent.click(screen.getByRole("menuitem", { name: /从列表移除/ }));
+  expect(removeRemoteWorkspace).toHaveBeenCalledWith("gpu", root, [root, copy]);
 });
 
 it("uses the server's resolved default even when it differs from the project list's order", async () => {

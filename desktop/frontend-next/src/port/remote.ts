@@ -32,6 +32,7 @@ export interface RemoteHost {
   // a link to ask through.
   workspace?: string;
   workspaces?: string[];
+  hiddenWorkspaces?: string[];
   serveInstall?: string;
   // Where this host's model credentials come from: "local" resolves them on
   // this machine over the tunnel, "remote" leaves it reading its own config.

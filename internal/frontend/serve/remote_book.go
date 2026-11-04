@@ -185,47 +185,56 @@ func (h *Hub) placeRemoteHost(w http.ResponseWriter, r *http.Request) {
 // machine's own list would be the better home, but it is only readable while
 // something is open over there, and cold is the state a folder is picked in.
 func (h *Hub) addRemoteWorkspace(w http.ResponseWriter, r *http.Request) {
-	host, dir, ok := h.remoteWorkspaceTarget(w, r)
+	host, dirs, ok := h.remoteWorkspaceTarget(w, r)
 	if !ok {
 		return
 	}
-	h.commitRemoteWorkspace(w, host, func(c *config.Config) { c.AddRemoteWorkspace(host, dir) })
+	h.commitRemoteWorkspace(w, host, func(c *config.Config) {
+		for _, dir := range dirs {
+			c.AddRemoteWorkspace(host, dir)
+		}
+	})
 }
 
 // removeRemoteWorkspace drops a folder from a machine's row. Nothing over there
 // is touched: the folder stays, and adding it back costs one pick.
 func (h *Hub) removeRemoteWorkspace(w http.ResponseWriter, r *http.Request) {
-	host, dir, ok := h.remoteWorkspaceTarget(w, r)
+	host, dirs, ok := h.remoteWorkspaceTarget(w, r)
 	if !ok {
 		return
 	}
 	inFolder := func(rt *Runtime) bool {
 		ep, ok := rt.Remote()
-		return ok && ep.Host == host && ep.Workspace == dir
+		return ok && ep.Host == host && slices.Contains(dirs, ep.Workspace)
 	}
 	if !h.releaseOrRefuse(w, r, "workspace.running", "a conversation in this folder is running; stop it first", h.panesWhere(inFolder)) {
 		return
 	}
-	h.commitRemoteWorkspace(w, host, func(c *config.Config) { c.RemoveRemoteWorkspace(host, dir) })
+	h.commitRemoteWorkspace(w, host, func(c *config.Config) {
+		for _, dir := range dirs {
+			c.RemoveRemoteWorkspace(host, dir)
+		}
+	})
 }
 
 // remoteWorkspaceTarget reads the machine and folder both writes are about.
-func (h *Hub) remoteWorkspaceTarget(w http.ResponseWriter, r *http.Request) (host, dir string, ok bool) {
+func (h *Hub) remoteWorkspaceTarget(w http.ResponseWriter, r *http.Request) (host string, dirs []string, ok bool) {
 	if h.opts.Remote == nil {
 		refuseNoRemote(w)
-		return "", "", false
+		return "", nil, false
 	}
 	var body struct {
-		Path string `json:"path"`
+		Path  string   `json:"path"`
+		Paths []string `json:"paths,omitempty"`
 	}
 	if !decodeRemoteBody(w, r, &body) {
-		return "", "", false
+		return "", nil, false
 	}
-	if dir = strings.TrimSpace(body.Path); dir == "" {
+	if strings.TrimSpace(body.Path) == "" {
 		missingField(w, "path")
-		return "", "", false
+		return "", nil, false
 	}
-	return r.PathValue("host"), dir, true
+	return r.PathValue("host"), (config.RemoteHostEntry{Workspace: body.Path, Workspaces: body.Paths}).WorkspaceList(), true
 }
 
 func (h *Hub) commitRemoteWorkspace(w http.ResponseWriter, host string, apply func(*config.Config)) {

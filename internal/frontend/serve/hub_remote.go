@@ -140,13 +140,14 @@ type RemoteHostView struct {
 	// Workspace is the default; Workspaces is every folder this machine is
 	// worked in, default first — the sidebar lists them before a link exists,
 	// which is the only moment the far kernel cannot answer for itself.
-	Workspace     string   `json:"workspace,omitempty"`
-	Workspaces    []string `json:"workspaces,omitempty"`
-	ServeInstall  string   `json:"serveInstall,omitempty"`
-	Provider      string   `json:"provider,omitempty"`
-	UseSSHConfig  bool     `json:"useSSHConfig,omitempty"`
-	PassphraseEnv string   `json:"passphraseEnv,omitempty"`
-	PasswordEnv   string   `json:"passwordEnv,omitempty"`
+	Workspace        string   `json:"workspace,omitempty"`
+	Workspaces       []string `json:"workspaces,omitempty"`
+	HiddenWorkspaces []string `json:"hiddenWorkspaces,omitempty"`
+	ServeInstall     string   `json:"serveInstall,omitempty"`
+	Provider         string   `json:"provider,omitempty"`
+	UseSSHConfig     bool     `json:"useSSHConfig,omitempty"`
+	PassphraseEnv    string   `json:"passphraseEnv,omitempty"`
+	PasswordEnv      string   `json:"passwordEnv,omitempty"`
 	// Forwards are set from the CLI and have no control here; the count is
 	// shown so an edit does not look like it silently dropped them.
 	Forwards int `json:"forwards,omitempty"`
@@ -175,25 +176,26 @@ func (h *Hub) listRemoteHosts(w http.ResponseWriter, _ *http.Request) {
 	out := make([]RemoteHostView, 0, len(cfg.Remote.Hosts))
 	for _, entry := range cfg.Remote.Hosts {
 		view := RemoteHostView{
-			Name:          entry.Name,
-			Kind:          entry.Kind,
-			Distro:        entry.Distro,
-			Target:        entry.Target(),
-			Status:        "idle",
-			Disabled:      entry.Disabled,
-			Host:          entry.Host,
-			Port:          entry.Port,
-			User:          entry.User,
-			IdentityFile:  entry.IdentityFile,
-			ProxyJump:     entry.ProxyJump,
-			Workspace:     entry.DefaultWorkspace(),
-			Workspaces:    entry.WorkspaceList(),
-			ServeInstall:  entry.ServeInstall,
-			Provider:      entry.ProviderMode(),
-			UseSSHConfig:  entry.UseSSHConfig,
-			PassphraseEnv: entry.PassphraseEnv,
-			PasswordEnv:   entry.PasswordEnv,
-			Forwards:      len(entry.Forwards),
+			Name:             entry.Name,
+			Kind:             entry.Kind,
+			Distro:           entry.Distro,
+			Target:           entry.Target(),
+			Status:           "idle",
+			Disabled:         entry.Disabled,
+			Host:             entry.Host,
+			Port:             entry.Port,
+			User:             entry.User,
+			IdentityFile:     entry.IdentityFile,
+			ProxyJump:        entry.ProxyJump,
+			Workspace:        entry.DefaultWorkspace(),
+			Workspaces:       entry.WorkspaceList(),
+			HiddenWorkspaces: entry.HiddenWorkspaces,
+			ServeInstall:     entry.ServeInstall,
+			Provider:         entry.ProviderMode(),
+			UseSSHConfig:     entry.UseSSHConfig,
+			PassphraseEnv:    entry.PassphraseEnv,
+			PasswordEnv:      entry.PasswordEnv,
+			Forwards:         len(entry.Forwards),
 		}
 		if state, ok := live[entry.Name]; ok {
 			view.Status, view.Attempt = state.Status, state.Attempt
