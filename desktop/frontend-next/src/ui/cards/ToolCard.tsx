@@ -9,12 +9,13 @@ import { categoryOf, labelFor, mcpOrigin, runLabelFor } from "../icons";
 import { Sym, glyphFor } from "../Sym";
 import { activityVerb } from "../activityEarlier";
 import { GOAL_STATUS, argOf, goalUpdate, shortArgs } from "../args";
-import { Cost } from "../Cost";
+import { Cost, useWatched } from "../Cost";
 import { bytes, count, seconds, tokens } from "../../i18n/format";
 import { currentStep, parsePlan, stepDone } from "../../state/session";
 import { DiffView } from "./DiffView";
 import { BringCall } from "./BringCall";
-import { StopCall } from "./StopCall";
+import { StepWait, StopCall } from "./StopCall";
+import { stepSummary } from "./stepsum";
 import { BackgroundNote, BackgroundReading } from "./BackgroundJob";
 import { WaitNote } from "./WaitNote";
 import { Term, ToolOutput, BoundNote } from "./ToolOutput";
@@ -43,6 +44,31 @@ function prettyArgs(args?: string): string {
 }
 
 const shortCallId = (id?: string) => id ? id.replace(/^call_/, "").slice(-8) : "—";
+
+const lastLine = (text?: string) => text?.split("\n").map((l) => l.trim()).filter(Boolean).at(-1) ?? "";
+
+// How long an activity step has run or took, in whole seconds; nothing under one.
+function StepTime({ tool, running }: { tool: StateTool; running: boolean }) {
+  const watched = useWatched(running);
+  const ms = running ? watched : tool.durationMs ?? 0;
+  if (ms < 1000) return null;
+  return <span className="step-sum">{t("common.n_s", { n: Math.round(ms / 1000) })}</span>;
+}
+
+// A step that turns failed under the reader shakes once; one drawn failed does not.
+function useFellInto(bad: boolean): boolean {
+  const [on, setOn] = useState(false);
+  const was = useRef(bad);
+  useEffect(() => {
+    const fell = !was.current && bad;
+    was.current = bad;
+    if (!fell) return;
+    setOn(true);
+    const id = setTimeout(() => setOn(false), 240);
+    return () => clearTimeout(id);
+  }, [bad]);
+  return on;
+}
 
 function useSettling(running: boolean): { pop: boolean; swap: boolean } {
   const [pop, setPop] = useState(false);
@@ -123,6 +149,7 @@ export function ToolCard({
   // subagent" is not a thing you can go read, "skill:security-review" is.
   const who = tool.profile?.name?.trim();
   const settling = useSettling(running);
+  const shaking = useFellInto(bad);
   // A refused call carries the same sentence twice: the kernel writes it to the
   // model as output and to the reader as an error. Rendering both prints it
   // twice, and the second copy reads like a second failure.
@@ -135,7 +162,9 @@ export function ToolCard({
   // Running is not a reason to show the arguments: the group above already says
   // the work is happening, and a call that opens itself pushes the transcript
   // around while it reads. A failure is different — that is what is being asked.
-  const start = useStartsOpen("steps", false, bad, toolChangedFile(tool));
+  // In the activity group a failure says itself in the box under its row, so
+  // the call's whole body stays folded until the reader asks for it.
+  const start = useStartsOpen("steps", false, bad && !activity, toolChangedFile(tool));
   const [touched, setOpen] = useState<boolean | null>(pinned ? true : null);
   useEffect(() => {
     if (bad) setOpen(null);
@@ -154,6 +183,10 @@ export function ToolCard({
     return registerNest(children.map((c) => c.id).filter((id): id is string => !!id), () => setOpen(true));
   }, [nestMounted, children]);
   const changes = changeCounts(tool);
+  const sum = activity && !running ? stepSummary(tool, verb, bad) : "";
+  // A host refusal says why in its own words; otherwise the command's last line
+  // of output says more than the generic error that it exited.
+  const failLine = activity && bad ? (refusal || (tool.refusalCode && errorDetail) || lastLine(tool.output) || errorDetail || tool.err || "") : "";
   const activityArgs = activity ? prettyArgs(tool.args) : "";
   // A call being watched in the activity group opens to its input even with no
   // output yet: a row that cannot open is the one that looks stuck.
@@ -179,16 +212,17 @@ export function ToolCard({
           <b>+{changes.added}</b><i>−{changes.removed}</i>
         </span>
       )}
-      {bad && <span className="fail">{badLabel}</span>}
+      {bad && !sum && <span className="fail">{badLabel}</span>}
       {bgJob && <BackgroundReading id={bgJob} />}
-      <Cost tools={[tool]} running={running} />
+      {sum ? <span className="step-sum">{sum}</span> : activity ? !changes && <StepTime tool={tool} running={running} /> : <Cost tools={[tool]} running={running} />}
       <span
         className="tool-state"
         data-state={running ? "running" : bad ? "failed" : "done"}
+        data-pop={settling.pop && !bad ? "" : undefined}
         aria-label={t(running ? "common.running" : bad ? "common.failed" : "common.done_2")}
         title={t(running ? "common.running" : bad ? "common.failed" : "common.done_2")}
       >
-        <StudioIcon name={running ? "clock" : bad ? "warning" : "check"} />
+        {running && activity ? <i className="step-spin" /> : <StudioIcon name={running ? "clock" : bad ? (activity ? "fail" : "warning") : "check"} />}
       </span>
       {onBring && tool.id && !running && hasBody ? <BringCall onBring={onBring} /> : null}
       {hasBody && <span className="tool-fold" aria-hidden="true" />}
@@ -321,6 +355,7 @@ export function ToolCard({
       data-call={tool.id || undefined}
       data-k={KINDED.has(categoryOf(shown)) ? categoryOf(shown) : undefined}
       data-running={running ? "" : undefined}
+      data-shake={shaking ? "" : undefined}
     >
       <div className="g">
         <Sym glyph={glyphFor(shown)} done={settling.pop && !bad} />
@@ -334,7 +369,14 @@ export function ToolCard({
         ) : (
           <div className="hl" data-swap={settling.swap ? "" : undefined}>{heading}</div>
         )}
-        {running && onStop && tool.id && <StopCall onStop={onStop} />}
+        {failLine && (
+          <div className="step-err" role="status">
+            <code>{failLine}</code>
+            {hasBody && !open && <button type="button" className="step-stop" data-action="tool.full-output" onClick={() => setOpen(true)}>{t("chat.see_full_output")}</button>}
+          </div>
+        )}
+        {running && activity && <StepWait onStop={onStop && tool.id ? onStop : undefined} quiet={!!tool.output || children.length > 0} />}
+        {running && !activity && onStop && tool.id && <StopCall onStop={onStop} />}
         {bgJob && <BackgroundNote id={bgJob} />}
       </div>
     </div>

@@ -1,4 +1,4 @@
-import { Fragment, memo, useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type Dispatch, type ReactNode, type RefObject, type SetStateAction } from "react";
+import { Fragment, memo, useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type Dispatch, type ReactNode, type RefObject, type SetStateAction } from "react";
 import { t } from "../i18n";
 import type { Item, Waiting } from "../state/session";
 import type { ExtensionSurface } from "../port/wire";
@@ -27,6 +27,7 @@ import { RememberCard } from "./cards/RememberCard";
 import { ExtensionCard } from "./cards/ExtensionCard";
 import { toolChangedFile, toolFailed } from "./cards/outcome";
 import { foldEarlier } from "./activityEarlier";
+import { ActivityHead, staggered } from "./ActivityHead";
 import { NewAnswerLine, useNewAnswerAnchor } from "./NewAnswerLine";
 import { WorkLanes } from "./cards/SubagentGroup";
 import { drawn, eachCall, foldStats, repeatedSpeakers, sameMembers, transcriptRows, type Shown } from "./turnrows";
@@ -663,14 +664,7 @@ const ActivityGroup = memo(function ActivityGroup({
   }, 0);
   return (
     <details className="activity-group" data-failed={failures ? "" : undefined} data-running={running ? "" : undefined} open={open} onToggle={(event) => event.currentTarget.open !== open && setOpen(event.currentTarget.open)}>
-      <summary>
-        <StudioIcon name={running ? "clock" : failures ? "warning" : "check"} className="activity-status-icon" />
-        <span className="activity-title">{t("chat.activity")}</span>
-        {running && <span className="activity-running">{t("chat.n_running", { n: runs })}</span>}
-        {failures > 0 && <span className="activity-errors">{t("chat.n_failed", { n: failures })}</span>}
-        <span className="activity-count">{t("chat.count_actions", { count: calls })}</span>
-        <StudioIcon name="down" className="activity-fold-icon" />
-      </summary>
+      <ActivityHead items={items} open={open} runs={runs} failures={failures} calls={calls} />
       <div className="activity-body">
         {fold.earlier.length > 0 && (
           <button type="button" className="activity-earlier" data-action="activity.earlier" aria-expanded={showEarlier} onClick={() => setShowEarlier((v) => !v)}>
@@ -679,7 +673,9 @@ const ActivityGroup = memo(function ActivityGroup({
             <StudioIcon name="down" />
           </button>
         )}
-        {(showEarlier ? items : fold.recent).flatMap(eachCall).map((item) => <Row key={item.id} it={item} activity {...rowProps} cp={checkpoints.get(item.id)} />)}
+        {staggered((showEarlier ? items : fold.recent).flatMap(eachCall), rowProps.owed).map(([item, k]) => (
+          <div key={item.id} className="step-slot" style={{ "--i": k } as CSSProperties}><Row it={item} activity {...rowProps} cp={checkpoints.get(item.id)} /></div>
+        ))}
       </div>
     </details>
   );

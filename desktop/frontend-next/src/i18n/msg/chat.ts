@@ -432,6 +432,8 @@ export const CHAT: Messages = {
   "chat.step_details": { zh: "步骤详情", en: "Step details" },
   "chat.stop_a_background_job_that": { zh: "终止一个仍在运行的后台任务。", en: "Stop a background job that is still running." },
   "chat.stop_command": { zh: "停止命令", en: "Stop command" },
+  "chat.see_full_output": { zh: "看完整输出", en: "See full output" },
+  "chat.stop_this_one": { zh: "停止这一条", en: "Stop this one" },
   "chat.stop_only_this_call": { zh: "只停止这一条调用", en: "Stop only this call" },
   "chat.submit": { zh: "提交", en: "Submit" },
   "chat.submit_n_still_to_fill": { zh: "提交（还差 {n} 项）", en: "Submit ({n} still to fill)" },
