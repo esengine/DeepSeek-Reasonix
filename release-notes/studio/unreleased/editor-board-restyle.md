@@ -15,6 +15,7 @@
 - 同时派出的几个子代理在对话里是一张卡：标题写几个并行、几个在跑、几个失败，每个子代理一行，带固定颜色的头像、名字、任务和进度；失败的直接写出原因，可以单独停止或全部停止，点一行在工作台打开；全部交付后收成一行汇总（b1b42c3d8）。
 - 底部的子代理读数：有子代理在跑时是带呼吸点的蓝色「N 个子代理在跑」，都结束后变回灰字「N 个子代理 · 都结束了」；悬停弹出的列表和对话里的组卡一样带颜色头像、任务和状态，可以全部停止（68e703888）。
 - 工作台里的子代理页签带它的颜色头像；顶部能「停止子代理」，主会话交给它的任务单独放在最上面，底部可以「回到对话里那一组」（95ec30ace）。
+- 后台任务结束后不再消失：浮层分「在跑」和「已结束」两段，每行写用时、命令和最后一行输出，结束的还写退出码；停止要再点一次确定，结束的可以「清除」。底部读数在跑时是蓝色，有失败时变红，直到你打开看过（b4b7abd35）。
 
 ---
 <!-- lang:en -->
@@ -36,3 +37,4 @@
 - Subagents sent out together are one card in the conversation: how many run in parallel, how many are running or failed, then one row per subagent with a fixed-colour avatar, its name, task and progress; a failure states its reason, each can be stopped alone or all at once, a row opens in the workbench, and once all have delivered the card folds to one summary line (b1b42c3d8).
 - The run rail's subagent reading is a blue "N subagents running" with a breathing dot while one runs and grey "N subagents · all finished" after; its list carries the same avatars, tasks and states as the conversation's group and can stop them all (68e703888).
 - A subagent's workbench tab carries its avatar, can stop the run from its head, shows the task the main session handed it at the top, and goes back to its group in the conversation from its foot (95ec30ace).
+- Background jobs no longer vanish when they end: the list shows running jobs above ended ones, each with its duration, command and last line of output, an ended one with its exit status; stopping asks again, and ended jobs can be cleared. The rail reading is blue while one runs and stays red after a failure until you open it (b4b7abd35).
