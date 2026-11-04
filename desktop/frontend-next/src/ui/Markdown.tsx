@@ -246,7 +246,7 @@ const Block = memo(function Block({ src, math, emoji, code, tail, live, local, i
         img: ({ src, alt, title }) => {
           const at = local && typeof src === "string" ? local.image(src) : null;
           if (images && src === OUTSIDE_IMAGE) {
-            return <span className="md-noimg md-outside-image" title={t("这张图片在工作区之外，不会加载")}>{alt}</span>;
+            return <span className="md-noimg md-outside-image" title={t("chat.this_picture_is_outside_the")}>{alt}</span>;
           }
           if (images && !at && typeof src !== "string") return <span className="md-noimg">{alt}</span>;
           return images ? (

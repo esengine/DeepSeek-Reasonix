@@ -20,7 +20,7 @@ export function PlanApproval({ port }: { port: AgentPort }) {
       .catch(() => setState(null));
   }, [port]);
 
-  if (!state) return <div className="empty">{t("无法读取计划批准设置。")}</div>;
+  if (!state) return <div className="empty">{t("plan.could_not_read_the_plan")}</div>;
 
   const flip = async () => {
     setBusy(true);
@@ -38,14 +38,14 @@ export function PlanApproval({ port }: { port: AgentPort }) {
     <div className="box">
       <div className="lrow">
         <span className="tx">
-          <span className="lb">{t("自动批准计划")}</span>
-          <span className="ds">{t("计划提交后不再等你点批准，直接开始执行，对话里会留下一条说明。只放行这一次点击：工具批准、沙箱和拒绝规则照常生效。默认关闭，只写在你自己的用户配置里，项目配置不能替你打开。")}</span>
+          <span className="lb">{t("plan.approve_plans_automatically")}</span>
+          <span className="ds">{t("plan.a_submitted_plan_starts_without")}</span>
         </span>
         <Switch
           data-action="plan-approval.auto"
           on={state.auto}
           busy={busy}
-          label={t("自动批准计划")}
+          label={t("plan.approve_plans_automatically")}
           onClick={() => void flip()}
         />
       </div>

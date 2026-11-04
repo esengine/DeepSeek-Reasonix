@@ -193,7 +193,7 @@ export function DiffView({ diff, path, named, onPrepare, onCommit }: Props) {
       // anyway posts an empty planId and answers "missing planId".
       if (!got.canFiles || !got.planId) {
         setOutcome("refused");
-        setFailed(got.disabledReason || t("该文件无法从检查点还原"));
+        setFailed(got.disabledReason || t("chat.this_file_cannot_be_restored"));
         return;
       }
       setPlan(got);
@@ -228,17 +228,17 @@ export function DiffView({ diff, path, named, onPrepare, onCommit }: Props) {
         {/* The card's own headline already names the file; saying it again
             here truncates one fact twice. Where there is no headline — the
             change preview — this row is the only thing that names it. */}
-        <span title={shown ?? undefined}>{named ? "" : (shown ?? t("改动"))}</span>
+        <span title={shown ?? undefined}>{named ? "" : (shown ?? t("common.changes"))}</span>
         {outcome === "reverted" ? (
-          <span className="ro">{t("已还原")}</span>
+          <span className="ro">{t("chat.reverted")}</span>
         ) : outcome === "kept" ? (
-          <span className="ro">{t("保留了当前版本")}</span>
+          <span className="ro">{t("chat.kept_current")}</span>
         ) : revertable && !plan ? (
           <button className="dif-act" data-action="file-revert.prepare" disabled={busy} onClick={() => void prepare()}>
-            {t(busy ? "…" : "还原该文件")}
+            {t(busy ? "…" : "chat.revert_this_file")}
           </button>
         ) : (
-          <span className="ro">{t("只读")}</span>
+          <span className="ro">{t("common.read_only")}</span>
         )}
       </div>
 
@@ -246,15 +246,15 @@ export function DiffView({ diff, path, named, onPrepare, onCommit }: Props) {
         <div className="dif-ask" data-clash={clash ? "" : undefined}>
           {clash ? (
             <>
-              <div className="q">{t("该文件在检查点之后再次被修改。")}</div>
+              <div className="q">{t("chat.this_file_has_changed_again")}</div>
               <div className="row">
                 <button className="dif-act" data-action="file-revert.commit" data-value="overwrite_checkpoint" disabled={busy} onClick={() => void commit("overwrite_checkpoint")}>
-                  {t("以检查点版本覆盖")}
+                  {t("chat.overwrite_with_the_checkpoints")}
                 </button>
                 <button className="dif-act ghost" data-action="file-revert.commit" data-value="keep_current" disabled={busy} onClick={() => void commit("keep_current")}>
-                  {t("保留当前版本")}
+                  {t("chat.keep_the_current_one")}
                 </button>
-                <button className="dif-act ghost" onClick={() => setPlan(null)}>{t("取消")}</button>
+                <button className="dif-act ghost" onClick={() => setPlan(null)}>{t("common.cancel")}</button>
               </div>
             </>
           ) : (
@@ -262,12 +262,12 @@ export function DiffView({ diff, path, named, onPrepare, onCommit }: Props) {
               {/* earliestRevisions(0): the preimage is the session's first, not
                   this turn's. Saying "before this change" would promise a
                   surgical undo and deliver a session-wide one. */}
-              <div className="q">{t("将该文件还原至本次会话开始时的状态 —— 会话中对它的其他改动也会一并撤销。")}</div>
+              <div className="q">{t("chat.put_this_file_back_the")}</div>
               <div className="row">
                 <button className="dif-act" data-action="file-revert.commit" disabled={busy} onClick={() => void commit()}>
-                  {t(busy ? "正在还原…" : "还原")}
+                  {t(busy ? "common.restoring" : "common.revert")}
                 </button>
-                <button className="dif-act ghost" onClick={() => setPlan(null)}>{t("取消")}</button>
+                <button className="dif-act ghost" onClick={() => setPlan(null)}>{t("common.cancel")}</button>
               </div>
             </>
           )}
@@ -293,7 +293,7 @@ export function DiffView({ diff, path, named, onPrepare, onCommit }: Props) {
               "skipped" in l ? (
                 <div className="dhunk" key={i}>
                   <span>⋯</span>
-                  <span>{t("跳过 {n} 行", { n: l.skipped })}</span>
+                  <span>{t("chat.n_lines_skipped", { n: l.skipped })}</span>
                 </div>
               ) : (
                 <div className="dl" key={i} data-d={l.sign === " " ? undefined : l.sign}>

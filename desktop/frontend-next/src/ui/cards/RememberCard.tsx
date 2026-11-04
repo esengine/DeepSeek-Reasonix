@@ -32,13 +32,13 @@ export const RememberCard = memo(function RememberCard({
     <LineRow
       glyph="◇"
       gone={forgotten}
-      title={t(forgotten ? "已经忘掉" : "记住了")}
+      title={t(forgotten ? "chat.forgotten" : "chat.remembered")}
       subject={m.title}
       subjectTitle={m.title}
       meta={`${t(SCOPE[m.scope] ?? m.scope)} · ${t(ACTIVATION[m.activation] ?? m.activation)}`}
       action={!forgotten && (
         <button className="act" data-action="memory.forget" data-target={m.name} disabled={busy} onClick={forget}>
-          {t(busy ? "忘掉中…" : "忘记")}
+          {t(busy ? "chat.forgetting" : "chat.forget")}
         </button>
       )}
       detail={m.description || undefined}

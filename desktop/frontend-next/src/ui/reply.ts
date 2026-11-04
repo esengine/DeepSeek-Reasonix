@@ -50,7 +50,7 @@ export function useReplyActions({ port, items, checkpoints, running, model, subm
   const regenerate = useCallback(
     async (turn: number, text: string) => {
       const plan = await port.prepareRewind(turn, "conversation");
-      if (!plan.canConversation) throw new Error(plan.disabledReason || t("这一轮无法重新生成"));
+      if (!plan.canConversation) throw new Error(plan.disabledReason || t("chat.this_turn_cannot_be_regenerated"));
       await port.commitRewind(plan.planId);
       await reloadSession();
       await submit(text);

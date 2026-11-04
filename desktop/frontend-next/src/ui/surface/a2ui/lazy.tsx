@@ -10,7 +10,7 @@ export function lazySurface<P extends object>(load: () => Promise<{ default: Com
   let View = loader();
   return function LazySurface(props: P) {
     const [attempt, setAttempt] = useState(0);
-    return <Boundary retryKey={attempt} fallback={<button type="button" className="dismiss" onClick={() => setAttempt(v => v + 1)}>{t("加载失败 · 重试")}</button>}>
+    return <Boundary retryKey={attempt} fallback={<button type="button" className="dismiss" onClick={() => setAttempt(v => v + 1)}>{t("common.failed_to_load_retry")}</button>}>
       <Suspense fallback={null}><View {...props} /></Suspense>
     </Boundary>;
   };

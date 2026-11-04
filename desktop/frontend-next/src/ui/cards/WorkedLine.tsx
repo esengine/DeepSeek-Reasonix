@@ -6,7 +6,7 @@ export function WorkedLine({ ms, startedAt }: { ms: number; startedAt?: number }
     <div className="rc">
       <div className="rc-ok">
         <span className="rc-t">
-          {startedAt ? t("{at} 开始 · 耗时 {t}", { at: clock(startedAt), t: elapsed(ms) }) : t("耗时 {t}", { t: elapsed(ms) })}
+          {startedAt ? t("chat.started_at_worked_for_t", { at: clock(startedAt), t: elapsed(ms) }) : t("chat.worked_for_t", { t: elapsed(ms) })}
         </span>
       </div>
     </div>

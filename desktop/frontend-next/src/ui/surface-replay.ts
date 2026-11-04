@@ -26,7 +26,7 @@ export function useSurfaceReplay(port: AgentPort, dispatch: Dispatch<SessionEven
       const { surfaces, incomplete } = await port.extensionSurfaces();
       if (generation !== epoch.current || id !== request.current || !current()) return;
       dispatch({ kind: "__extension_snapshot", surfaces: surfaces.filter(p => !changed.has(key(p))) });
-      if (incomplete) dispatch({ kind: "__error", text: t("部分扩展界面可能没能恢复") });
+      if (incomplete) dispatch({ kind: "__error", text: t("chat.some_extension_surfaces_may_not") });
     } catch (error) {
       if (generation === epoch.current && id === request.current && current()) {
         dispatch({ kind: "__error", text: reason(error) });

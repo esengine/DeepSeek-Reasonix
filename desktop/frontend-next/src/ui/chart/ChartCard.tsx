@@ -8,8 +8,8 @@ import { clip } from "./format";
 import type { ChartMark, ChartSpec } from "./spec";
 
 function describe(spec: ChartSpec): string {
-  const kinds = spec.marks.map((m) => (m.type === "bar" ? t("柱状图") : m.type === "line" ? t("折线图") : t("饼图")));
-  return t("{kind}：{title}，共 {n} 行", { kind: [...new Set(kinds)].join(" · "), title: spec.title, n: spec.data.rows.length });
+  const kinds = spec.marks.map((m) => (m.type === "bar" ? t("chat.bar_chart") : m.type === "line" ? t("chat.line_chart") : t("chat.pie_chart")));
+  return t("chat.kind_title_n_rows", { kind: [...new Set(kinds)].join(" · "), title: spec.title, n: spec.data.rows.length });
 }
 
 function axes(spec: ChartSpec): string {
@@ -83,7 +83,7 @@ export function ChartCard({ spec, callId }: { spec: ChartSpec; callId?: string }
       </div>
       <div className="c">
         <div className="hl">
-          <span className="nm">{t("图表")}</span>
+          <span className="nm">{t("chat.chart")}</span>
           <span className="arg" title={spec.title}>{spec.title}</span>
         </div>
         <figure className="chart" role="group" aria-label={describe(spec)}>
@@ -96,14 +96,14 @@ export function ChartCard({ spec, callId }: { spec: ChartSpec; callId?: string }
           </svg>
           {spec.marks.map((m, i) => (
             <div className="chart-mark" key={i}>
-              <Scroller scrolls={m.type !== "pie"} label={t("图表：{title}（可横向滚动）", { title: spec.title })}>
+              <Scroller scrolls={m.type !== "pie"} label={t("chat.chart_title_scrolls_sideways", { title: spec.title })}>
                 <Mark spec={spec} mark={m} hot={setRead} hatch={hatch} />
               </Scroller>
               <Legend spec={spec} mark={m} />
             </div>
           ))}
           {axes(spec) && <figcaption className="chart-axes">{axes(spec)}</figcaption>}
-          <div className="chart-read" aria-live="polite">{read ?? t("悬停或聚焦图表以查看数值")}</div>
+          <div className="chart-read" aria-live="polite">{read ?? t("chat.hover_or_focus_the_chart")}</div>
         </figure>
         <ChartTable spec={spec} id={`${uid}-data`} />
       </div>

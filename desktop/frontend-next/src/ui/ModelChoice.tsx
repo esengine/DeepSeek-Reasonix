@@ -101,8 +101,8 @@ export function ModelChoice({
           type="search"
           value={q}
           spellCheck={false}
-          placeholder={t("搜索或输入完整模型 ID…")}
-          aria-label={t("搜索或添加模型")}
+          placeholder={t("composer.search_or_enter_an_exact")}
+          aria-label={t("composer.search_or_add_a_model")}
           onChange={(e) => setQ(e.target.value)}
           onKeyDown={(e) => {
             if (e.key !== "Enter" || !naming) return;
@@ -113,15 +113,15 @@ export function ModelChoice({
         {query && <span className="cnt">{hits.length} / {models.length}</span>}
         {onFetch && (
           <button className="mfetch" data-action="provider.probe" onClick={onFetch} disabled={fetchDisabled}>
-            {t(fetching ? "正在从服务商读取…" : "没找到？从服务商读取可用模型")}
+            {t(fetching ? "common.reading_from_provider" : "composer.not_listed_read_available_models")}
           </button>
         )}
       </div>
       {fetchFail && (
         <div className="find" data-lvl="err" role="alert">
-          <span className="t">{t("读取模型列表失败")}</span>
+          <span className="t">{t("composer.could_not_read_the_model")}</span>
           <span className="why">{fetchFail}</span>
-          <span className="why">{t("可以直接输入完整模型 ID 添加。")}</span>
+          <span className="why">{t("composer.you_can_also_type_the")}</span>
         </div>
       )}
 
@@ -130,16 +130,16 @@ export function ModelChoice({
           <div className="mline" key={m} data-off={on.has(m) ? undefined : ""}
             aria-busy={facts?.[m]?.checking || undefined}>
             <button className="tick" role="checkbox" aria-checked={on.has(m)}
-              aria-label={t("选用 {name}", { name: m })} onClick={() => onToggle(m)}>
+              aria-label={t("composer.enable_name", { name: m })} onClick={() => onToggle(m)}>
               <i />
             </button>
             <span className="mid">
               <span className="nm" title={labels?.[m] ? m : undefined}>{labels?.[m] ?? m}</span>
               {onAlias && <input className="malias" value={aliasFor(m)} spellCheck={false}
                 data-action="provider.draft" data-value="model-alias" data-target={m}
-                aria-label={t("{name} 的显示别名", { name: m })}
-                placeholder={t("显示别名（留空使用模型 ID）")}
-                title={t("仅用于显示，不改变请求中的模型 ID")}
+                aria-label={t("composer.display_alias_for_name", { name: m })}
+                placeholder={t("composer.display_alias_empty_uses_model")}
+                title={t("composer.display_only_the_model_id")}
                 disabled={!on.has(m)} onChange={(e) => onAlias(m, e.target.value)} />}
               {facts?.[m] && <ModelEvidence fact={facts[m]} />}
             </span>
@@ -147,26 +147,26 @@ export function ModelChoice({
               {onCheck && (
                 <button className="mverify" data-action="provider.model-check" data-target={m}
                   disabled={!on.has(m) || checkDisabled || facts?.[m]?.checking}
-                  aria-label={t("验证模型 {name}", { name: m })} onClick={() => onCheck(m)}>
-                  {t(facts?.[m]?.checking ? "验证中…" : facts?.[m]?.status ? "重新验证" : "验证")}
+                  aria-label={t("composer.verify_model_name", { name: m })} onClick={() => onCheck(m)}>
+                  {t(facts?.[m]?.checking ? "common.verifying" : facts?.[m]?.status ? "composer.verify_again" : "composer.verify")}
                 </button>
               )}
               {onVision ? (
                 <button className="vtag" aria-pressed={vision.includes(m)}
-                  aria-label={t("{name} 的图片输入", { name: m })}
+                  aria-label={t("composer.image_input_for_name", { name: m })}
                   disabled={!on.has(m) || visionLocked?.(m)}
-                  title={visionLocked?.(m) ? t("当前连接不会向这个模型发送图片") : t(vision.includes(m) ? "已启用图片输入" : "图片能力未确认；点击后按手动声明启用")}
+                  title={visionLocked?.(m) ? t("composer.this_connection_will_not_send") : t(vision.includes(m) ? "composer.image_input_enabled" : "composer.image_capability_is_unverified_click")}
                   onClick={() => onVision(m)}>
-                  {t(vision.includes(m) ? "读图" : visionLocked?.(m) ? "不发送图片" : "读图？")}
+                  {t(vision.includes(m) ? "common.reads_images" : visionLocked?.(m) ? "composer.no_images" : "composer.images")}
                 </button>
               ) : (
-                vision.includes(m) && <span className="vtag" data-flat>{t("读图")}</span>
+                vision.includes(m) && <span className="vtag" data-flat>{t("common.reads_images")}</span>
               )}
               {onDefault && (
                 <button className="dtag" aria-pressed={def === m} disabled={!on.has(m)}
-                  aria-label={t("将 {name} 设为默认模型", { name: m })}
+                  aria-label={t("composer.make_name_the_default_model", { name: m })}
                   onClick={() => onDefault(m)}>
-                  {t("默认")}
+                  {t("common.default")}
                 </button>
               )}
             </span>
@@ -174,8 +174,8 @@ export function ModelChoice({
         ))}
       </div>
 
-      {hidden > 0 && <span className="mmore">{t("另有 {n} 个未列出，可通过搜索找到", { n: hidden })}</span>}
-      {shown.length === 0 && !naming && <div className="empty">{t("没有匹配的模型。")}</div>}
+      {hidden > 0 && <span className="mmore">{t("composer.n_more_not_listed_search", { n: hidden })}</span>}
+      {shown.length === 0 && !naming && <div className="empty">{t("composer.no_models_match")}</div>}
 
       {/* Under the list, never over it: a "create" offer sitting above seven
           real matches is how you add a model when you meant to pick one. */}
@@ -183,8 +183,8 @@ export function ModelChoice({
         <button className="mnew" onClick={add}>
           <span className="k">+</span>
           <span className="tx">
-            <span className="lb">{t("添加未列出的模型「{name}」", { name: q.trim() })}</span>
-            <span className="ds">{t("按原始模型 ID 保存；添加后可以验证，不会替换成相似名称")}</span>
+            <span className="lb">{t("composer.add_unlisted_model_name", { name: q.trim() })}</span>
+            <span className="ds">{t("composer.saves_the_exact_model_id")}</span>
           </span>
         </button>
       )}
@@ -252,10 +252,10 @@ function checkTally(picked: string[], facts?: Record<string, ModelFact>): string
   const count = { available: 0, unavailable: 0, unknown: 0, checking: 0, todo: 0 };
   for (const m of picked) count[facts[m]?.checking ? "checking" : facts[m]?.status ?? "todo"]++;
   return [
-    count.available && t("{n} 个可用", { n: count.available }),
-    count.unavailable && t("{n} 个不可用", { n: count.unavailable }),
-    count.unknown && t("{n} 个无法确定", { n: count.unknown }),
-    count.checking && t("{n} 个验证中", { n: count.checking }),
-    count.todo && t("{n} 个未验证", { n: count.todo }),
+    count.available && t("composer.n_available", { n: count.available }),
+    count.unavailable && t("composer.n_unavailable", { n: count.unavailable }),
+    count.unknown && t("composer.n_undetermined", { n: count.unknown }),
+    count.checking && t("composer.n_verifying", { n: count.checking }),
+    count.todo && t("composer.n_not_verified", { n: count.todo }),
   ].filter(Boolean).join(" · ");
 }

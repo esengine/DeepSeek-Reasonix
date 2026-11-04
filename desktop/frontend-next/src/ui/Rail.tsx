@@ -353,15 +353,15 @@ export function Rail({ marks, total, scroll, flow, onJump, bound, scope, earlier
           type="button"
           className="srail-earlier"
           style={{ top: Math.max(6, (view[0]?.top ?? PAD) - 14) }}
-          aria-label={t("更早还有 {n} 条消息，点击加载", { n: earlier })}
-          title={t("更早还有 {n} 条消息，点击加载", { n: earlier })}
+          aria-label={t("chat.n_more_messages_before_these", { n: earlier })}
+          title={t("chat.n_more_messages_before_these", { n: earlier })}
           data-action="history.more"
           onClick={onLoadEarlier}
         />
       )}
       <nav
         className="srail"
-        aria-label={t("你说过的话")}
+        aria-label={t("chat.what_you_said")}
         onMouseMove={(e) => {
           const rect = e.currentTarget.getBoundingClientRect();
           aim(railLocalY(e.clientY, rect.top, rect.height, geom.current.rail));
@@ -396,11 +396,11 @@ export function Rail({ marks, total, scroll, flow, onJump, bound, scope, earlier
               data-starred={starred ? "" : undefined}
               data-edits={!folded && m.files > 0 ? "" : undefined}
               aria-label={folded
-                ? t("定位到第 {a} 至 {b} 条", { a: v.from + 1, b: v.to + 1 })
-                : t("定位到你说的：{text}", { text: m.text.slice(0, 40) })}
+                ? t("chat.jump_to_questions_a_to", { a: v.from + 1, b: v.to + 1 })
+                : t("chat.jump_to_what_you_said", { text: m.text.slice(0, 40) })}
               data-action-contextmenu="rail.star"
               data-action-keydown="rail.star"
-              title={m.msgIndex === undefined ? undefined : starred ? t("右键取消这处星标") : t("右键给这处加星标")}
+              title={m.msgIndex === undefined ? undefined : starred ? t("chat.right_click_to_remove_the") : t("chat.right_click_to_star_this")}
               onFocus={(e) => { if (e.currentTarget.matches(":focus-visible")) setAt(i); }}
               onBlur={() => setAt(-1)}
               onClick={() => {
@@ -437,7 +437,7 @@ export function Rail({ marks, total, scroll, flow, onJump, bound, scope, earlier
           onMouseEnter={hold}
           onMouseLeave={release}
         >
-          <div className="srail-subhd">{t("第 {a} 至 {b} 条", { a: view[opened].from + 1, b: view[opened].to + 1 })}</div>
+          <div className="srail-subhd">{t("chat.questions_a_to_b", { a: view[opened].from + 1, b: view[opened].to + 1 })}</div>
           {Array.from({ length: view[opened].to - view[opened].from + 1 }, (_, k) => {
             const mk = marks[view[opened]!.from + k];
             if (!mk) return null;
@@ -465,13 +465,13 @@ export function Rail({ marks, total, scroll, flow, onJump, bound, scope, earlier
           <div className="hd">
             <span className="n">
               {shown.single
-                ? t("你的第{n}条", { n: shown.from + 1 })
-                : t("第{a}至{b}条", { a: shown.from + 1, b: shown.to + 1 })}
+                ? t("chat.your_message_n", { n: shown.from + 1 })
+                : t("chat.messages_a_to_b", { a: shown.from + 1, b: shown.to + 1 })}
             </span>
-            {head && head.files > 0 && <span>· {t("改了{n}个文件", { n: head.files })}</span>}
+            {head && head.files > 0 && <span>· {t("chat.changed_n_files", { n: head.files })}</span>}
           </div>
           <div className="tx">{head?.text}</div>
-          <div className="keys">{t("点击跳过去 · 右键加星标")}</div>
+          <div className="keys">{t("chat.click_to_jump_right_click")}</div>
         </div>
       )}
     </div>

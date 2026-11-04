@@ -104,7 +104,7 @@ export function effortDescription(value: string, forcedThinking = false, cheapes
   // level, and still bills for it. That is the rung a saved "off" lands on, so
   // it is the one that would otherwise read as free.
   if (forcedThinking && cheapest !== "" && id === cheapest.toLowerCase()) {
-    return `${base} · ${t("思考仍开启并计费，该模型无法关闭思考")}`;
+    return `${base} · ${t("composer.thinking_stays_on_and_is")}`;
   }
   return base;
 }
@@ -116,13 +116,13 @@ export function effortMenu(efforts: string[], modelLabel: string, onDeclare: str
   const declared = efforts.length > 0;
   const cheapest = cheapestEffort(efforts);
   return [
-    { value: "__effort-heading", label: t("推理强度"), right: modelLabel, header: true },
-    ...(declared ? [] : [{ value: onDeclare, label: t("声明推理档位"), desc: t("这个端点没有报告推理档位，中转站通常不转发这项能力。将打开该来源的编辑表单，可以选择思考参数或直接填写档位。") }]),
+    { value: "__effort-heading", label: t("composer.reasoning_effort"), right: modelLabel, header: true },
+    ...(declared ? [] : [{ value: onDeclare, label: t("composer.declare_reasoning_levels"), desc: t("composer.this_endpoint_reported_no_reasoning") }]),
     ...efforts.map((value) => ({
       value,
       label: effortLabel(value),
       meta: effortApi(value),
-      badge: value === "auto" ? t("推荐") : undefined,
+      badge: value === "auto" ? t("composer.recommended") : undefined,
       recommended: value === "auto",
       strength: value === "disabled" || value === "none" ? 0 : ({ auto: 1, low: 1, medium: 2, high: 3, xhigh: 4, max: 4 } as Record<string, number>)[value.toLowerCase()] ?? 1,
       desc: effortDescription(value, forcedThinking, cheapest),
@@ -131,10 +131,10 @@ export function effortMenu(efforts: string[], modelLabel: string, onDeclare: str
       value: MODE_ROW + mode.id,
       label: modeLabel(mode),
       desc: MODE_TEXT[mode.hintKey] ? t(MODE_TEXT[mode.hintKey]) : undefined,
-      badge: mode.costlier ? t("费用更高") : undefined,
+      badge: mode.costlier ? t("composer.costs_more") : undefined,
       toggle: mode.active,
       divide: i === 0,
     })),
-    ...(declared ? [{ value: "__effort-note", label: t("仅显示当前模型实际支持的档位。"), right: t("按模型生效"), header: true }] : []),
+    ...(declared ? [{ value: "__effort-note", label: t("composer.only_levels_actually_supported_by"), right: t("composer.per_model"), header: true }] : []),
   ];
 }

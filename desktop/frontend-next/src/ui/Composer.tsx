@@ -218,7 +218,7 @@ export function Composer({ port, status, running, queued = false, quote, restore
   }, []);
   useFitHeight(box, text, placeCaret);
   const showHint = useSyncExternalStore(onComposerHintChange, showsComposerHint, showsComposerHint);
-  const fittedPlaceholder = usePlaceholderFit(box, queued ? [t("继续输入以排队后续修改"), t("继续输入…"), "…"] : running ? [t("运行中也可以继续输入…"), t("继续输入…"), "…"] : [t("描述任务、问题或要改的内容…"), t("描述任务…"), "…"]);
+  const fittedPlaceholder = usePlaceholderFit(box, queued ? [t("composer.keep_typing_to_queue_further"), t("composer.keep_typing"), "…"] : running ? [t("composer.you_can_keep_typing_while"), t("composer.keep_typing"), "…"] : [t("composer.describe_a_task_question_or"), t("composer.describe_a_task"), "…"]);
   const placeholder = showHint ? fittedPlaceholder : "";
 
   // Attachments ride into the turn as path references, exactly as they do from
@@ -431,9 +431,9 @@ export function Composer({ port, status, running, queued = false, quote, restore
           onHover={menu.hover}
         />
       )}
-      <div role="status" aria-live="polite" aria-label={t("补全")}>
+      <div role="status" aria-live="polite" aria-label={t("common.completions")}>
         {menu.loading && !menu.open && <div className="menu slashmenu">
-          <div className="mnone">{t("正在加载命令与技能…")}</div>
+          <div className="mnone">{t("composer.loading_commands_and_skills")}</div>
         </div>}
       </div>
       {/* What letting go will do, said before it happens. A drop that only
@@ -466,8 +466,8 @@ export function Composer({ port, status, running, queued = false, quote, restore
                   )}
                   <span className="meta">
                     <span className="nm" title={c.a?.path ?? c.name}>{c.name}</span>
-                    {c.state === "adding" && <span className="sz live">{t("正在添加…")}</span>}
-                    {c.state === "ready" && <span className="sz">{isPicture(c) ? t("图片") : t("文件")}</span>}
+                    {c.state === "adding" && <span className="sz live">{t("composer.adding")}</span>}
+                    {c.state === "ready" && <span className="sz">{isPicture(c) ? t("composer.image") : t("common.files")}</span>}
                     {c.state === "failed" && c.error && <span className="why" title={c.error}>{c.error}</span>}
                     {c.state === "failed" && (
         <button
@@ -479,7 +479,7 @@ export function Composer({ port, status, running, queued = false, quote, restore
                           upload(c.id, c.blob);
                         }}
                       >
-                        {t("添加失败 · 重试")}
+                        {t("composer.could_not_add_retry")}
                       </button>
                     )}
                   </span>
@@ -489,7 +489,7 @@ export function Composer({ port, status, running, queued = false, quote, restore
                   <span className="glyph" aria-hidden="true">{"#"}</span>
                   <span className="meta">
                     <span className="nm" title={c.title}>{c.title}</span>
-                    <span className="sz">{t("历史会话 · 只读资料")}</span>
+                    <span className="sz">{t("composer.past_conversation_read_only_reference")}</span>
                   </span>
                 </>
               ) : (
@@ -504,7 +504,7 @@ export function Composer({ port, status, running, queued = false, quote, restore
                         insert(c.k === "quote" ? quoteBlock(c) : c.body);
                       }}
                     >
-                      {t("{n} 行 · 展开到输入框", { n: c.lines })}
+                      {t("composer.n_lines_put_it_back", { n: c.lines })}
                     </button>
                     {c.k === "paste" && <PasteKeep chip={c} onKeep={keepPaste} />}
                   </span>
@@ -512,7 +512,7 @@ export function Composer({ port, status, running, queued = false, quote, restore
               )}
               <button
                 className="x"
-                aria-label={t("移除 {name}", { name: chipName(c) })}
+                aria-label={t("common.remove_name", { name: chipName(c) })}
                 onClick={() => discard(c)}
               >
                 ×
@@ -526,8 +526,8 @@ export function Composer({ port, status, running, queued = false, quote, restore
       {warnPictures && (
         <p className="shotwarn" role="status">
           {status?.visionDeclared === false
-            ? t("该模型是否支持读图未声明 · 暂按不支持处理；在「连接」中勾选后即可直接发送")
-            : t("当前模型不支持读图 · 图片将按看图模型设置处理")}
+            ? t("composer.nobody_has_said_whether_this")
+            : t("composer.this_model_does_not_read")}
         </p>
       )}
       {/* The prompt glyph sits beside the box rather than in it, so it cannot be
@@ -544,7 +544,7 @@ export function Composer({ port, status, running, queued = false, quote, restore
           data-chips={chips.list.length > 0 ? "" : undefined}
           placeholder={placeholder}
           role="combobox"
-          aria-label={t("任务输入")}
+          aria-label={t("composer.task_input")}
           aria-describedby={guide}
           aria-keyshortcuts={sendAria(sendShortcut, touch)}
           aria-busy={submitting}
@@ -628,21 +628,21 @@ export function Composer({ port, status, running, queued = false, quote, restore
       </div>
       <div className="composeguide" id={guide}>
         <span className="composecaps" aria-hidden="true">
-          <span><kbd>/</kbd>{t("命令与技能")}</span>
-          <span><kbd>@</kbd>{t("引用文件")}</span>
+          <span><kbd>/</kbd>{t("composer.commands_and_skills")}</span>
+          <span><kbd>@</kbd>{t("composer.reference_files")}</span>
         </span>
         <span className="composehint" aria-live="polite">
           {stopping
-            ? t("正在停止…")
+            ? t("composer.stopping")
             : submitting
-            ? t("正在发送…")
+            ? t("common.sending")
             : adding
-              ? t("正在添加附件…")
+              ? t("composer.adding_attachments")
               : failed
-                ? t("有附件添加失败，请重试或移除")
+                ? t("composer.an_attachment_failed_retry_or")
                 : sendHint(sendShortcut, running, touch, runningIntent)}
         </span>
-        {showCount && <span className="fcount">{t("{n} 字 · {lines} 行", { n: text.length, lines })}</span>}
+        {showCount && <span className="fcount">{t("composer.n_characters_lines_lines", { n: text.length, lines })}</span>}
       </div>
       <div className="row">
         {/* 拖进来和粘贴都走同一条路，但那两个都得先有一张图在手边。点开系统
@@ -662,14 +662,14 @@ export function Composer({ port, status, running, queued = false, quote, restore
         <div className="turntools">
           <button
             className="mode plain attach studio-attach"
-            aria-label={t("添加附件")}
+            aria-label={t("composer.add_an_attachment")}
             aria-describedby={attachTipId}
             onClick={() => picker.current?.click()}
           >
             <StudioIcon name="plus" />
             <span className="studio-control-tip" id={attachTipId} role="tooltip">
-              <b>{t("添加附件")}</b>
-              <span>{t("也可直接拖入或粘贴")}</span>
+              <b>{t("composer.add_an_attachment")}</b>
+              <span>{t("composer.you_can_also_drop_or")}</span>
             </span>
           </button>
           {onSide && <SideAskButton open={side} onToggle={onSide} panel={sidePanel} />}
@@ -680,18 +680,18 @@ export function Composer({ port, status, running, queued = false, quote, restore
             triggerAction="plan.mode"
             ariaPressed={status?.plan ?? false}
             place="bottom"
-            title={t("工作模式")}
+            title={t("composer.work_mode")}
             menuClassName="composer-menu"
             current={status?.plan ? "plan" : "agent"}
             pending={busy["plan"]}
             items={[
-              { value: "__mode", label: t("工作模式"), right: t("当前任务"), header: true },
-              { value: "agent", label: "Agent", desc: t("执行任务并使用已启用工具") },
-              { value: "plan", label: "Plan", desc: t("先整理步骤，不写入文件") },
-              { value: "ask", label: t("Ask（未实现）"), desc: t("直接回答，不调用工具"), disabled: true },
+              { value: "__mode", label: t("composer.work_mode"), right: t("common.current_task"), header: true },
+              { value: "agent", label: "Agent", desc: t("composer.run_tasks_with_enabled_tools") },
+              { value: "plan", label: "Plan", desc: t("composer.plan_steps_before_changing_files") },
+              { value: "ask", label: t("composer.ask_not_implemented"), desc: t("composer.answer_directly_without_tools"), disabled: true },
             ]}
             onPick={(value) => change("plan", () => port.setPlanMode(value === "plan"))}
-            label={<><StudioIcon name="agent" /><span className="studio-sr-label">{t("计划")}</span><span>{status?.plan ? "Plan" : "Agent"}</span><StudioIcon name="down" /></>}
+            label={<><StudioIcon name="agent" /><span className="studio-sr-label">{t("common.plan")}</span><span>{status?.plan ? "Plan" : "Agent"}</span><StudioIcon name="down" /></>}
           />
         </div>
         {git?.repo && (worktree.sources || status?.workspaceRoot) ? <WorktreeChip port={port} workspace={workspace} onChanged={onChanged} onSwitched={onTreeChanged} onError={onError} changeCount={countElsewhere ? 0 : changeCount} sources={worktree.sources ?? { available: false, sourceRoot: status?.workspaceRoot ?? "", sources: [] }} canCreate={fresh && !!worktree.sources?.available} selection={worktree.selection} branch={git.branch} busy={submitting || running} onSelect={worktree.setSelection} refresh={worktree.refresh} /> : <BranchChip port={port} git={git} changeCount={changeCount} countElsewhere={countElsewhere} onChanged={onChanged} onSwitched={onTreeChanged} onError={onError} />}
@@ -700,8 +700,8 @@ export function Composer({ port, status, running, queued = false, quote, restore
             separate reading — an approved plan is still running, and saying so
             here is not the same as offering to turn planning back on. */}
         {status?.planPhase === "executing" && (
-          <span className="mode plain" data-plan-phase="executing" title={t("正在执行已批准的计划")}>
-            <span className="lb">{t("执行计划中")}</span>
+          <span className="mode plain" data-plan-phase="executing" title={t("composer.executing_an_approved_plan")}>
+            <span className="lb">{t("composer.executing_plan")}</span>
           </span>
         )}
         <Policy port={port} status={status} onChanged={onChanged} onBoundary={() => onSettings("tools:sandbox")} />
@@ -718,8 +718,8 @@ export function Composer({ port, status, running, queued = false, quote, restore
             head={<ModelGroupChips headings={groupHeadings(menuItems)} chosen={chosenModelGroups} onChange={writeModelFilter} />}
             menuClassName="studio-model-menu composer-menu"
             searchAlways
-            searchPlaceholder={t("搜索模型或服务商…")}
-            menuTitle={<><b>{t("选择模型")}</b><small>{t("用于后续任务")}</small></>}
+            searchPlaceholder={t("composer.search_models_or_providers")}
+            menuTitle={<><b>{t("composer.choose_model")}</b><small>{t("composer.for_future_tasks")}</small></>}
             onOpen={() => { void modelHealth.check(loadModels()); loadModels(); }}
             pending={busy["model"] || busy["effort"] || busy["mode"]}
             asideClassName="studio-effort-menu"
@@ -739,7 +739,7 @@ export function Composer({ port, status, running, queued = false, quote, restore
                 }}
               />
             ) : undefined}
-            label={<>{hasVendorMark(currentMark) && <VendorMark slug={currentMark} size={14} />}<span className="nm">{modelLb}</span>{status && <><i className="studio-model-sep" aria-hidden="true" /><span className="studio-effort-reading">{declared ? effortShort(status.effort, status.modes) : t("未声明")}</span></>}<StudioIcon name="down" /></>}
+            label={<>{hasVendorMark(currentMark) && <VendorMark slug={currentMark} size={14} />}<span className="nm">{modelLb}</span>{status && <><i className="studio-model-sep" aria-hidden="true" /><span className="studio-effort-reading">{declared ? effortShort(status.effort, status.modes) : t("common.not_declared")}</span></>}<StudioIcon name="down" /></>}
           />
         </div>
         </div>
@@ -750,7 +750,7 @@ export function Composer({ port, status, running, queued = false, quote, restore
               data-primary
               data-action="session.stop"
               data-pending={stopping ? "" : undefined}
-              aria-label={t(stopping ? "正在停止…" : "停下")}
+              aria-label={t(stopping ? "composer.stopping" : "composer.stop")}
               disabled={stopping}
               aria-busy={stopping}
               onClick={() => {
@@ -769,12 +769,12 @@ export function Composer({ port, status, running, queued = false, quote, restore
                   <rect x="4.8" y="4.8" width="6.4" height="6.4" rx="1.3" />
                 </svg>
               </span>
-              <span>{t(stopping ? "正在停止…" : "停下")}</span>
+              <span>{t(stopping ? "composer.stopping" : "composer.stop")}</span>
             </button>
           )}
           <button
             className="btn send"
-            aria-label={t(submitting ? "正在发送…" : running ? runningIntent === "followup" ? "排队发送" : "插话" : "发送")}
+            aria-label={t(submitting ? "common.sending" : running ? runningIntent === "followup" ? "composer.queue" : "common.steer" : "common.send")}
             data-primary={running ? undefined : ""}
             data-action="session.send"
             data-running={running ? "" : undefined}
@@ -787,7 +787,7 @@ export function Composer({ port, status, running, queued = false, quote, restore
                 <path d="M8 12.8V3.4M4.2 7.2 8 3.4l3.8 3.8" />
               </svg>
             </span>
-            <span>{t(submitting ? "正在发送…" : running ? runningIntent === "followup" ? "排队发送" : "插话" : "发送")}</span>
+            <span>{t(submitting ? "common.sending" : running ? runningIntent === "followup" ? "composer.queue" : "common.steer" : "common.send")}</span>
           </button>
         </span>
       </div>

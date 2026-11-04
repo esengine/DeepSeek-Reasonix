@@ -24,18 +24,18 @@ export default function MapPlanner({ node, value, disabled, change }: RichInputP
   const groups = [...new Set(places.map(p => p.group).filter((v): v is string => !!v))];
   const visible = [...order.flatMap(id => places.filter(p => p.value === id)), ...places.filter(p => !order.includes(p.value))].filter(p => !group || p.group === group);
   const move = (id: string, delta: number) => { const next = [...order]; const from = next.indexOf(id), to = from + delta; if (from < 0 || to < 0 || to >= next.length || disabled) return; [next[from], next[to]] = [next[to], next[from]]; change(next); };
-  return <Workspace title={node.label} badge={t("地图与行程")} subtitle={t("选择地点并调整访问顺序，地图与行程同步显示")}>
-    <MantineGroup gap="xs"><Button size="xs" variant={!group ? "light" : "subtle"} data-action="surface.explore" onClick={() => setGroup("")}>{t("全部地点")}</Button>{groups.map(g => <Button key={g} size="xs" variant={group === g ? "light" : "subtle"} data-action="surface.explore" onClick={() => setGroup(g)}>{g}</Button>)}<Badge variant="light" color="gray">{t("已选 {n} 个", { n: order.length })}</Badge></MantineGroup>
+  return <Workspace title={node.label} badge={t("chat.map_itinerary")} subtitle={t("chat.choose_places_and_arrange_the")}>
+    <MantineGroup gap="xs"><Button size="xs" variant={!group ? "light" : "subtle"} data-action="surface.explore" onClick={() => setGroup("")}>{t("chat.all_places")}</Button>{groups.map(g => <Button key={g} size="xs" variant={group === g ? "light" : "subtle"} data-action="surface.explore" onClick={() => setGroup(g)}>{g}</Button>)}<Badge variant="light" color="gray">{t("chat.n_selected", { n: order.length })}</Badge></MantineGroup>
     <div className="rich-split">
-      <Stack gap="xs"><MapCanvas places={visible} order={order} active={active} focusVersion={focusVersion} focus={focus} /><Text size="xs" c="dimmed">{t("虚线表示访问顺序，不代表道路导航路线")}</Text></Stack>
+      <Stack gap="xs"><MapCanvas places={visible} order={order} active={active} focusVersion={focusVersion} focus={focus} /><Text size="xs" c="dimmed">{t("chat.dashed_lines_show_visit_order")}</Text></Stack>
       <Stack ref={listRef} gap="sm" className="rich-map-list">
         {visible.map(p => { const at = order.indexOf(p.value), included = at >= 0; return <Paper ref={active === p.value ? activeRef : undefined} key={p.value} p="md" radius="md" className="rich-stop" data-active={active === p.value}>
           <Stack gap="sm"><MantineGroup justify="space-between" wrap="nowrap"><Badge circle color={included ? "teal" : "gray"} variant="light">{included ? at + 1 : "+"}</Badge><Button variant="subtle" size="sm" data-action="surface.explore" onClick={() => focus(p.value)}>{p.label}</Button>{p.group && <Text size="xs" c="dimmed">{p.group}</Text>}</MantineGroup>
           {active === p.value && <OptionImage image={p.image} />}
           {p.description && <Text size="sm">{p.description}</Text>}
           {active === p.value && p.facts?.map(f => <MantineGroup key={f.label} justify="space-between"><Text c="dimmed" size="xs">{f.label}</Text><Text size="xs">{f.value}</Text></MantineGroup>)}
-          <MantineGroup gap="xs"><Button variant={included ? "light" : "filled"} color="teal" size="xs" disabled={disabled} data-action="surface.edit" data-target={node.key} onClick={() => change(included ? order.filter(id => id !== p.value) : [...order, p.value])}>{included ? t("移出行程") : t("加入行程")}</Button>
-            {included && <><Button size="xs" variant="subtle" aria-label={t("上移 {name}", { name: p.label })} disabled={disabled || at === 0} data-action="surface.edit" data-target={node.key} onClick={() => move(p.value, -1)}>↑</Button><Button size="xs" variant="subtle" aria-label={t("下移 {name}", { name: p.label })} disabled={disabled || at === order.length - 1} data-action="surface.edit" data-target={node.key} onClick={() => move(p.value, 1)}>↓</Button></>}
+          <MantineGroup gap="xs"><Button variant={included ? "light" : "filled"} color="teal" size="xs" disabled={disabled} data-action="surface.edit" data-target={node.key} onClick={() => change(included ? order.filter(id => id !== p.value) : [...order, p.value])}>{included ? t("chat.remove_stop") : t("chat.add_stop")}</Button>
+            {included && <><Button size="xs" variant="subtle" aria-label={t("common.move_name_up", { name: p.label })} disabled={disabled || at === 0} data-action="surface.edit" data-target={node.key} onClick={() => move(p.value, -1)}>↑</Button><Button size="xs" variant="subtle" aria-label={t("common.move_name_down", { name: p.label })} disabled={disabled || at === order.length - 1} data-action="surface.edit" data-target={node.key} onClick={() => move(p.value, 1)}>↓</Button></>}
           </MantineGroup></Stack>
         </Paper>; })}
       </Stack>

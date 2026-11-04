@@ -201,7 +201,7 @@ function arc(cx: number, cy: number, r: number, inner: number, a0: number, a1: n
 export function PiePlot({ spec, mark, hot }: Frame) {
   const slices = slicesOf(spec, mark);
   const total = slices.reduce((n, s) => n + s.value, 0);
-  if (slices.length === 0) return <div className="chart-empty">{t("没有可画的数据")}</div>;
+  if (slices.length === 0) return <div className="chart-empty">{t("chat.nothing_to_draw")}</div>;
   const r = 104;
   let angle = 0;
   return (

@@ -188,7 +188,7 @@ export function AskCard({ item, onAnswer, onEngage, refine }: Props) {
       <div className="c">
         <div className="hl">
           <span className="nm">{askHeading(qs)}</span>
-          <span className="tag" data-pending={sealed ? undefined : ""}>{sealed ? t("已处理") : t("等你处理")}</span>
+          <span className="tag" data-pending={sealed ? undefined : ""}>{sealed ? t("chat.handled") : t("chat.needs_you")}</span>
         </div>
         <div className="out">
           <div className="ask" data-sealed={sealed ? "" : undefined} aria-busy={submitting}
@@ -206,7 +206,7 @@ export function AskCard({ item, onAnswer, onEngage, refine }: Props) {
                     data-answered={answered(i) ? "" : undefined}
                     onClick={() => setTab(i)}
                   >
-                    {q.header || t("问题 {n}", { n: i + 1 })}
+                    {q.header || t("chat.question_n", { n: i + 1 })}
                     <i className="dot" />
                   </button>
                 ))}
@@ -222,7 +222,7 @@ export function AskCard({ item, onAnswer, onEngage, refine }: Props) {
                 }}
               >
                 <div className="ask-q"><LazyMarkdown text={q.prompt} /></div>
-                <div className="ask-hint">{t(q.multi ? "可多选" : "请选择一项")}</div>
+                <div className="ask-hint">{t(q.multi ? "chat.multiple_allowed" : "common.pick_one")}</div>
                 <div className="opts" aria-label={q.prompt}>
                   {q.options.filter((o) => !isOtherOption(o.label)).map((o) => (
                     <button
@@ -253,7 +253,7 @@ export function AskCard({ item, onAnswer, onEngage, refine }: Props) {
                   >
                     <span className="mark" />
                     <span className="txt">
-                      <span className="lb">{customOption(i)?.label ?? t("其他 —— 自行填写")}</span>
+                      <span className="lb">{customOption(i)?.label ?? t("chat.something_else_i_will_write")}</span>
                       {customOption(i)?.description && <span className="ds">{customOption(i)?.description}</span>}
                     </span>
                   </button>
@@ -263,10 +263,10 @@ export function AskCard({ item, onAnswer, onEngage, refine }: Props) {
                     inputRef={(el) => {
                       boxes.current[i] = el;
                     }}
-                    label={noteShown(i) ? t("补充说明（可选）") : (customOption(i)?.label ?? t("其他 —— 自行填写"))}
+                    label={noteShown(i) ? t("chat.note_optional") : (customOption(i)?.label ?? t("chat.something_else_i_will_write"))}
                     value={freeShown(i)}
                     readOnly={sealed}
-                    placeholder={noteShown(i) ? t("补充说明（可选），会随所选项一起发送") : t("或直接输入你的回答")}
+                    placeholder={noteShown(i) ? t("chat.add_a_note_optional_it") : t("chat.or_type_your_own_answer")}
                     onChange={(text) => type(i, text)}
                     onFocus={() => enterBox(i)}
                     onEnter={onEnter}
@@ -282,16 +282,16 @@ export function AskCard({ item, onAnswer, onEngage, refine }: Props) {
                 {item.recorded !== undefined ? (
                   item.recorded
                 ) : item.timedOut ? (
-                  <b>{t("等待超时，这个问题已被跳过")}</b>
+                  <b>{t("chat.nobody_answered_in_time_this")}</b>
                 ) : item.answeredElsewhere ? (
-                  <b>{answeredBy || t("已在其他窗口处理，请以最新运行状态为准。")}</b>
+                  <b>{answeredBy || t("chat.handled_in_another_window_refer")}</b>
                 ) : (
                   <>
                     {qs.map((q, i) => (
                       <span key={q.id}>
                         {i > 0 && "　·　"}
-                        <b>{q.header || t("问题 {n}", { n: i + 1 })}：</b>
-                        {chosen[i]?.length ? chosen[i].join("、") : t("未答")}
+                        <b>{q.header || t("chat.question_n", { n: i + 1 })}：</b>
+                        {chosen[i]?.length ? chosen[i].join("、") : t("chat.unanswered")}
                       </span>
                     ))}
                   </>
@@ -302,18 +302,18 @@ export function AskCard({ item, onAnswer, onEngage, refine }: Props) {
               <div className="ask-foot">
                 {skipIn !== null && (
                   <span className="ask-skip" role="timer" aria-live="off">
-                    {t("{time} 后自动跳过这个问题，点任意处保留", { time: skipIn < 60 ? t("{n} 秒", { n: skipIn }) : clock(skipIn) })}
+                    {t("chat.this_question_is_skipped_in", { time: skipIn < 60 ? t("common.n_s", { n: skipIn }) : clock(skipIn) })}
                   </span>
                 )}
                 {/* An answer batch with nothing selected is the kernel's explicit
                     "don't decide for me" path: it ends the turn rather than
                     feeding a prose dismissal back to the model. */}
                 <button className="dismiss" data-action="ask.answer" data-value="none" disabled={submitting} onClick={() => void send(qs.map(() => []))}>
-                  {t("先不选择，直接回复")}
+                  {t("chat.skip_the_choice_and_reply")}
                 </button>
                 {qs.length > 1 && tab > 0 && (
                   <button className="dismiss" data-action="ask.step" data-value="prev" disabled={submitting} onClick={() => setTab(tab - 1)}>
-                    {t("上一题")}
+                    {t("chat.previous")}
                   </button>
                 )}
                 {stepTo(tab, tab) >= 0 ? (
@@ -321,11 +321,11 @@ export function AskCard({ item, onAnswer, onEngage, refine }: Props) {
                   // waiting for this one to be answered first.
                   <button className="btn" data-primary data-action="ask.step" data-value="next"
                     disabled={!answered(tab) || submitting} onClick={() => setTab(stepTo(tab))}>
-                    {t("下一题（{i}/{n}）", { i: tab + 1, n: qs.length })}
+                    {t("chat.next_i_n", { i: tab + 1, n: qs.length })}
                   </button>
                 ) : (
                   <button className="btn" data-primary data-action="ask.answer" data-value="chosen" disabled={left > 0 || submitting} onClick={() => void send(qs.map((_, i) => selected(i)))}>
-                    {submitting ? t("正在提交…") : t("确认")}
+                    {submitting ? t("common.submitting") : t("common.confirm")}
                   </button>
                 )}
               </div>
@@ -347,9 +347,9 @@ function isOtherOption(label: string): boolean {
 function reasonLabel(reason: AskReason): string {
   switch (reason) {
     case "user_decision":
-      return t("需要你决定");
+      return t("chat.need_your_decision");
     case "missing_value":
-      return t("需要你补充信息");
+      return t("chat.need_more_information_from_you");
     default: {
       const unhandled: never = reason;
       return unhandled;

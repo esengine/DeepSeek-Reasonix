@@ -11,7 +11,7 @@ export function SkillPinView({ pin }: { pin: SkillPin }) {
         <StudioIcon name="spark" />
         <b>{pin.name}</b>
         {pin.args && <span className="skillpin-args">{pin.args}</span>}
-        <span className="skillpin-more">{t("技能说明")}</span>
+        <span className="skillpin-more">{t("chat.skill_text")}</span>
       </summary>
       {pin.description && <p className="skillpin-desc">{pin.description}</p>}
       <pre className="skillpin-text">{pin.text}</pre>

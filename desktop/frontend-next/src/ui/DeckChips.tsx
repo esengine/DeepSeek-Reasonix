@@ -51,8 +51,8 @@ export function DeckChips({ tasks, jobs, open, onOpen, onCancelJob, onReadJob, o
             type="button"
             className="studio-deckchip"
             data-action="deck.agents"
-            aria-label={t("子代理")}
-            title={t("子代理")}
+            aria-label={t("common.subagents")}
+            title={t("common.subagents")}
             data-live={liveAgents ? "" : undefined}
             aria-expanded={open === "agents"}
             aria-haspopup="dialog"
@@ -61,9 +61,9 @@ export function DeckChips({ tasks, jobs, open, onOpen, onCancelJob, onReadJob, o
             <StudioIcon name="branch" />
             {liveAgents > 0 && <i className="agent-live" aria-hidden="true" />}
             <b>{liveAgents || agentsIn(tasks)}</b>
-            <span>{liveAgents ? t("个子代理在跑") : t("个子代理 · 都结束了")}</span>
+            <span>{liveAgents ? t("subagent.subagents_running") : t("subagent.subagents_all_finished")}</span>
           </button>
-          <div className="studio-deck-pop" role="dialog" aria-label={t("子代理")}>
+          <div className="studio-deck-pop" role="dialog" aria-label={t("common.subagents")}>
             <AgentDeck tasks={tasks} onStop={onStopCall} onOpen={(id) => { shut(); void openTask(id); }} />
           </div>
         </div>
@@ -78,8 +78,8 @@ export function DeckChips({ tasks, jobs, open, onOpen, onCancelJob, onReadJob, o
             type="button"
             className="studio-deckchip"
             data-action="deck.jobs"
-            aria-label={t("后台任务")}
-            title={t("后台任务")}
+            aria-label={t("common.background_jobs")}
+            title={t("common.background_jobs")}
             data-live={liveJobs ? "" : undefined}
             data-failed={!liveJobs && failedJobs ? "" : undefined}
             aria-expanded={open === "jobs"}
@@ -88,9 +88,9 @@ export function DeckChips({ tasks, jobs, open, onOpen, onCancelJob, onReadJob, o
           >
             <StudioIcon name="play" />
             <b>{liveJobs || failedJobs || jobs.length}</b>
-            <span>{liveJobs ? t("个后台任务在跑") : failedJobs ? t("个后台任务失败了") : t("个后台任务已结束")}</span>
+            <span>{liveJobs ? t("subagent.background_jobs_running") : failedJobs ? t("subagent.background_jobs_failed") : t("subagent.background_jobs_done")}</span>
           </button>
-          <div className="studio-deck-pop" role="dialog" aria-label={t("后台任务")}>
+          <div className="studio-deck-pop" role="dialog" aria-label={t("common.background_jobs")}>
             <Jobs jobs={jobs} onCancel={onCancelJob} onView={onReadJob ? (id) => { shut(); setViewingJob(id); } : undefined} />
           </div>
         </div>

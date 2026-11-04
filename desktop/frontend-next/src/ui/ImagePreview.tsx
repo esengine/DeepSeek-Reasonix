@@ -15,8 +15,8 @@ export function ImagePreview({ src, name, className, children }: {
   useEffect(() => setOpen(false), [src]);
   return <>
     <button type="button" className={["image-trigger", className].filter(Boolean).join(" ")}
-      disabled={!src} data-action-click="image.open" data-action-mousedown="image.open" aria-label={t("查看图片 {name}", { name })}
-      title={t("查看图片 {name}", { name })} onClick={() => setOpen(true)}
+      disabled={!src} data-action-click="image.open" data-action-mousedown="image.open" aria-label={t("chat.preview_image_name", { name })}
+      title={t("chat.preview_image_name", { name })} onClick={() => setOpen(true)}
       onMouseDown={(ev) => { if (ev.detail > 1) ev.preventDefault(); }}>
       {children}
     </button>
@@ -56,9 +56,9 @@ function ImageViewer({ src, name, onClose }: { src: string; name: string; onClos
         }
       }}>
       <button type="button" ref={close} className="image-preview-close" data-action="image.close"
-        aria-label={t("关闭图片预览")} onClick={onClose}><StudioIcon name="close" /></button>
+        aria-label={t("chat.close_image_preview")} onClick={onClose}><StudioIcon name="close" /></button>
       <div className="image-preview-view" data-action="image.close" onClick={backdrop}>
-        {failed ? <p role="status">{t("图片不可用")}</p>
+        {failed ? <p role="status">{t("chat.image_unavailable")}</p>
           : <img src={src} alt={name} draggable={false} onError={() => setFailed(true)} />}
       </div>
       <div className="image-preview-name">{name}</div>

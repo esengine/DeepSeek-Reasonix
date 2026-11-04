@@ -15,13 +15,13 @@ export default function SurfaceActionCard({spec,callId,port}:{spec:SurfaceSpec;c
   const generation = useRef(0);
   const refresh = useCallback(async () => {
     const id = ++generation.current;
-    if (!port) {setError(t("界面已失效，请等待新的请求"));return;}
+    if (!port) {setError(t("chat.this_surface_has_expired_wait"));return;}
     try {const next=await port.surfaceActionState(callId);if(id===generation.current){setState(next);setError("");return next;}}
     catch(e){if(id===generation.current)setError(reason(e));}
   },[callId,port]);
   useEffect(()=>{void refresh();return()=>{generation.current++;};},[refresh]);
   return <SurfaceKit>{state ? <ActionSurface spec={spec} state={state} setState={setState} port={port} loadError={error} refresh={refresh}/>
-    : <Card withBorder padding="lg">{spec.title && <Title order={3} size="h4">{spec.title}</Title>}{error && <Stack><Alert color="red" role="alert">{error}</Alert><Button data-action="surface.refresh" onClick={()=>void refresh()}>{t("重试")}</Button></Stack>}</Card>}</SurfaceKit>;
+    : <Card withBorder padding="lg">{spec.title && <Title order={3} size="h4">{spec.title}</Title>}{error && <Stack><Alert color="red" role="alert">{error}</Alert><Button data-action="surface.refresh" onClick={()=>void refresh()}>{t("common.retry")}</Button></Stack>}</Card>}</SurfaceKit>;
 }
 
 function ActionSurface(props:{spec:SurfaceSpec;state:SurfaceActionRecord;setState:(state:SurfaceActionRecord)=>void;port?:SurfaceActionPort;loadError:string;refresh:()=>Promise<SurfaceActionRecord|undefined>}) {
@@ -60,8 +60,8 @@ function ActionForm({spec,runtime,state,setState,port,loadError,refresh}:{spec:S
       {spec.title && <Title order={3} size="h4">{spec.title}</Title>}
       <SurfaceView runtime={runtime} inputs disabled={!state||busy||sealed} actionDisabled={!valid} onAction={id=>void send(id)}/>
       {(error||loadError) && <Alert color="red" role="alert">{error||loadError}</Alert>}
-      {sealed ? <MantineGroup justify="space-between"><Text size="sm" c="dimmed">{state.status==="withdrawn"?t("已撤回"):t("已提交")}</Text>{state.canWithdraw && <Button variant="subtle" data-action="queue.cancel" data-target={state.itemId} disabled={busy} onClick={()=>void withdraw()}>{t("撤回")}</Button>}</MantineGroup>
-      : <MantineGroup><Button variant={delivery==="queue"?"light":"subtle"} data-action="surface.delivery" data-value="queue" disabled={busy} onClick={()=>setDelivery("queue")}>{t("排队")}</Button><Button variant={delivery==="steer"?"light":"subtle"} data-action="surface.delivery" data-value="steer" disabled={busy} onClick={()=>setDelivery("steer")}>{t("插入当前任务")}</Button></MantineGroup>}
+      {sealed ? <MantineGroup justify="space-between"><Text size="sm" c="dimmed">{state.status==="withdrawn"?t("chat.withdrawn"):t("chat.submitted")}</Text>{state.canWithdraw && <Button variant="subtle" data-action="queue.cancel" data-target={state.itemId} disabled={busy} onClick={()=>void withdraw()}>{t("chat.take_it_back")}</Button>}</MantineGroup>
+      : <MantineGroup><Button variant={delivery==="queue"?"light":"subtle"} data-action="surface.delivery" data-value="queue" disabled={busy} onClick={()=>setDelivery("queue")}>{t("common.queued")}</Button><Button variant={delivery==="steer"?"light":"subtle"} data-action="surface.delivery" data-value="steer" disabled={busy} onClick={()=>setDelivery("steer")}>{t("chat.steer_current_task")}</Button></MantineGroup>}
     </Stack>
   </Card>;
 }

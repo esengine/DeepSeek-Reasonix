@@ -25,11 +25,11 @@ function Picture({ data, path, view }: { data: ArrayBuffer; path: string; view: 
   }, [data, path]);
   return <>
     <div className="document-controls">
-      <button data-action="document.zoom" data-target={path} onClick={() => setZoom(Math.max(0.25, zoom - 0.25))} aria-label={t("缩小")}>−</button>
+      <button data-action="document.zoom" data-target={path} onClick={() => setZoom(Math.max(0.25, zoom - 0.25))} aria-label={t("chat.zoom_out")}>−</button>
       <button data-action="document.zoom" data-target={path} onClick={() => setZoom(1)}>{Math.round(zoom * 100)}%</button>
-      <button data-action="document.zoom" data-target={path} onClick={() => setZoom(Math.min(4, zoom + 0.25))} aria-label={t("放大")}>+</button>
+      <button data-action="document.zoom" data-target={path} onClick={() => setZoom(Math.min(4, zoom + 0.25))} aria-label={t("chat.zoom_in")}>+</button>
     </div>
-    {failed ? <p role="alert">{t("图片不可用")}</p> : <div className="document-picture">
+    {failed ? <p role="alert">{t("chat.image_unavailable")}</p> : <div className="document-picture">
       {url && <img src={url} alt={path} style={{ width: `${zoom * 100}%`, maxWidth: "none" }} onError={() => setFailed(true)} />}
     </div>}
   </>;
@@ -44,12 +44,12 @@ export default function DocumentPreview({ port, path, shown, refresh, onOpenExte
   const { info, data, error } = value ?? {};
   const officeWaiting = officeOn && info?.kind === "office" && !data && !error;
   useEffect(() => { if (officeWaiting) reload(); }, [officeWaiting, reload]);
-  const fallback = <p role="alert">{t("此文件暂不支持预览")}</p>;
-  let body = <p role="status">{t("正在读取…")}</p>;
+  const fallback = <p role="alert">{t("chat.preview_is_not_available_for")}</p>;
+  let body = <p role="status">{t("common.loading")}</p>;
   if (error) body = <p role="alert">{error}</p>;
   else if (info?.kind === "unsupported") body = fallback;
-  else if (info?.kind === "office" && !officeOn) body = <p role="status">{t("Office 文档预览已在设置中关闭")}</p>;
-  else if (info && info.size > info.limit) body = <p role="alert">{t("文件超过预览大小限制")}</p>;
+  else if (info?.kind === "office" && !officeOn) body = <p role="status">{t("chat.office_document_preview_is_turned")}</p>;
+  else if (info && info.size > info.limit) body = <p role="alert">{t("chat.this_file_exceeds_the_preview")}</p>;
   else if (data && info) {
     const text = () => new TextDecoder("utf-8", { fatal: true }).decode(data);
     switch (info.kind) {
@@ -64,11 +64,11 @@ export default function DocumentPreview({ port, path, shown, refresh, onOpenExte
   return <div className="document-preview">
     <div className="document-controls">
       {info && <span>{info.size.toLocaleString()} B</span>}
-      <button data-action="document.refresh" data-target={path} onClick={reload}>{t("刷新")}</button>
-      {onOpenExternal && <button data-action="workbench.open-file" data-target={path} onClick={onOpenExternal}>{t("用系统应用打开")}</button>}
+      <button data-action="document.refresh" data-target={path} onClick={reload}>{t("common.re_freeze")}</button>
+      {onOpenExternal && <button data-action="workbench.open-file" data-target={path} onClick={onOpenExternal}>{t("chat.open_in_system_application")}</button>}
     </div>
     <Boundary fallback={fallback} retryKey={info?.version}>
-      <Suspense fallback={<p role="status">{t("正在读取…")}</p>}>{body}</Suspense>
+      <Suspense fallback={<p role="status">{t("common.loading")}</p>}>{body}</Suspense>
     </Boundary>
   </div>;
 }

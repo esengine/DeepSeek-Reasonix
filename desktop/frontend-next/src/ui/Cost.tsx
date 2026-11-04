@@ -56,8 +56,8 @@ export function Cost({ tools, running = false }: { tools: Tool[]; running?: bool
       {/* No bar while it runs. The bar is a length against a known duration;
           growing one against a duration nobody knows yet is a progress bar that
           cannot be honest about what fraction it has drawn. */}
-      {!ms && live > 0 && <span className="live" title={t("这一步已经跑了多久")}>{seconds(live, 0)}</span>}
-      {left > 0 && <span title={t("这一步留在上下文里的估算 token")}>{tokens(left)}</span>}
+      {!ms && live > 0 && <span className="live" title={t("composer.how_long_this_step_has")}>{seconds(live, 0)}</span>}
+      {left > 0 && <span title={t("composer.estimated_tokens_this_step_leaves")}>{tokens(left)}</span>}
     </span>
   );
 }

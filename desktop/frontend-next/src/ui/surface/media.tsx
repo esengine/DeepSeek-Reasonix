@@ -15,7 +15,7 @@ export function OptionImage({ image, fit = "cover" }: { image?: SurfaceImage; fi
 
 function SourceLink({ source }: { source?: string }) {
   const url = imageSourceURL(source);
-  return url ? <a className="rich-option-source" href={url.href} target="_blank" rel="noopener noreferrer">{t("图片来源")} · {url.hostname}</a> : null;
+  return url ? <a className="rich-option-source" href={url.href} target="_blank" rel="noopener noreferrer">{t("chat.image_source")} · {url.hostname}</a> : null;
 }
 
 function PhotoCard({ src, image, fit }: { src: string; image: SurfaceImage; fit: "cover" | "contain" }) {
@@ -23,7 +23,7 @@ function PhotoCard({ src, image, fit }: { src: string; image: SurfaceImage; fit:
   return <div>
     <MediaImage src={src} alt={image.alt} fit={fit} open={() => setOpened(true)} />
     <SourceLink source={image.source} />
-    <Modal data-action-click="surface.explore" data-action-keydown="surface.explore" opened={opened} onClose={() => setOpened(false)} title={image.alt} size="xl" centered withinPortal={false} closeOnEscape={false} closeButtonProps={{ "aria-label": t("关闭图片") }} onKeyDown={event => { if (event.key === "Escape") { event.stopPropagation(); setOpened(false); } }}>
+    <Modal data-action-click="surface.explore" data-action-keydown="surface.explore" opened={opened} onClose={() => setOpened(false)} title={image.alt} size="xl" centered withinPortal={false} closeOnEscape={false} closeButtonProps={{ "aria-label": t("chat.close_image") }} onKeyDown={event => { if (event.key === "Escape") { event.stopPropagation(); setOpened(false); } }}>
       <MediaImage key={opened ? "open" : "closed"} src={src} alt={image.alt} fit="contain" />
       <SourceLink source={image.source} />
     </Modal>
@@ -34,6 +34,6 @@ function MediaImage({ src, alt, fit, open }: { src: string; alt: string; fit: "c
   const [attempt, setAttempt] = useState(0);
   const [failed, setFailed] = useState(false);
   const image = <img key={attempt} src={src} alt={alt} loading={open ? "lazy" : "eager"} decoding="async" style={{ objectFit: fit }} onError={() => setFailed(true)} />;
-  if (failed) return <div className="rich-option-media"><Stack gap="xs" align="center"><Text size="sm" c="dimmed">{t("图片暂不可用")}</Text><Button variant="subtle" size="xs" data-action="surface.explore" onClick={() => { setAttempt(value => value + 1); setFailed(false); }}>{t("重试图片")}</Button></Stack></div>;
-  return open ? <UnstyledButton className="rich-option-media rich-photo-trigger" aria-label={t("查看大图：{alt}", { alt })} data-action="surface.explore" onClick={open}>{image}</UnstyledButton> : <div className="rich-option-media rich-photo-viewer">{image}</div>;
+  if (failed) return <div className="rich-option-media"><Stack gap="xs" align="center"><Text size="sm" c="dimmed">{t("chat.image_unavailable_2")}</Text><Button variant="subtle" size="xs" data-action="surface.explore" onClick={() => { setAttempt(value => value + 1); setFailed(false); }}>{t("chat.retry_image")}</Button></Stack></div>;
+  return open ? <UnstyledButton className="rich-option-media rich-photo-trigger" aria-label={t("chat.view_image_alt", { alt })} data-action="surface.explore" onClick={open}>{image}</UnstyledButton> : <div className="rich-option-media rich-photo-viewer">{image}</div>;
 }

@@ -7,7 +7,7 @@ export function EffortShape({ field, level, className = "tip" }: { field?: strin
   if (!field) return null;
   return (
     <i className={className} data-effort-field={field}>
-      {t("当前接口类型会按 {field} 发送，例如 {example}", { field, example: effortExample(field, level || EXAMPLE_LEVEL) })}
+      {t("composer.this_interface_type_sends_the", { field, example: effortExample(field, level || EXAMPLE_LEVEL) })}
     </i>
   );
 }

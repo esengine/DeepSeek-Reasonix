@@ -141,7 +141,7 @@ function AgentRow({ task, status, onStop }: { task: Task; status: DelegateStatus
       </div>
       {now && (
         <p className="agent-row-note">
-          {t("subagent.doing", { what: t(activityVerb(now.name) ?? "执行") })} <code>{shortArgs(now.args ?? "")}</code>
+          {t("subagent.doing", { what: t(activityVerb(now.name) ?? "subagent.run") })} <code>{shortArgs(now.args ?? "")}</code>
         </p>
       )}
       {(status === "failed" || status === "refused") && task.tool.err && <p className="agent-row-note" data-tone="err">{task.tool.err}</p>}

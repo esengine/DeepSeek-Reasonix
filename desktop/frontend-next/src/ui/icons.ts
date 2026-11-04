@@ -37,7 +37,7 @@ const RUNNING: Record<string, string> = {
 // resolved to belongs in the mono tag beside it — and anything else with no
 // entry here is title-cased rather than passed through.
 export const labelFor = (tool: string) =>
-  LABEL[tool] ? t(LABEL[tool]) : (isCapability(tool) ? t("调用 MCP") : titleCase(tool));
+  LABEL[tool] ? t(LABEL[tool]) : (isCapability(tool) ? t("chat.call_mcp") : titleCase(tool));
 
 export const isCapability = (tool: string) => tool === "use_capability" || tool.startsWith("mcp__");
 
@@ -49,7 +49,7 @@ const titleCase = (id: string) =>
     .join(" ") || id;
 
 export function runLabelFor(tool: string) {
-  return t(RUNNING[categoryOf(tool)] ?? "正在处理…");
+  return t(RUNNING[categoryOf(tool)] ?? "common.working");
 }
 
 // A tool that changes the tree has to read as one: the neutral bucket drops the

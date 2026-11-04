@@ -12,10 +12,10 @@ export function ChartTable({ spec, id }: { spec: ChartSpec; id: string }) {
   return (
     <div className="chart-data">
       <button type="button" className="chart-toggle" data-action="chart.data" aria-expanded={open} aria-controls={id} onClick={() => setOpen(!open)}>
-        {open ? t("收起数据") : t("查看数据")}
+        {open ? t("chat.hide_data") : t("chat.view_data")}
       </button>
       {open && (
-        <div className="chart-table" id={id} tabIndex={0} role="region" aria-label={t("图表数据：{title}", { title: spec.title })}>
+        <div className="chart-table" id={id} tabIndex={0} role="region" aria-label={t("chat.chart_data_title", { title: spec.title })}>
           <table>
             <thead>
               <tr>{spec.data.columns.map((c) => <th key={c.name} scope="col" data-num={c.type === "number" || undefined}>{c.name}</th>)}</tr>
@@ -26,7 +26,7 @@ export function ChartTable({ spec, id }: { spec: ChartSpec; id: string }) {
               ))}
             </tbody>
           </table>
-          {rest > 0 && <div className="chart-more">{t("另有 {n} 行", { n: rest })}</div>}
+          {rest > 0 && <div className="chart-more">{t("chat.and_n_more_rows", { n: rest })}</div>}
         </div>
       )}
     </div>

@@ -23,12 +23,12 @@ export function BroughtResults({ items, ids, onDismiss, takeovers, onExtInvoke, 
   });
   if (drawn.length === 0) return null;
   return (
-    <section className="brought" aria-label={t("带到末尾的结果")}>
+    <section className="brought" aria-label={t("chat.brought_to_the_end")}>
       {drawn.map((it) => (
         <div className="brought-item" key={it.tool.id}>
           <div className="brought-bar">
-            <span>{t("带到末尾的结果")}</span>
-            <button type="button" className="brought-close" data-action="tool.unbring" aria-label={t("移除")} title={t("移除")} onClick={() => onDismiss(it.tool.id!)}>
+            <span>{t("chat.brought_to_the_end")}</span>
+            <button type="button" className="brought-close" data-action="tool.unbring" aria-label={t("common.remove")} title={t("common.remove")} onClick={() => onDismiss(it.tool.id!)}>
               <StudioIcon name="close" />
             </button>
           </div>

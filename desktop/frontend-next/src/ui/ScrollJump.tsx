@@ -48,12 +48,12 @@ export function ScrollJump({ scroll, flow, active, onJump }: {
     <div className="scrolljump">
       <div>
         {shown.up && (
-          <TooltipButton data-action="transcript.scroll" data-value="up" aria-label={t("回到会话顶部")} title={t("回到会话顶部（Shift+点击：上一个展开的块）")} onClick={(e) => onJump("up", e.shiftKey)}>
+          <TooltipButton data-action="transcript.scroll" data-value="up" aria-label={t("chat.back_to_top")} title={t("chat.back_to_top_shift_click")} onClick={(e) => onJump("up", e.shiftKey)}>
             <StudioIcon name="down" />
           </TooltipButton>
         )}
         {shown.down && (
-          <TooltipButton data-action="transcript.scroll" data-value="down" aria-label={t("跳到最新")} title={t("跳到最新（Shift+点击：下一个展开的块）")} onClick={(e) => onJump("down", e.shiftKey)}>
+          <TooltipButton data-action="transcript.scroll" data-value="down" aria-label={t("chat.jump_to_latest")} title={t("chat.jump_to_latest_shift_click")} onClick={(e) => onJump("down", e.shiftKey)}>
             <StudioIcon name="down" />
           </TooltipButton>
         )}

@@ -23,10 +23,10 @@ export function Agents({ tasks, onOpen }: { tasks: Task[]; onOpen?: (taskId: str
   if (tasks.length === 0) return null;
 
   return (
-    <Grp id="agents" name={t("子代理")}>
+    <Grp id="agents" name={t("common.subagents")}>
       <Row
-        k={t("数量")}
-        v={<span className={live ? "lk" : undefined}>{t("运行中 {live} / 共 {total}", { live, total: agentsIn(tasks) })}</span>}
+        k={t("subagent.count")}
+        v={<span className={live ? "lk" : undefined}>{t("subagent.live_running_total_total", { live, total: agentsIn(tasks) })}</span>}
       />
       <div className="agents">
         {shown.map((x) => {
@@ -54,8 +54,8 @@ export function Agents({ tasks, onOpen }: { tasks: Task[]; onOpen?: (taskId: str
                 className="ag-open"
                 data-action="agent.open"
                 data-target={x.id}
-                title={t("查看完整记录")}
-                aria-label={t("查看完整记录：{name}", { name: agentName(x) })}
+                title={t("subagent.open_full_transcript")}
+                aria-label={t("subagent.deck.open_full", { name: agentName(x) })}
                 onClick={() => onOpen(x.id)}
               >
                 <StudioIcon name="chevron" />

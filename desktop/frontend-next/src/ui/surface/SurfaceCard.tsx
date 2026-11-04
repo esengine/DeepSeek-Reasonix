@@ -34,6 +34,6 @@ export interface SurfaceCardProps {
 
 export function SurfaceCard(props: SurfaceCardProps) {
   const spec = parseSurface(props.item.ask.questions[0]?.surface);
-  if (!spec || props.item.surfaceExpired) return <div className="restore-notice" role="status" data-code="surface.expired">{t("界面已失效，请等待新的请求")}</div>;
+  if (!spec || props.item.surfaceExpired) return <div className="restore-notice" role="status" data-code="surface.expired">{t("chat.this_surface_has_expired_wait")}</div>;
   return <SurfaceMediaContext.Provider value={props.port}><NativeSurface key={props.item.ask.id} {...props} spec={spec} /></SurfaceMediaContext.Provider>;
 }

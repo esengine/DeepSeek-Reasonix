@@ -19,7 +19,7 @@ export function modelTooltip(models: ModelEntry[], current: string | undefined, 
 // modelLabel is how the composer names the session's model: the alias, else the
 // entry's short form, else the id without its provider.
 export function modelLabel(models: ModelEntry[], status: { modelRef?: string; label?: string } | null | undefined): string {
-  if (status?.modelRef === UNCONFIGURED_REF) return t("未连接");
+  if (status?.modelRef === UNCONFIGURED_REF) return t("common.not_connected");
   const m = models.find((x) => x.ref === status?.modelRef);
   return m?.modelAlias?.trim() || m?.modelShort || (status?.modelRef?.replace(/^[^/]+\//, "") ?? status?.label ?? "—");
 }
@@ -42,7 +42,7 @@ export function modelMenu(models: ModelEntry[], order: readonly string[] = [], c
           desc: m.modelAlias?.trim() ? m.model : undefined,
           status: modelHealthStatus(health[m.provider]),
           meta: t(KIND_LABEL[kind] ?? kind),
-          badge: m.vision ? t("读图") : undefined,
+          badge: m.vision ? t("common.reads_images") : undefined,
           mono,
           mark: m.mark,
         });
@@ -60,8 +60,8 @@ export function modelMenu(models: ModelEntry[], order: readonly string[] = [], c
   }
   out.push({
     value: "__manage-models",
-    label: t("管理模型与连接"),
-    desc: t("服务商、API 与可用模型"),
+    label: t("composer.manage_models_and_connections"),
+    desc: t("composer.providers_api_access_and_available"),
     plain: true,
     divide: out.length > 0,
   });

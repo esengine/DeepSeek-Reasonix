@@ -8,18 +8,18 @@ import { useShown } from "./shown";
 function lead(retry: RetryState): string {
   switch (retry.cause) {
     case "connection_closed":
-      return t("连接被中断");
+      return t("composer.connection_closed");
     case "timeout":
-      return t("服务器没有及时响应");
+      return t("composer.the_server_did_not_answer");
     case "upstream_status":
-      return t("服务器返回 HTTP {status}", { status: retry.status ?? 0 });
+      return t("composer.server_returned_http_status", { status: retry.status ?? 0 });
     case "stream_idle":
-      return t("回包停住了");
+      return t("composer.the_response_stalled");
     case "upstream_error":
-      return t("服务器在回包中途报错");
+      return t("composer.the_server_reported_an_error");
   }
-  if (retry.scope === "stream") return t("回包写到一半断了");
-  return retry.scope === "headers" ? t("请求没有成功") : t("连接已断开");
+  if (retry.scope === "stream") return t("composer.the_response_was_cut_mid");
+  return retry.scope === "headers" ? t("composer.the_request_did_not_succeed") : t("composer.connection_dropped");
 }
 
 function phase(retry: RetryState, elapsedMs: number): string {
@@ -28,14 +28,14 @@ function phase(retry: RetryState, elapsedMs: number): string {
   // A maximum of 0 is the kernel saying the user removed the limit.
   const vars = { attempt: retry.attempt, max: retry.max > 0 ? retry.max : "∞" };
   if (p.kind === "backoff") {
-    return replay ? t("{n}s 后重放 {attempt}/{max}", { ...vars, n: p.nextSecs }) : t("{n}s 后重试 {attempt}/{max}", { ...vars, n: p.nextSecs });
+    return replay ? t("composer.next_replay_attempt_max_in", { ...vars, n: p.nextSecs }) : t("composer.next_retry_attempt_max_in", { ...vars, n: p.nextSecs });
   }
   const secs = decimals(p.secs, 1);
-  if (replay) return t("重放 {attempt}/{max} · 等待服务器响应 {secs}s", { ...vars, secs });
+  if (replay) return t("composer.replay_attempt_max_waiting_for", { ...vars, secs });
   if (retry.timeoutSecs) {
-    return t("重试 {attempt}/{max} · 等待服务器响应 {secs}s（超过 {limit}s 视为无响应）", { ...vars, secs, limit: retry.timeoutSecs });
+    return t("composer.retry_attempt_max_waiting_for_2", { ...vars, secs, limit: retry.timeoutSecs });
   }
-  return t("重试 {attempt}/{max} · 等待服务器响应 {secs}s", { ...vars, secs });
+  return t("composer.retry_attempt_max_waiting_for", { ...vars, secs });
 }
 
 // Counted from the stamp the wait carries, not from mount: the notice of the
@@ -57,7 +57,7 @@ export function Await({ since, retry }: { since: number; retry?: Waiting["retry"
       <i />
       <i />
       <span className="t">
-        {retry ? `${lead(retry)} · ${phase(retry, elapsed)}` : t("等待回包 {secs}s", { secs: decimals(elapsed / 1000, 1) })}
+        {retry ? `${lead(retry)} · ${phase(retry, elapsed)}` : t("composer.waiting_for_a_response_secs", { secs: decimals(elapsed / 1000, 1) })}
       </span>
     </div>
   );

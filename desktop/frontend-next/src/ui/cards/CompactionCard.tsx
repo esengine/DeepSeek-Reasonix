@@ -14,12 +14,12 @@ import { tx } from "../../i18n/rich";
 // The literals live inside t() rather than in a table, which a module body
 // would freeze in the source language and a catalogue scanner would never see.
 function why(c: Compaction): string {
-  if (c.trigger === "manual") return t("手动触发");
+  if (c.trigger === "manual") return t("chat.triggered_by_hand");
   if (c.trigger !== "auto") return c.trigger ?? "";
-  if (!c.triggerTokens) return t("上下文达到阈值，自动触发");
+  if (!c.triggerTokens) return t("chat.automatic_a_context_threshold_was");
   const n = tokens(c.triggerTokens);
-  if (c.boundary === "capacity") return t("自动触发 · 输入到达窗口容量线 {n}", { n });
-  return t("自动触发 · 输入到达 {n}", { n });
+  if (c.boundary === "capacity") return t("chat.automatic_input_reached_the_windows", { n });
+  return t("chat.automatic_input_reached_n", { n });
 }
 
 // A digest reads as complete whatever it dropped, so the count of the fold's
@@ -37,18 +37,18 @@ function Coverage({ c }: { c: Compaction }) {
         <span className="k">✓</span>
         <span>
           {missing === 0 ? (
-            <>{tx("本段的 {n} 处改动均已写入简报", { n: <b>{required}</b> })}</>
+            <>{tx("chat.all_n_changes_made_here", { n: <b>{required}</b> })}</>
           ) : (
-            <>{tx("{kept}/{required} 处改动写进了简报", { kept: <b>{kept}</b>, required })}</>
+            <>{tx("chat.kept_required_changes_are_in", { kept: <b>{kept}</b>, required })}</>
           )}
-          {c.coverageBackstopped && t("（缺失部分由主机补全）")}
+          {c.coverageBackstopped && t("chat.gaps_kept_by_the_host")}
         </span>
       </div>
       {missing > 0 && (
         <div className="row">
           <span className="x">×</span>
           <span>
-            {tx("另有 {n} 处仅保留索引地址，需通过 recall 取回原文", { n: <b>{missing}</b> })}
+            {tx("chat.n_more_are_index_entries", { n: <b>{missing}</b> })}
           </span>
         </div>
       )}
@@ -78,14 +78,14 @@ function Remains({ c }: { c: Compaction }) {
       <div className="row">
         <span className="k">·</span>
         <span>
-          {tx("折叠后仍有 {n}：{top}", { n: <b>{tokens(r.total)}</b>, top })}
-          {big && big.tokens > 0 && <>{" · "}{big.tool ? t("最大的一条是 {tool} 的结果 {n}", { tool: big.tool, n: tokens(big.tokens) }) : t("最大的一条是 {role} 消息 {n}", { role: t(PART[big.role === "assistant" ? "reply" : big.role === "tool" ? "tool_output" : "user"] ?? big.role), n: tokens(big.tokens) })}</>}
+          {tx("chat.n_still_held_after_the", { n: <b>{tokens(r.total)}</b>, top })}
+          {big && big.tokens > 0 && <>{" · "}{big.tool ? t("chat.the_largest_is_a_tool", { tool: big.tool, n: tokens(big.tokens) }) : t("chat.the_largest_is_a_role", { role: t(PART[big.role === "assistant" ? "reply" : big.role === "tool" ? "tool_output" : "user"] ?? big.role), n: tokens(big.tokens) })}</>}
         </span>
       </div>
       {r.active > 0 && (
         <div className="row">
           <span className="k">·</span>
-          <span>{t("正在进行的这一轮占 {n}，折叠动不了它。", { n: tokens(r.active) })}</span>
+          <span>{t("chat.the_turn_in_progress_holds", { n: tokens(r.active) })}</span>
         </div>
       )}
     </div>
@@ -113,8 +113,8 @@ export function CompactionCard({ c, done }: { c: Compaction; done: boolean }) {
       </div>
       <div className="c">
         <div className="hl">
-          <span className={done ? "nm" : "nm shim"}>{t(!done ? "正在压缩…" : aborted ? "压缩未完成" : "压缩完成")}</span>
-          <span className="tag">{t("主机")}</span>
+          <span className={done ? "nm" : "nm shim"}>{t(!done ? "common.compacting" : aborted ? "chat.compaction_did_not_complete" : "chat.compaction_done")}</span>
+          <span className="tag">{t("chat.host")}</span>
           {c.trigger && <span className="arg" title={why(c)}>{why(c)}</span>}
         </div>
         {/* While it runs, the digest's own last line is the progress bar: a
@@ -129,9 +129,9 @@ export function CompactionCard({ c, done }: { c: Compaction; done: boolean }) {
               {(c.messages || before > 0) && (
                 <div className="comp-n">
                   {c.messages ? (
-                    <>{tx("正在将 {n} 条消息折叠为简报", { n: <b>{c.messages}</b> })}</>
+                    <>{tx("chat.folding_n_messages_into_a", { n: <b>{c.messages}</b> })}</>
                   ) : (
-                    t("正在折叠为简报")
+                    t("chat.folding_into_a_digest")
                   )}
                   {before > 0 && (
                     <>
@@ -158,9 +158,9 @@ export function CompactionCard({ c, done }: { c: Compaction; done: boolean }) {
               )}
               <div className="comp-n">
                 {c.messages ? (
-                  <>{tx("折叠了 {n} 条消息", { n: <b>{c.messages}</b> })}</>
+                  <>{tx("chat.folded_n_messages", { n: <b>{c.messages}</b> })}</>
                 ) : (
-                  t("本次未折叠任何内容")
+                  t("chat.this_pass_folded_nothing")
                 )}
                 {cause && <>{" · "}{t(cause)}</>}
                 {shrank && (
@@ -188,7 +188,7 @@ function Brief({ text }: { text: string }) {
   return (
     <details open={open} onToggle={(e) => e.currentTarget.open !== open && setOpen(e.currentTarget.open)}>
       <summary>
-        <span className="fold">{t("查看其后续使用的简报")}</span>
+        <span className="fold">{t("chat.see_the_digest_it_carries")}</span>
       </summary>
       <div className="txt">{text}</div>
     </details>

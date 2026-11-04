@@ -32,13 +32,13 @@ export function totalsOf(changes: readonly WorkspaceChange[]): ChangeTotals {
 export function ChangedFilesPill({ changes, onOpen }: { changes: readonly WorkspaceChange[]; onOpen: () => void }) {
   if (changes.length === 0) return null;
   const sum = totalsOf(changes);
-  const label = plural(sum.files, "1 个文件已更改", "{n} 个文件已更改", { n: tokens(sum.files) });
+  const label = plural(sum.files, "composer.n_1_file_changed", "composer.n_files_changed", { n: tokens(sum.files) });
   const aria = sum.counted
-    ? t("{label}，新增 {up} 行，删除 {down} 行，点击查看文件改动", { label, up: sum.insertions, down: sum.deletions })
-    : t("{label}，点击查看文件改动", { label });
+    ? t("composer.label_up_lines_added_down", { label, up: sum.insertions, down: sum.deletions })
+    : t("composer.label_open_file_changes", { label });
   return (
     <div className="changedpill-row">
-      <button className="changedpill" data-action="changes.open" aria-label={aria} title={t("查看文件改动")} onClick={onOpen}>
+      <button className="changedpill" data-action="changes.open" aria-label={aria} title={t("composer.view_file_changes")} onClick={onOpen}>
         <span>{label}</span>
         {sum.counted && (
           <>

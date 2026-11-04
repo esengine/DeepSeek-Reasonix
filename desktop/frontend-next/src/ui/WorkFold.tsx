@@ -17,10 +17,10 @@ export function WorkFold({ open, onOpen, calls, failures, words, children }: {
     <details className="activity-group work-fold" data-failed={failures ? "" : undefined} open={open} onToggle={(e) => e.currentTarget.open !== open && onOpen(e.currentTarget.open)}>
       <summary>
         <StudioIcon name={failures ? "warning" : "check"} className="activity-status-icon" />
-        <span className="activity-title">{t("中间过程")}</span>
-        {failures > 0 && <span className="activity-errors">{t("{n} 项失败", { n: failures })}</span>}
-        <span className="activity-count">{calls > 0 ? t("{count} 项操作", { count: calls }) : t("思考与中间文字")}</span>
-        {words > 0 && calls > 0 && <span className="activity-count">{t("文字 {count}", { count: words })}</span>}
+        <span className="activity-title">{t("chat.work_in_between")}</span>
+        {failures > 0 && <span className="activity-errors">{t("chat.n_failed", { n: failures })}</span>}
+        <span className="activity-count">{calls > 0 ? t("chat.count_actions", { count: calls }) : t("chat.thinking_and_notes")}</span>
+        {words > 0 && calls > 0 && <span className="activity-count">{t("chat.notes_count", { count: words })}</span>}
         <StudioIcon name="down" className="activity-fold-icon" />
       </summary>
       <div className="activity-body work-fold-body">{children}</div>

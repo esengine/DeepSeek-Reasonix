@@ -30,17 +30,17 @@ export function AgentTranscript({ task, onClose }: { task: Task; onClose: () => 
   const status = delegateStatusLabel(delegateStatus(running, tool));
   const body = (
     <div className="agent-tx-scrim" data-action="agent.close" role="presentation" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="agent-tx" ref={box} tabIndex={-1} role="dialog" aria-modal="true" aria-label={t("子代理完整记录：{name}", { name: agentName(task) })} data-status={running ? "running" : "done"}>
+      <div className="agent-tx" ref={box} tabIndex={-1} role="dialog" aria-modal="true" aria-label={t("subagent.full_transcript_of_subagent_name", { name: agentName(task) })} data-status={running ? "running" : "done"}>
         <div className="agent-tx-hd">
           <span className="who">{nestLabel(tool.profile?.name?.trim(), tool.profile?.count, children.length)}</span>
           {ranLabel(tool.profile) && <span className="ran" title={ranLabel(tool.profile)}>{ranLabel(tool.profile)}</span>}
           <span className="rt">{[status, tool.durationMs ? seconds(tool.durationMs) : ""].filter(Boolean).join(" · ")}</span>
-          <button type="button" className="agent-tx-x" data-action="agent.close" aria-label={t("关闭")} onClick={onClose}>
+          <button type="button" className="agent-tx-x" data-action="agent.close" aria-label={t("common.close")} onClick={onClose}>
             <StudioIcon name="close" />
           </button>
         </div>
         <div className="agent-tx-bd nest-bd">
-          {children.length === 0 && <p className="mnote">{t("还没有记录到步骤")}</p>}
+          {children.length === 0 && <p className="mnote">{t("subagent.no_steps_recorded_yet")}</p>}
           {children.map((c) => (
             <NestedCall key={c.id} tool={c} whole />
           ))}

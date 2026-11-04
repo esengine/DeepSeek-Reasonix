@@ -5,7 +5,7 @@ import { StudioIcon } from "../StudioIcon";
  *  does not have to find the card the model summarised. */
 export function BringCall({ onBring }: { onBring: () => void }) {
   return (
-    <button type="button" className="bring-call" data-action="tool.bring" aria-label={t("把结果带到末尾")} title={t("把结果带到末尾")} onClick={(event) => {
+    <button type="button" className="bring-call" data-action="tool.bring" aria-label={t("chat.show_this_result_again_at")} title={t("chat.show_this_result_again_at")} onClick={(event) => {
         // It sits in the call's heading line, which is also what folds the card.
         event.preventDefault();
         event.stopPropagation();

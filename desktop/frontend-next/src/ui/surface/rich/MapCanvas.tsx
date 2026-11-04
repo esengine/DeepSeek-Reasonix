@@ -27,13 +27,13 @@ export default function MapCanvas({ places, order, active, focusVersion, focus }
   useEffect(overview, [bounds, ready]);
   const point = places.find(p => p.value === active)?.location;
   useEffect(() => { if (point && ready && focusVersion > 0) ref.current?.jumpTo({ center: [point.longitude, point.latitude] }); }, [point?.longitude, point?.latitude, ready, focusVersion]);
-  return <div className="rich-map" aria-label={t("地点地图")}>
+  return <div className="rich-map" aria-label={t("chat.places_map")}>
     <Map key={attempt} ref={ref} initialViewState={{ longitude: coordinates[0]?.[0] ?? 0, latitude: coordinates[0]?.[1] ?? 0, zoom: 11 }} mapStyle={style} onLoad={() => { setReady(true); setError(false); }} onError={() => setError(true)} attributionControl={{ compact: false }}>
       <NavigationControl position="top-right" showCompass={false} />
       {selected.length > 1 && <Source id="visit-order" type="geojson" data={{ type: "Feature", properties: {}, geometry: { type: "LineString", coordinates: selected } }}><Layer id="visit-order-line" type="line" paint={{ "line-color": "#0d9488", "line-width": 3, "line-dasharray": [2, 2] }} /></Source>}
       {places.map(p => <Marker key={p.value} longitude={p.location!.longitude} latitude={p.location!.latitude} anchor="center"><Button className="rich-map-pin" radius="xl" color={active === p.value ? "dark" : "teal"} size="compact-sm" aria-label={p.label} data-action="surface.explore" onClick={() => focus(p.value)}>{order.includes(p.value) ? order.indexOf(p.value) + 1 : "+"}</Button></Marker>)}
     </Map>
-    <Button className="rich-map-overview" size="xs" variant="default" disabled={!ready || !coordinates.length} data-action="surface.explore" onClick={overview}>{t("查看全部地点")}</Button>
-    {error && <Alert className="rich-map-status" color="yellow" role="status">{t("部分地图内容加载失败，地点列表仍可用")} <Button size="xs" variant="subtle" data-action="surface.explore" onClick={() => { setReady(false); setError(false); setAttempt(v => v + 1); }}>{t("重试")}</Button></Alert>}
+    <Button className="rich-map-overview" size="xs" variant="default" disabled={!ready || !coordinates.length} data-action="surface.explore" onClick={overview}>{t("chat.show_all_places")}</Button>
+    {error && <Alert className="rich-map-status" color="yellow" role="status">{t("chat.some_map_content_could_not")} <Button size="xs" variant="subtle" data-action="surface.explore" onClick={() => { setReady(false); setError(false); setAttempt(v => v + 1); }}>{t("common.retry")}</Button></Alert>}
   </div>;
 }

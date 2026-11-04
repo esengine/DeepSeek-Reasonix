@@ -21,11 +21,11 @@ export function runningSendIntent(preferred: RunningMessageIntent, hasChips: boo
 
 export function sendHint(mode: SendShortcut, running: boolean, touch: boolean, intent: RunningMessageIntent = "steer"): string {
   if (running && intent === "followup") {
-    if (touch) return t("点按排队 · 回车换行");
-    if (mode === "modifier_enter") return t("{key} 排队 · Enter 换行", { key: chord("Enter") });
-    return t("Enter 排队 · Shift+Enter 换行");
+    if (touch) return t("composer.tap_queue_enter_for_a");
+    if (mode === "modifier_enter") return t("composer.key_to_queue_enter_for", { key: chord("Enter") });
+    return t("composer.enter_to_queue_shift_enter");
   }
-  if (touch) return t(running ? "点按插话 · 回车换行" : "点按发送 · 回车换行");
-  if (mode === "modifier_enter") return t(running ? "{key} 插话 · Enter 换行" : "{key} 发送 · Enter 换行", { key: chord("Enter") });
-  return t(running ? "Enter 插话 · Shift+Enter 换行" : "Enter 发送 · Shift+Enter 换行");
+  if (touch) return t(running ? "composer.tap_steer_enter_for_a" : "composer.tap_send_enter_for_a");
+  if (mode === "modifier_enter") return t(running ? "composer.key_to_steer_enter_for" : "composer.key_to_send_enter_for", { key: chord("Enter") });
+  return t(running ? "composer.enter_to_steer_shift_enter" : "composer.enter_to_send_shift_enter");
 }

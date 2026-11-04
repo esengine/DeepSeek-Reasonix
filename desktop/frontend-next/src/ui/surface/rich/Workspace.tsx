@@ -17,7 +17,7 @@ export function Workspace({ title, subtitle, badge, children }: { title?: string
     <Paper className="rich-workspace-body" radius="lg"><Stack gap="lg">
       <MantineGroup className="rich-heading" justify="space-between" align="flex-start" wrap="nowrap">
         <Stack gap={6}><Text className="rich-eyebrow" size="xs" fw={600} c="dimmed">{badge}</Text><Title order={3} className="rich-title">{title}</Title><Text c="dimmed" size="sm">{subtitle}</Text></Stack>
-        <Button variant="subtle" size="xs" data-action="surface.explore" onClick={() => setExpanded(v => !v)}>{expanded ? t("收起工作区") : t("展开工作区")}</Button>
+        <Button variant="subtle" size="xs" data-action="surface.explore" onClick={() => setExpanded(v => !v)}>{expanded ? t("chat.collapse_workspace") : t("chat.expand_workspace")}</Button>
       </MantineGroup>
       {children}
     </Stack></Paper>

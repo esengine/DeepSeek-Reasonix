@@ -20,18 +20,18 @@ import { Sym } from "../Sym";
 // the words they were written with.
 function gapPhrase(kind: string): string {
   switch (kind) {
-    case "unbacked_claim": return t("声称过但账本不支持");
-    case "unproven_criterion": return t("验收项没有证据");
-    case "missing_check": return t("预期的检查从未通过");
-    case "failed_verification": return t("验证失败");
-    case "stale_verification": return t("验证早于最后一次改动");
-    case "inconclusive_verification": return t("已运行，但退出码来自命令中的其他片段");
-    case "unverified_change": return t("有改动；没有主机能读作证据的检查");
-    case "unreviewed_change": return t("改动后未再检查");
-    case "declared_unverified": return t("自己申报未验证");
-    case "mod_effects_unobserved": return t("有 Claude Code mod 在运行；它写了什么不在主机观测范围内");
-    case "workspace_claim_yielded": return t("你在等待期间，另一个会话改动了本会话占用的路径；之前读到的内容可能已过时");
-    case "outside_observed_root": return t("写在了主机观测范围之外；这里没有任何证据能说明它留下了什么");
+    case "unbacked_claim": return t("chat.claimed_but_the_ledger_does");
+    case "unproven_criterion": return t("chat.an_acceptance_criterion_has_no");
+    case "missing_check": return t("chat.an_expected_check_never_passed");
+    case "failed_verification": return t("chat.verification_failed");
+    case "stale_verification": return t("chat.the_verification_predates_the_last");
+    case "inconclusive_verification": return t("chat.it_ran_but_the_exit");
+    case "unverified_change": return t("chat.changed_no_check_the_host");
+    case "unreviewed_change": return t("chat.changed_never_looked_at_again");
+    case "declared_unverified": return t("chat.declared_unverified_by_the_turn");
+    case "mod_effects_unobserved": return t("chat.a_claude_code_mod_was");
+    case "workspace_claim_yielded": return t("chat.another_session_wrote_under_this");
+    case "outside_observed_root": return t("chat.written_outside_the_folder_this");
     default: return kind;
   }
 }
@@ -53,7 +53,7 @@ function gapDetail(detail: string): string {
 // What carried a clean verdict, so "verified" is never an unsourced assertion.
 function evidence(r: Receipt): string[] {
   const out: string[] = [];
-  if (r.changes?.length) out.push(t("{n} 个文件", { n: r.changes.length }));
+  if (r.changes?.length) out.push(t("common.n_files", { n: r.changes.length }));
   for (const v of r.verifications ?? []) {
     if (v.passed && !v.stale && !v.inconclusive) out.push(v.command);
   }
@@ -66,7 +66,7 @@ function Verified({ r }: { r: Receipt }) {
   return (
     <div className="rc-ok">
       <span className="rc-tick">✓</span>
-      <span className="rc-t">{t("没有未经验证的部分")}</span>
+      <span className="rc-t">{t("chat.nothing_left_unverified")}</span>
       {parts.length > 0 && <span className="rc-src">{parts.join(" · ")}</span>}
     </div>
   );
@@ -88,8 +88,8 @@ export function ReceiptCard({ r }: { r: Receipt }) {
       </div>
       <div className="c">
         <div className="hl">
-          <span className="nm">{t("交付验收")}</span>
-          <span className="tag">{t("主机")}</span>
+          <span className="nm">{t("chat.delivery_receipt")}</span>
+          <span className="tag">{t("chat.host")}</span>
         </div>
         <div className="out">
           {clean && <Verified r={r} />}
@@ -99,11 +99,11 @@ export function ReceiptCard({ r }: { r: Receipt }) {
               {g.detail && <code className="gapd" title={g.detail}>{gapDetail(g.detail)}</code>}
             </div>
           ))}
-          {rest > 0 && <div className="rc-more">{t("另有 {n} 项", { n: rest })}</div>}
+          {rest > 0 && <div className="rc-more">{t("chat.and_n_more", { n: rest })}</div>}
           {declared.length > 0 && (
             <>
               {/* Volunteered, not found — so it carries no severity. */}
-              <div className="rc-hd">{t("这一轮自己说明的")}</div>
+              <div className="rc-hd">{t("chat.this_turn_said_so_itself")}</div>
               {declared.map((d, i) => (
                 <div className="find" key={d} style={{ "--i": gaps.length + i } as React.CSSProperties}>
                   <span className="t">{d}</span>
@@ -124,13 +124,13 @@ export function ReceiptCard({ r }: { r: Receipt }) {
 export function ReceiptHint({ r, open, onToggle }: { r: Receipt; open: boolean; onToggle: () => void }) {
   if (!r.severity) return null;
   const warn = r.severity === "warn";
-  const text = r.gaps?.length ? t("有未验证的改动") : t("这一轮自己说明了风险或未验证项");
-  const label = `${warn ? t("警告") : t("提示")}：${text}`;
+  const text = r.gaps?.length ? t("chat.unverified_changes") : t("chat.this_turn_declared_risks_or");
+  const label = `${warn ? t("chat.warning") : t("chat.notice")}：${text}`;
   return (
     <div className="rc" data-severity={r.severity}>
       <button
         type="button" className="rc-ok" data-action="chrome.receipt-line" aria-expanded={open} aria-label={label}
-        title={open ? t("收起交付验收") : t("点击查看交付验收：改了什么、哪些没有验证")}
+        title={open ? t("chat.collapse_the_delivery_receipt") : t("chat.click_to_see_the_delivery")}
         onClick={onToggle}
       >
         <span className="rc-tick" style={{ "--rc-c": warn ? "var(--warn-ink)" : "var(--muted)" } as React.CSSProperties}>{warn ? "!" : "•"}</span>

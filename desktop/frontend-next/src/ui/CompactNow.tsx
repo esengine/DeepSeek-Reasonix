@@ -37,14 +37,14 @@ export function CompactNow({ action }: { action: CompactAction }) {
   return (
     <div className="compact-now" ref={box}>
       <button ref={trigger} className="btn sm" data-action="compaction.confirm" disabled={action.busy} aria-expanded={asking} onClick={() => setAsking(true)}>
-        {action.pending ? t("正在压缩…") : t("立即压缩")}
+        {action.pending ? t("common.compacting") : t("composer.compact_now")}
       </button>
       {asking && (
-        <div className="wsconfirm" role="alertdialog" aria-label={t("压缩当前上下文？")}>
-          <div className="wsconfirm-t"><span className="q">{t("压缩当前上下文？")}</span><span className="h">{t("模型将依据摘要继续工作；完整对话记录会保留。")}</span></div>
+        <div className="wsconfirm" role="alertdialog" aria-label={t("composer.compact_the_current_context")}>
+          <div className="wsconfirm-t"><span className="q">{t("composer.compact_the_current_context")}</span><span className="h">{t("composer.the_model_will_continue_from")}</span></div>
           <div className="wsconfirm-a">
-            <button autoFocus data-action="layer.dismiss" onClick={cancel}>{t("取消")}</button>
-            <button data-action="compaction.now" disabled={action.busy} onClick={() => { close(); action.run(); trigger.current?.focus(); }}>{t("确认压缩")}</button>
+            <button autoFocus data-action="layer.dismiss" onClick={cancel}>{t("common.cancel")}</button>
+            <button data-action="compaction.now" disabled={action.busy} onClick={() => { close(); action.run(); trigger.current?.focus(); }}>{t("composer.confirm_compaction")}</button>
           </div>
         </div>
       )}

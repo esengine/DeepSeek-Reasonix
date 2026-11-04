@@ -39,35 +39,35 @@ export function SessionRef({ port }: { port: AgentPort }) {
     if (!state) return;
     const n = Number(draft);
     if (!Number.isInteger(n) || n < state.minTokens || n > state.maxTokens) {
-      return setError(t("请输入 {min} 到 {max} 之间的整数。", { min: state.minTokens, max: state.maxTokens }));
+      return setError(t("common.enter_a_whole_number_from", { min: state.minTokens, max: state.maxTokens }));
     }
     if (n !== state.tokens) void save(n);
   };
 
   const body = !state ? (
-    <div className="empty">{t("无法读取引用设置。")}</div>
+    <div className="empty">{t("composer.the_reference_settings_could_not")}</div>
   ) : (
     <div className="box">
       <div className="lrow threshold-row">
         <span className="tx">
-          <span className="lb">{t("引用的最大长度")}</span>
-          <span className="ds">{t("引用的历史会话会作为只读资料放进这条消息；超过上限时只保留最近的消息，并写明保留了多少。默认 {n} token。", { n: state.defaultTokens })}</span>
+          <span className="lb">{t("composer.largest_quote")}</span>
+          <span className="ds">{t("composer.a_referenced_conversation_goes_into", { n: state.defaultTokens })}</span>
         </span>
         <div className="threshold-control">
           <span className="unit-field">
-            <input type="text" inputMode="numeric" aria-label={t("引用的最大长度")} data-action-keydown="session-ref.tokens" data-action-change="session-ref.tokens"
+            <input type="text" inputMode="numeric" aria-label={t("composer.largest_quote")} data-action-keydown="session-ref.tokens" data-action-change="session-ref.tokens"
               value={draft} disabled={busy}
               onChange={(e) => setDraft(e.target.value.replace(/\D/g, ""))}
               onBlur={commit}
               onKeyDown={(e: KeyboardEvent<HTMLInputElement>) => { if (e.key === "Enter") e.currentTarget.blur(); }} />
             <i>token</i>
           </span>
-          <button type="button" className="btn" data-action="session-ref.reset" disabled={busy || state.tokens === state.defaultTokens} onClick={() => void save(0)}>{t("恢复默认")}</button>
+          <button type="button" className="btn" data-action="session-ref.reset" disabled={busy || state.tokens === state.defaultTokens} onClick={() => void save(0)}>{t("composer.restore_default")}</button>
         </div>
       </div>
       {error && <div className="why">{error}</div>}
     </div>
   );
 
-  return <Group id="session-ref" title={t("引用历史会话的长度")} hint={t("在输入框里引用一段历史会话时，最多给这条消息添加多少内容。")}>{body}</Group>;
+  return <Group id="session-ref" title={t("composer.size_of_a_referenced_conversation")} hint={t("composer.how_much_a_referenced_past")}>{body}</Group>;
 }

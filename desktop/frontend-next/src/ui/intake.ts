@@ -135,13 +135,13 @@ export function planTone(plan: IntakePlan): IntakeAction {
 export function planVerb(plan: IntakePlan): string {
   const images = plan.attach.length;
   const refs = refCount(plan);
-  if (images > 0 && refs > 0) return t("松手 → 附上 {a} 张图，引用 {r} 个文件", { a: images, r: refs });
-  if (images > 0) return t("松手 → 附上 {n} 张图", { n: images });
-  if (refs === 1 && plan.ref.length === 1) return t("松手 → 引用 {name}", { name: basename(plan.ref[0]) });
-  if (refs === 1) return t("松手 → 引用 1 个文件");
-  if (refs > 1) return t("松手 → 引用 {n} 个文件", { n: refs });
-  if (plan.insert !== "") return t("松手 → 插入到光标处");
-  return t("工作区外的文件引用不到 · 这里放不下");
+  if (images > 0 && refs > 0) return t("composer.release_to_attach_a_images", { a: images, r: refs });
+  if (images > 0) return t("composer.release_to_attach_n_images", { n: images });
+  if (refs === 1 && plan.ref.length === 1) return t("composer.release_to_reference_name", { name: basename(plan.ref[0]) });
+  if (refs === 1) return t("composer.release_to_reference_1_file");
+  if (refs > 1) return t("composer.release_to_reference_n_files", { n: refs });
+  if (plan.insert !== "") return t("composer.release_to_insert_at_the");
+  return t("composer.a_file_outside_the_workspace");
 }
 
 function basename(path: string): string {

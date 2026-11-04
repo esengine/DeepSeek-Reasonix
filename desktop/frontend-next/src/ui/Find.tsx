@@ -15,7 +15,7 @@ function Bar({ find, pending, failed }: { find: Finding; pending: boolean; faile
   }, [focus]);
 
   const asked = query.trim().length > 0;
-  const count = pending && asked ? failed ? t("部分历史尚未读取") : t("正在查找较早消息…") : total > 0 ? `${index + 1} / ${total}${capped ? "+" : ""}` : asked ? t("无结果") : "";
+  const count = pending && asked ? failed ? t("chat.some_history_has_not_been") : t("chat.searching_earlier_messages") : total > 0 ? `${index + 1} / ${total}${capped ? "+" : ""}` : asked ? t("chat.no_matches") : "";
 
   return (
     <div className="tfind" role="search">
@@ -31,8 +31,8 @@ function Bar({ find, pending, failed }: { find: Finding; pending: boolean; faile
         data-action-keydown="transcript.find"
         data-value="query"
         value={query}
-        placeholder={t("在这段对话里查找")}
-        aria-label={t("在这段对话里查找")}
+        placeholder={t("common.find_in_this_conversation")}
+        aria-label={t("common.find_in_this_conversation")}
         onChange={(ev) => onQuery(ev.target.value)}
         onKeyDown={(ev) => {
           if (ev.nativeEvent.isComposing) return;
@@ -51,8 +51,8 @@ function Bar({ find, pending, failed }: { find: Finding; pending: boolean; faile
         data-action="transcript.find"
         data-value="case"
         aria-pressed={caseSensitive}
-        aria-label={t("区分大小写")}
-        title={t("区分大小写")}
+        aria-label={t("common.match_case")}
+        title={t("common.match_case")}
         onClick={() => setMode({ caseSensitive: !caseSensitive })}
       >
         Aa
@@ -62,8 +62,8 @@ function Bar({ find, pending, failed }: { find: Finding; pending: boolean; faile
         data-action="transcript.find"
         data-value="regex"
         aria-pressed={regex}
-        aria-label={t("把查询当作正则表达式")}
-        title={t("把查询当作正则表达式")}
+        aria-label={t("chat.read_the_query_as_a")}
+        title={t("chat.read_the_query_as_a")}
         onClick={() => setMode({ regex: !regex })}
       >
         .*
@@ -76,8 +76,8 @@ function Bar({ find, pending, failed }: { find: Finding; pending: boolean; faile
         data-action="transcript.find"
         data-value="prev"
         disabled={total === 0}
-        aria-label={t("上一处")}
-        title={t("上一处")}
+        aria-label={t("chat.previous_match")}
+        title={t("chat.previous_match")}
         onClick={() => onStep(-1)}
       >
         <svg viewBox="0 0 16 16" aria-hidden="true">
@@ -89,15 +89,15 @@ function Bar({ find, pending, failed }: { find: Finding; pending: boolean; faile
         data-action="transcript.find"
         data-value="next"
         disabled={total === 0}
-        aria-label={t("下一处")}
-        title={t("下一处")}
+        aria-label={t("chat.next_match")}
+        title={t("chat.next_match")}
         onClick={() => onStep(1)}
       >
         <svg viewBox="0 0 16 16" aria-hidden="true">
           <path d="M4.4 6.4 8 10l3.6-3.6" />
         </svg>
       </button>
-      <button className="clr" data-action="transcript.find" data-value="close" aria-label={t("关闭查找")} onClick={onClose}>
+      <button className="clr" data-action="transcript.find" data-value="close" aria-label={t("chat.close_find")} onClick={onClose}>
         ×
       </button>
     </div>

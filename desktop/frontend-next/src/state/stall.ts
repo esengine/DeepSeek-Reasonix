@@ -38,9 +38,9 @@ export function foldStall(s: SessionState, ev: WireEvent | StallGesture | { kind
 }
 
 function pausedNote(stall?: Stall): string {
-  if (stall?.cause === "tokens") return t("任务已按设置暂停：自上次有进展以来的输入已达上下文窗口的 {n} 倍", { n: stall.tokenMultiple });
-  if (stall?.cause === "perseveration") return t("任务已按设置暂停：模型卡在重复输出同一段文字");
-  return t("任务已按设置暂停：连续 {n} 轮没有可观察的进展", { n: stall?.idleRounds ?? 0 });
+  if (stall?.cause === "tokens") return t("composer.paused_by_your_setting_input", { n: stall.tokenMultiple });
+  if (stall?.cause === "perseveration") return t("composer.paused_by_your_setting_the");
+  return t("composer.paused_by_your_setting_n", { n: stall?.idleRounds ?? 0 });
 }
 
 /** Whether the strip draws: a pause always, a running stall until muted. */

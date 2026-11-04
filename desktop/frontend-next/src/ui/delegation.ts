@@ -16,9 +16,9 @@ export const agentsOf = (tool: Tool): number => Math.max(tool.profile?.count ?? 
 // things into "64 subagents"; the number of delegates only ever comes from the
 // dispatch itself.
 export function nestLabel(who: string | undefined, count: number | undefined, steps: number): string {
-  if (count && count > 1) return t("{n} 个子代理 · {steps} 步", { n: count, steps });
-  if (who) return t("{name} 做了 {n} 步", { name: who, n: steps });
-  return t("子代理做了 {n} 步", { n: steps });
+  if (count && count > 1) return t("subagent.n_subagents_steps_steps", { n: count, steps });
+  if (who) return t("subagent.name_took_n_steps", { name: who, n: steps });
+  return t("subagent.the_subagent_took_n_steps", { n: steps });
 }
 
 // What a child ran on, as the kernel recorded it when the run started: the
@@ -42,9 +42,9 @@ export const delegateStatus = (running: boolean, tool: Tool): DelegateStatus =>
   running ? "running" : tool.refusalCode ? "refused" : toolFailed(tool) ? "failed" : "done";
 
 export const delegateStatusLabel = (status: DelegateStatus): string =>
-  status === "running" ? t("运行中") : status === "refused" ? t("未执行") : status === "failed" ? t("失败") : t("已交付");
+  status === "running" ? t("common.running") : status === "refused" ? t("subagent.state.not_run") : status === "failed" ? t("common.failed") : t("subagent.state.delivered");
 
 // What the kernel's own record says about one run, as opposed to the card's
 // reading above, which has only the progress stream to go on.
 export const delegateStateLabel = (state: SubagentState): string =>
-  state === "running" ? t("运行中") : state === "completed" ? t("已完成") : state === "cancelled" ? t("已取消") : state === "failed" ? t("失败") : t("已中断");
+  state === "running" ? t("common.running") : state === "completed" ? t("common.done_2") : state === "cancelled" ? t("common.cancelled") : state === "failed" ? t("common.failed") : t("common.interrupted");

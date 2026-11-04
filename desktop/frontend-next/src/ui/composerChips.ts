@@ -22,9 +22,9 @@ export type Chip =
 
 export function chipName(c: Chip): string {
   if (c.k === "session") return c.title;
-  if (c.k === "quote" && c.source) return t("引用 {name}", { name: c.source.split("/").at(-1) ?? c.source });
-  if (c.k === "quote") return c.turn === undefined ? t("引用回复") : t("引用第 {n} 轮回复", { n: c.turn });
-  return c.k === "paste" ? c.name ?? t("粘贴的文本") : c.name;
+  if (c.k === "quote" && c.source) return t("composer.quote_name", { name: c.source.split("/").at(-1) ?? c.source });
+  if (c.k === "quote") return c.turn === undefined ? t("composer.quoting_a_reply") : t("composer.quoting_turn_n", { n: c.turn });
+  return c.k === "paste" ? c.name ?? t("composer.pasted_text") : c.name;
 }
 
 // Provider-visible quotes use the kernel's turn identity when available.

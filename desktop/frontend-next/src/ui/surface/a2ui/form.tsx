@@ -35,9 +35,9 @@ function NativeForm({ item, onAnswer, spec, runtime }: Props & { runtime: Surfac
     {spec.title && <Title order={3} size="h4">{spec.title}</Title>}
     {!item.answeredElsewhere && <SurfaceView runtime={runtime} disabled={sealed || busy} inputs />}
     {error && <Alert color="red" role="alert">{error}</Alert>}
-    {sealed ? <Text size="sm" c="dimmed" fw={500}>{item.answeredElsewhere ? t("已在其他窗口处理，请以最新运行状态为准。") : item.surfaceValues ? t("已提交") : t("未选择")}</Text> : <MantineGroup justify="flex-end">
-      <Button variant="subtle" type="button" data-action="ask.answer" data-value="none" disabled={busy} onClick={() => void send(true)}>{t("暂不回答")}</Button>
-      <Button type="button" data-action="ask.answer" data-value="chosen" disabled={!valid || busy} onClick={() => void send()}>{busy ? t("正在提交…") : t("提交")}</Button>
+    {sealed ? <Text size="sm" c="dimmed" fw={500}>{item.answeredElsewhere ? t("chat.handled_in_another_window_refer") : item.surfaceValues ? t("chat.submitted") : t("common.no_selection")}</Text> : <MantineGroup justify="flex-end">
+      <Button variant="subtle" type="button" data-action="ask.answer" data-value="none" disabled={busy} onClick={() => void send(true)}>{t("chat.skip_for_now")}</Button>
+      <Button type="button" data-action="ask.answer" data-value="chosen" disabled={!valid || busy} onClick={() => void send()}>{busy ? t("common.submitting") : t("chat.submit")}</Button>
     </MantineGroup>}
     </Stack>
   </Card>;

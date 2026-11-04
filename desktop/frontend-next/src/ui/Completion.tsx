@@ -262,7 +262,7 @@ export function CompletionMenu({ id, items, active, kind, query, kb, onPick, onH
         className="mlist"
         id={id}
         role="listbox"
-        aria-label={t("补全")}
+        aria-label={t("common.completions")}
         data-kb={kb ? "" : undefined}
       >
         {items.map((it, i) => {
@@ -295,11 +295,11 @@ export function CompletionMenu({ id, items, active, kind, query, kb, onPick, onH
                 {it.hint && <span className="ds">{it.hint}</span>}
                 {it.args?.map((a) => (
                   <span className="ds" key={a.name}>
-                    {a.name} {t(a.required ? "必填" : "可选")}
+                    {a.name} {t(a.required ? "chat.required" : "common.optional")}
                     {a.description ? ` · ${a.description}` : ""}
                   </span>
                 ))}
-                {it.moreArgs ? <span className="ds">{t("还有 {n} 项", { n: it.moreArgs })}</span> : null}
+                {it.moreArgs ? <span className="ds">{t("chat.n_more", { n: it.moreArgs })}</span> : null}
               </span>
               {it.kind && <span className="rt">{t(KIND[it.kind] ?? it.kind)}</span>}
             </button>

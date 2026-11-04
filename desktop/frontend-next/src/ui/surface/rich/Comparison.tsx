@@ -21,26 +21,26 @@ export default function Comparison({ node, value, disabled, change }: RichInputP
   const priceDiffers = new Set(visible.map(o => JSON.stringify([o.currency, o.price]))).size > 1;
   const differing = (f: string) => new Set(visible.map(o => o.facts?.find(v => v.label === f)?.value)).size > 1;
   const select = (id: string) => { if (!disabled) change(node.field!.type === "choice" ? id : selected.includes(id) ? selected.filter(v => v !== id) : [...selected, id]); };
-  return <Workspace title={node.label} badge={t("对比与选择")} subtitle={t("筛选候选项，查看属性差异，再提交你的选择")}>
-    <MantineGroup justify="space-between"><TextInput style={{ flex: "1 1 200px" }} aria-label={t("搜索选项")} placeholder={t("搜索选项")} value={search} data-action="surface.explore" onChange={e => setSearch(e.target.value)} /><MantineGroup gap="xs">
-      <Button size="xs" variant={shortlist ? "light" : "subtle"} data-action="surface.explore" onClick={() => setShortlist(v => !v)}>{t("仅看已选")}</Button>
-      <Button size="xs" variant={table ? "light" : "subtle"} data-action="surface.explore" onClick={() => setTable(v => !v)}>{table ? t("卡片视图") : t("属性对比")}</Button>
-      {table && <Button size="xs" variant={differences ? "light" : "subtle"} aria-pressed={differences} data-action="surface.explore" onClick={() => setDifferences(v => !v)}>{t("仅看差异")}</Button>}
-      {comparablePrices && <Button size="xs" variant={ascending ? "light" : "subtle"} data-action="surface.explore" onClick={() => setAscending(v => !v)}>{t("按价格排序")}</Button>}
+  return <Workspace title={node.label} badge={t("chat.compare_choose")} subtitle={t("chat.filter_options_compare_the_details")}>
+    <MantineGroup justify="space-between"><TextInput style={{ flex: "1 1 200px" }} aria-label={t("chat.search_options")} placeholder={t("chat.search_options")} value={search} data-action="surface.explore" onChange={e => setSearch(e.target.value)} /><MantineGroup gap="xs">
+      <Button size="xs" variant={shortlist ? "light" : "subtle"} data-action="surface.explore" onClick={() => setShortlist(v => !v)}>{t("chat.selected_only")}</Button>
+      <Button size="xs" variant={table ? "light" : "subtle"} data-action="surface.explore" onClick={() => setTable(v => !v)}>{table ? t("chat.card_view") : t("chat.compare_details")}</Button>
+      {table && <Button size="xs" variant={differences ? "light" : "subtle"} aria-pressed={differences} data-action="surface.explore" onClick={() => setDifferences(v => !v)}>{t("chat.differences_only")}</Button>}
+      {comparablePrices && <Button size="xs" variant={ascending ? "light" : "subtle"} data-action="surface.explore" onClick={() => setAscending(v => !v)}>{t("chat.sort_by_price")}</Button>}
     </MantineGroup></MantineGroup>
-    <MantineGroup gap="xs"><Button size="xs" variant={!group ? "light" : "subtle"} data-action="surface.explore" onClick={() => setGroup("")}>{t("全部选项")}</Button>{groups.map(g => <Button key={g} size="xs" variant={group === g ? "light" : "subtle"} data-action="surface.explore" onClick={() => setGroup(g)}>{g}</Button>)}<Text c="dimmed" size="xs">{t("已选 {n} 个", { n: selected.length })}</Text></MantineGroup>
-    {!visible.length && <Text role="status" c="dimmed">{t("没有符合筛选条件的选项")}</Text>}
-    {table && visible.length > 0 ? <div className="rich-table"><table aria-label={node.label}><thead><tr><th>{t("属性")}</th>{visible.map(o => <th key={o.value}>{o.label}</th>)}</tr></thead><tbody>
-      {(!differences || priceDiffers) && <tr data-different={priceDiffers}><th>{t("价格")}</th>{visible.map(o => <td key={o.value}>{o.price === undefined ? "—" : `${o.currency} ${o.price.toLocaleString()}`}</td>)}</tr>}
+    <MantineGroup gap="xs"><Button size="xs" variant={!group ? "light" : "subtle"} data-action="surface.explore" onClick={() => setGroup("")}>{t("chat.all_options")}</Button>{groups.map(g => <Button key={g} size="xs" variant={group === g ? "light" : "subtle"} data-action="surface.explore" onClick={() => setGroup(g)}>{g}</Button>)}<Text c="dimmed" size="xs">{t("chat.n_selected", { n: selected.length })}</Text></MantineGroup>
+    {!visible.length && <Text role="status" c="dimmed">{t("chat.no_options_match_these_filters")}</Text>}
+    {table && visible.length > 0 ? <div className="rich-table"><table aria-label={node.label}><thead><tr><th>{t("chat.attribute")}</th>{visible.map(o => <th key={o.value}>{o.label}</th>)}</tr></thead><tbody>
+      {(!differences || priceDiffers) && <tr data-different={priceDiffers}><th>{t("chat.price")}</th>{visible.map(o => <td key={o.value}>{o.price === undefined ? "—" : `${o.currency} ${o.price.toLocaleString()}`}</td>)}</tr>}
       {facts.filter(f => !differences || differing(f)).map(f => <tr key={f} data-different={differing(f)}><th>{f}</th>{visible.map(o => <td key={o.value}>{o.facts?.find(v => v.label === f)?.value ?? "—"}</td>)}</tr>)}
-      <tr><th>{t("选择")}</th>{visible.map(o => <td key={o.value}><Button size="xs" variant={selected.includes(o.value) ? "light" : "filled"} disabled={disabled} aria-pressed={selected.includes(o.value)} aria-label={t("选择 {name}", { name: o.label })} data-action="surface.edit" data-target={node.key} onClick={() => select(o.value)}>{selected.includes(o.value) ? t("已选择") : t("选择")}</Button></td>)}</tr>
+      <tr><th>{t("chat.select")}</th>{visible.map(o => <td key={o.value}><Button size="xs" variant={selected.includes(o.value) ? "light" : "filled"} disabled={disabled} aria-pressed={selected.includes(o.value)} aria-label={t("chat.select_name", { name: o.label })} data-action="surface.edit" data-target={node.key} onClick={() => select(o.value)}>{selected.includes(o.value) ? t("chat.selected") : t("chat.select")}</Button></td>)}</tr>
     </tbody></table></div> : <div className="rich-products">{visible.map(o => <Paper className="rich-product" data-selected={selected.includes(o.value)} radius="lg" p="lg" key={o.value}>
-      <Stack h="100%" gap="md"><OptionImage image={o.image} fit="contain" /><MantineGroup justify="space-between">{o.group && <Badge color="gray" variant="light">{o.group}</Badge>}{selected.includes(o.value) && <Badge color="teal">{t("已选择")}</Badge>}</MantineGroup><Title order={4} size="xl">{o.label}</Title>
+      <Stack h="100%" gap="md"><OptionImage image={o.image} fit="contain" /><MantineGroup justify="space-between">{o.group && <Badge color="gray" variant="light">{o.group}</Badge>}{selected.includes(o.value) && <Badge color="teal">{t("chat.selected")}</Badge>}</MantineGroup><Title order={4} size="xl">{o.label}</Title>
         {o.price !== undefined && <Text className="rich-product-price" fw={600}><Text component="span" size="xs" c="dimmed">{o.currency}</Text> {o.price.toLocaleString()}</Text>}
         {o.description && <Text c="dimmed" size="sm">{o.description}</Text>}
         <Stack gap="xs" style={{ flex: 1 }}>{o.facts?.map(f => <MantineGroup key={f.label} justify="space-between" align="flex-start" wrap="nowrap"><Text c="dimmed" size="sm">{f.label}</Text><Text size="sm" ta="right">{f.value}</Text></MantineGroup>)}</Stack>
         {o.preview && <Text size="sm">{o.preview}</Text>}
-        <Button color="teal" variant={selected.includes(o.value) ? "light" : "filled"} disabled={disabled} aria-pressed={selected.includes(o.value)} aria-label={t("选择 {name}", { name: o.label })} data-action="surface.edit" data-target={node.key} onClick={() => select(o.value)}>{selected.includes(o.value) ? t("已选择") : t("选择")}</Button>
+        <Button color="teal" variant={selected.includes(o.value) ? "light" : "filled"} disabled={disabled} aria-pressed={selected.includes(o.value)} aria-label={t("chat.select_name", { name: o.label })} data-action="surface.edit" data-target={node.key} onClick={() => select(o.value)}>{selected.includes(o.value) ? t("chat.selected") : t("chat.select")}</Button>
       </Stack>
     </Paper>)}</div>}
   </Workspace>;

@@ -60,24 +60,24 @@ export const waiting = (queue: QueueSnapshot | null): QueueItem[] =>
 // which is how a row would render Chinese inside an English window.
 function label(it: QueueItem): string {
   if (it.origin === "host") {
-    if (it.state === "blocked") return t("后台 · 受阻");
-    if (it.state === "uncertain") return t("后台 · 状态不明");
-    return t("后台任务续接");
+    if (it.state === "blocked") return t("composer.background_blocked");
+    if (it.state === "uncertain") return t("composer.background_uncertain");
+    return t("composer.background_job_follow_on");
   }
   switch (it.state) {
     case "steer_accepted":
-      return t("插话已收");
+      return t("composer.steer_accepted");
     case "blocked":
-      return t("受阻");
+      return t("composer.blocked");
     case "uncertain":
-      return t("状态不明");
+      return t("composer.uncertain");
     default:
       // The kernel's own reason for not delivering mid-turn, read from what the
       // entry froze rather than guessed from its text.
-      if (it.images && it.state === "queued") return t("含图片，本轮结束后发送");
+      if (it.images && it.state === "queued") return t("composer.has_an_image_sent_when");
       // A steer the kernel could not admit is converted to a follow-up, so an
       // entry still calling itself one is waiting on a held queue, not refused.
-      return it.intent === "steer" ? t("插话排队") : t("排队");
+      return it.intent === "steer" ? t("composer.steer_queued") : t("common.queued");
   }
 }
 
@@ -182,37 +182,37 @@ export function Queue({ queue, running, onRead, onEdit, onMove, onCancel, onSend
   const ordinary = (it: QueueItem) => it.origin !== "host" && it.state === "queued" && it.intent === "followup";
 
   return (
-    <div className="queue" role="group" aria-label={t("待送达")}>
+    <div className="queue" role="group" aria-label={t("composer.pending")}>
       <div className="qhd">
-        <span className="lb">{t("待发送")}</span>
-        <span className="qcount" aria-label={t("{n} 条待发送", { n: items.length })}>{items.length}</span>
+        <span className="lb">{t("common.to_send")}</span>
+        <span className="qcount" aria-label={t("composer.n_to_send", { n: items.length })}>{items.length}</span>
         <span className="qsummary">
           {queue.readonly
-            ? t("会话暂时只读，消息已为你保留")
+            ? t("composer.this_conversation_is_temporarily_read")
             : queue.paused
-              ? t("发送已暂停")
+              ? t("composer.sending_is_paused")
               : running
-                ? t("尚未送达，可以改，也可以取回")
-                : t("正在送出…")}
+                ? t("composer.not_delivered_yet_edit_it")
+                : t("composer.sending")}
         </span>
-        {queue.readonly && <span className="qflag" data-ro="">{t("只读")}</span>}
+        {queue.readonly && <span className="qflag" data-ro="">{t("common.read_only")}</span>}
         {/* The kernel pauses itself when it recovers entries: something was
             said that no one has since re-confirmed. */}
-        {!!queue.recoveredCount && <span className="qflag" data-warn="">{t("恢复了 {n} 条", { n: queue.recoveredCount })}</span>}
+        {!!queue.recoveredCount && <span className="qflag" data-warn="">{t("composer.n_recovered", { n: queue.recoveredCount })}</span>}
         {/* Both limits refuse on their own, so a header that showed one of them
             would be wrong about the other exactly when it bites. */}
-        {capacityPressure && <span className="qcap" aria-label={t("队列容量")}>
+        {capacityPressure && <span className="qcap" aria-label={t("composer.queue_capacity")}>
           {cap.maxItems > 0 && <span data-full={fullItems || undefined}>
-            {t("条目")} {cap.items}/{cap.maxItems}
-            <Meter value={cap.items} max={cap.maxItems} label={t("条目")} full={fullItems} />
+            {t("composer.items")} {cap.items}/{cap.maxItems}
+            <Meter value={cap.items} max={cap.maxItems} label={t("composer.items")} full={fullItems} />
           </span>}
           <span data-full={fullBytes || undefined}>
-            {t("字节")} {size(cap.bytes)}/{size(cap.maxBytes)}
-            <Meter value={cap.bytes} max={cap.maxBytes} label={t("字节")} full={fullBytes} />
+            {t("composer.bytes")} {size(cap.bytes)}/{size(cap.maxBytes)}
+            <Meter value={cap.bytes} max={cap.maxBytes} label={t("composer.bytes")} full={fullBytes} />
           </span>
         </span>}
         <button className="qhold" data-action="queue.pause" onClick={() => onPause(!queue.paused)} disabled={queue.readonly}>
-          {queue.paused ? t("继续派发") : t("暂停派发")}
+          {queue.paused ? t("composer.release") : t("composer.hold")}
         </button>
       </div>
 
@@ -228,7 +228,7 @@ export function Queue({ queue, running, onRead, onEdit, onMove, onCancel, onSend
               {ordinary(it) ? (
                 <span className="qdot" aria-hidden="true" />
               ) : (
-                <span className="pill" data-tone={tone(it.state)} title={it.state === "steer_accepted" ? t("下个工具边界送入") : it.origin === "host" ? t("后台任务续接") : undefined}>
+                <span className="pill" data-tone={tone(it.state)} title={it.state === "steer_accepted" ? t("composer.goes_in_at_the_next") : it.origin === "host" ? t("composer.background_job_follow_on") : undefined}>
                   {label(it)}
                 </span>
               )}
@@ -260,25 +260,25 @@ export function Queue({ queue, running, onRead, onEdit, onMove, onCancel, onSend
                 // 被截断时看得见全文，是每一行都该有的，而不是可编辑的那些。
                 <Overflow className="pv" text={it.preview} />
               )}
-              {!!it.refs?.length && <span className="rf">{t("冻结 {n} 文件", { n: it.refs.length })}</span>}
+              {!!it.refs?.length && <span className="rf">{t("composer.n_frozen", { n: it.refs.length })}</span>}
               {why && (it.state === "blocked" || it.state === "uncertain") && <span className="qwhy" title={why}>{why}</span>}
               {unread?.id === it.id && (
                 <span className="qwhy" data-err="" role="alert">
-                  {t("无法读取该条的正文，未打开编辑：{why}", { why: unread.why })}
+                  {t("composer.could_not_read_this_entry", { why: unread.why })}
                 </span>
               )}
               {live && (
                 <span className="qacts">
                   {items.length > 1 && editable(it) && <>
-                    <button className="qmove" data-action="queue.move" data-target={it.id} data-value="up" onClick={() => onMove(it.id, i - 1)} disabled={i === 0} title={t("上移")} aria-label={t("上移")}>
+                    <button className="qmove" data-action="queue.move" data-target={it.id} data-value="up" onClick={() => onMove(it.id, i - 1)} disabled={i === 0} title={t("common.move_up")} aria-label={t("common.move_up")}>
                       <StudioIcon name="arrow" />
                     </button>
-                    <button className="qmove" data-action="queue.move" data-target={it.id} data-value="down" onClick={() => onMove(it.id, i + 1)} disabled={i === items.length - 1} title={t("下移")} aria-label={t("下移")}>
+                    <button className="qmove" data-action="queue.move" data-target={it.id} data-value="down" onClick={() => onMove(it.id, i + 1)} disabled={i === items.length - 1} title={t("common.move_down")} aria-label={t("common.move_down")}>
                       <StudioIcon name="arrow" data-flip="" />
                     </button>
                   </>}
                   {editable(it) && (
-                    <button data-action="queue.edit" data-target={it.id} onClick={() => void open(it.id)} title={t("编辑")} aria-label={t("改")}>
+                    <button data-action="queue.edit" data-target={it.id} onClick={() => void open(it.id)} title={t("common.edit")} aria-label={t("composer.edit")}>
                       <StudioIcon name="edit" />
                     </button>
                   )}
@@ -291,26 +291,26 @@ export function Queue({ queue, running, onRead, onEdit, onMove, onCancel, onSend
                       data-action="queue.send-now"
                       data-target={it.id}
                       onClick={() => onSendNow(it)}
-                      title={t("停止当前回复，把这条作为新一轮立即发出")}
+                      title={t("composer.stop_the_current_response_and")}
                     >
-                      {t("立即发送")}
+                      {t("composer.send_now")}
                     </button>
                   )}
                   {retryable(it) && (
-                    <button data-action="queue.retry" data-target={it.id} onClick={() => onRetry(it.id)} title={t("重试")}>
-                      {t("重试")}
+                    <button data-action="queue.retry" data-target={it.id} onClick={() => onRetry(it.id)} title={t("common.retry")}>
+                      {t("common.retry")}
                     </button>
                   )}
                   {/* Only an entry that quoted files has anything to re-freeze. */}
                   {editable(it) && !!it.refs?.length && (
-                    <button data-action="queue.refresh" data-target={it.id} onClick={() => onRefresh(it.id)} title={t("重新冻结引用的文件")}>
-                      {t("刷新")}
+                    <button data-action="queue.refresh" data-target={it.id} onClick={() => onRefresh(it.id)} title={t("composer.re_freeze_the_files_it")}>
+                      {t("common.re_freeze")}
                     </button>
                   )}
                 </span>
               )}
               {live && (
-                <button className="x" data-action="queue.cancel" data-target={it.id} onClick={() => onCancel(it.id)} title={t("取回")} aria-label={t("取回")}>
+                <button className="x" data-action="queue.cancel" data-target={it.id} onClick={() => onCancel(it.id)} title={t("composer.take_it_back")} aria-label={t("composer.take_it_back")}>
                   <StudioIcon name="rewind" />
                 </button>
               )}

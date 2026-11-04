@@ -56,7 +56,7 @@ export function ExtensionCard({ ext, onInvoke, onSubmit }: Props) {
   const missing = (ext.form?.fields ?? []).filter((f) => f.required && empty(values[f.key]));
   if (ext.code) return (
     <div className="restore-notice" role="status" data-code={ext.code}>
-      <span>{t("扩展界面已失效")}</span>
+      <span>{t("chat.extension_surface_expired")}</span>
       <span className="why">{ext.pluginId}/{ext.surfaceId}</span>
     </div>
   );
@@ -80,7 +80,7 @@ export function ExtensionCard({ ext, onInvoke, onSubmit }: Props) {
       <div className="c">
         <div className="hl">
           <span className="nm">{ext.card?.title || ext.form?.title || ext.pluginId}</span>
-          <span className="tag">{t("扩展 · {id}", { id: ext.pluginId })}</span>
+          <span className="tag">{t("chat.extension_id", { id: ext.pluginId })}</span>
         </div>
         <div className="out">
           {/* A composed surface draws itself from primitives. It comes first
@@ -144,7 +144,7 @@ export function ExtensionCard({ ext, onInvoke, onSubmit }: Props) {
 
           {ext.form && (
             <div className="extform" data-sealed={sent ? "" : undefined} aria-busy={pending}>
-              <div className="why">{t("这是插件「{id}」的提问；回答它不会批准任何工具调用或权限。", { id: ext.pluginId })}</div>
+              <div className="why">{t("chat.this_is_a_question_from", { id: ext.pluginId })}</div>
               {ext.form.message && <div className="exttext">{ext.form.message}</div>}
               {ext.form.fields.map((f) => (
                 <Field key={f.key} f={f} value={values[f.key]} sealed={sent || pending} onChange={(v) => set(f.key, v)} />
@@ -158,7 +158,7 @@ export function ExtensionCard({ ext, onInvoke, onSubmit }: Props) {
                     disabled={missing.length > 0 || pending || !onSubmit}
                     onClick={() => void submit()}
                   >
-                    {pending ? t("正在提交…") : missing.length ? t("提交（还差 {n} 项）", { n: missing.length }) : t("提交")}
+                    {pending ? t("common.submitting") : missing.length ? t("chat.submit_n_still_to_fill", { n: missing.length }) : t("chat.submit")}
                   </button>
                 </div>
               )}

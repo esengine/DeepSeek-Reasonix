@@ -37,7 +37,7 @@ export const goalStatusText = (status: string): string => (STATUS[status] ? t(ST
 export const goalStopText = (cause: string): string => (STOP[cause] ? t(STOP[cause]) : cause);
 
 export function goalUsageText(r: GoalRuntime): string {
-  return t("{turns} 轮 · {requests} 次请求 · {tokens} tokens · 用时 {time}", {
+  return t("plan.turns_turns_requests_requests_tokens", {
     turns: String(r.turnsUsed), requests: String(r.requestsUsed), tokens: tokens(r.tokensUsed), time: workTime(r.workDurationMs),
   });
 }

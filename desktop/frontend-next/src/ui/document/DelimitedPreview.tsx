@@ -22,8 +22,8 @@ export default function DelimitedPreview({ text, path, view }: { text: string; p
     worker.postMessage({ text, delimiter: /\.tsv$/i.test(path) ? "\t" : "," });
     return () => { window.clearTimeout(timer); worker.terminate(); };
   }, [text, path]);
-  if (result?.text !== text) return <p role="status">{t("正在读取…")}</p>;
-  if (result.error || !result.rows) return <p role="alert">{t("表格无法解析或超过 10 万个单元格，请切换源码查看")}</p>;
+  if (result?.text !== text) return <p role="status">{t("common.loading")}</p>;
+  if (result.error || !result.rows) return <p role="alert">{t("chat.the_table_is_invalid_or")}</p>;
   const rows = result.rows, height = 30;
   const start = Math.min(Math.max(0, rows.length - 1), Math.max(0, Math.floor(top / height) - 10));
   const visible = rows.slice(start, start + 80);

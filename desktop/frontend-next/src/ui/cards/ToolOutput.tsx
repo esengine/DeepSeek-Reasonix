@@ -320,7 +320,7 @@ function Clip({ id, deps, children }: { id?: string; deps?: unknown; children: R
       </div>
       {(over || open) && (
         <button className="out-more" onClick={toggle}>
-          {open ? t("收起") : t("展开全部")}
+          {open ? t("common.collapse") : t("chat.show_all")}
         </button>
       )}
     </div>
@@ -335,7 +335,7 @@ export function BoundNote({ bound }: { bound?: Bound }) {
   if (bound.kind === "spilled") {
     return (
       <div className="bound" title={bound.path}>
-        {t("完整输出已保存（{lines} 行 · {size}），模型按需读取", {
+        {t("chat.full_output_saved_to_disk", {
           lines: bound.lines ?? 0,
           size: bytes(bound.bytes ?? 0),
         })}
@@ -343,11 +343,11 @@ export function BoundNote({ bound }: { bound?: Bound }) {
     );
   }
   if (bound.kind === "windowed") {
-    return <div className="bound">{t("已显示开头部分，模型可继续往下读")}</div>;
+    return <div className="bound">{t("chat.showing_the_start_the_model")}</div>;
   }
   return (
     <div className="bound bad">
-      {t("模型只收到 {kept}，共 {size} — 其余未进入上下文", {
+      {t("chat.the_model_received_only_kept", {
         kept: bytes(bound.keptBytes ?? 0),
         size: bytes(bound.bytes ?? 0),
       })}

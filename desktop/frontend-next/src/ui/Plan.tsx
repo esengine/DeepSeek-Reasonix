@@ -30,7 +30,7 @@ export function Plan({ steps, shownElsewhere, paused }: { steps: PlanStep[]; sho
   return (
     <div className="block" data-b="plan">
       <div className="lbl">
-        {t("计划")}
+        {t("common.plan")}
         <span className="c">
           {done} / {steps.length}
         </span>
@@ -56,7 +56,7 @@ export function Plan({ steps, shownElsewhere, paused }: { steps: PlanStep[]; sho
                   ordinal, which was the number the model then cited back. */}
               <span
                 className="b"
-                aria-label={stepDone(st) ? t("已完成") : i === now ? t("进行中") : t("未开始")}
+                aria-label={stepDone(st) ? t("common.done_2") : i === now ? t("plan.step.now") : t("plan.step.todo")}
               />
               {/* The strike is painted as a background so it can be drawn rather
                   than appear, and an inline box is what makes it repeat per line

@@ -23,15 +23,15 @@ export function SideAskButton({ open, onToggle, panel }: { open: boolean; onTogg
         type="button"
         className="mode plain attach studio-attach"
         data-action="side.toggle"
-        aria-label={t("辅助会话")}
+        aria-label={t("composer.side_question")}
         aria-describedby={tip}
         aria-pressed={open}
         onClick={onToggle}
       >
         <StudioIcon name="chat" />
         <span className="studio-control-tip" id={tip} role="tooltip">
-          <b>{t("辅助会话")}</b>
-          <span>{t("只读 · 不写入主会话 · 关闭即丢")}</span>
+          <b>{t("composer.side_question")}</b>
+          <span>{t("composer.read_only_not_in_the")}</span>
         </span>
       </button>
       {open && host && panel ? createPortal(panel, host) : null}

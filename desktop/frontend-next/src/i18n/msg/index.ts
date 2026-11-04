@@ -1,4 +1,6 @@
+import { CHAT } from "./chat";
 import { COMMON } from "./common";
+import { COMPOSER } from "./composer";
 import { PLAN } from "./plan";
 import { SUBAGENT } from "./subagent";
 import type { Messages } from "./types";
@@ -7,7 +9,7 @@ export type { Message, Messages } from "./types";
 
 /** Every message by its key. Each area's table is one file; a key's first
  *  segment names the file it lives in. */
-export const AREAS: Record<string, Messages> = { common: COMMON, plan: PLAN, subagent: SUBAGENT };
+export const AREAS: Record<string, Messages> = { chat: CHAT, common: COMMON, composer: COMPOSER, plan: PLAN, subagent: SUBAGENT };
 
 export const MESSAGES: Messages = Object.assign({}, ...Object.values(AREAS));
 

@@ -665,16 +665,16 @@ const ActivityGroup = memo(function ActivityGroup({
     <details className="activity-group" data-failed={failures ? "" : undefined} data-running={running ? "" : undefined} open={open} onToggle={(event) => event.currentTarget.open !== open && setOpen(event.currentTarget.open)}>
       <summary>
         <StudioIcon name={running ? "clock" : failures ? "warning" : "check"} className="activity-status-icon" />
-        <span className="activity-title">{t("执行过程")}</span>
-        {running && <span className="activity-running">{t("{n} 项运行中", { n: runs })}</span>}
-        {failures > 0 && <span className="activity-errors">{t("{n} 项失败", { n: failures })}</span>}
-        <span className="activity-count">{t("{count} 项操作", { count: calls })}</span>
+        <span className="activity-title">{t("chat.activity")}</span>
+        {running && <span className="activity-running">{t("chat.n_running", { n: runs })}</span>}
+        {failures > 0 && <span className="activity-errors">{t("chat.n_failed", { n: failures })}</span>}
+        <span className="activity-count">{t("chat.count_actions", { count: calls })}</span>
         <StudioIcon name="down" className="activity-fold-icon" />
       </summary>
       <div className="activity-body">
         {fold.earlier.length > 0 && (
           <button type="button" className="activity-earlier" data-action="activity.earlier" aria-expanded={showEarlier} onClick={() => setShowEarlier((v) => !v)}>
-            <span>{t("更早的 {n} 项", { n: earlierCalls })}</span>
+            <span>{t("chat.n_earlier_steps", { n: earlierCalls })}</span>
             <span className="activity-earlier-kinds">{fold.kinds.map(([verb, n]) => `${verb} ${n}`).join(" · ")}</span>
             <StudioIcon name="down" />
           </button>

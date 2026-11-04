@@ -9,5 +9,5 @@ export function useNewAnswerAnchor(): string | null {
 }
 
 export function NewAnswerLine() {
-  return <div className="new-answer-line" role="separator" data-new-answer=""><span>{t("从这里开始有新回答")}</span></div>;
+  return <div className="new-answer-line" role="separator" data-new-answer=""><span>{t("chat.new_answers_start_here")}</span></div>;
 }

@@ -25,7 +25,7 @@ export function RememberChoice({ options, target, busy, disabled, onChoose }: {
       {options.map((choice) => (
         <button key={choice} className="btn" data-weak="" data-action="decision.tool" data-target={target} data-value={choice}
           aria-describedby={`remember-where-${target}`} disabled={disabled} onClick={() => onChoose(choice)}>
-          {busy === choice ? t("正在提交…") : t(LABEL[choice])}
+          {busy === choice ? t("common.submitting") : t(LABEL[choice])}
         </button>
       ))}
     </>

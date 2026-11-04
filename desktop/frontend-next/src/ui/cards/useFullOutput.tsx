@@ -32,7 +32,7 @@ export function useFullOutput(tool: StateTool, read?: ReadOutput) {
       }
       setGot({ phase: "done", text });
     } catch (e) {
-      setGot({ phase: "failed", why: reason(e) || t("取回失败，请重试") });
+      setGot({ phase: "failed", why: reason(e) || t("chat.could_not_fetch_it_try") });
     }
   };
   return {
@@ -44,13 +44,13 @@ export function useFullOutput(tool: StateTool, read?: ReadOutput) {
 function HiddenNote({ hidden, got, canLoad, onLoad }: { hidden: number; got: Fetch; canLoad: boolean; onLoad: () => void }) {
   return (
     <div className="bound">
-      {t("中间 {n} 个字符没有放在页面里，只显示了开头和结尾", { n: count(hidden) })}
+      {t("chat.n_characters_from_the_middle", { n: count(hidden) })}
       {canLoad && got.phase !== "loading" && (
         <button type="button" className="out-more" data-action="tool.show-full" onClick={onLoad}>
-          {got.phase === "failed" ? t("重试") : t("显示完整输出")}
+          {got.phase === "failed" ? t("common.retry") : t("chat.show_full_output")}
         </button>
       )}
-      {got.phase === "loading" && <span role="status"> {t("正在取回…")}</span>}
+      {got.phase === "loading" && <span role="status"> {t("chat.fetching")}</span>}
       {got.phase === "failed" && <span role="alert" className="bad"> {got.why}</span>}
     </div>
   );
