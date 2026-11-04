@@ -42,6 +42,7 @@
 - 扩展页顶部只留一个「添加…」，菜单里是「从市场安装 / 从仓库地址安装 / 从本机文件夹导入（直接弹出选文件夹）/ 接入外部服务」，当前做不了的项不出现；各分组自己的「添加」「接入服务」按钮去掉。「运行时」卡片移到已安装列表底部，变成一句说明（启用、停用、安装或更新后从下一轮生效），旁边保留「重载运行时」，用于改了扩展代码之后（62e1216f1）。
 - 扩展的插件包和外部服务每行只放三样：状态点 + 完整名字（不再截断）、下面一行说明、开关；更新、导出、移除、重连、登录收进展开后的详情；出错的行默认展开，原因和处理按钮直接可见（4807daf20）。
 - 技能行改为两行：第一行是名字（或命令）和标记——源文件夹有更新 / 副本被改过 / 两边都改过（警示色）、源文件夹不见了（红色）、子代理、只读——第二行是说明；右边是「我的 / 项目」标签和开关。外部服务出错只用红点表示，去掉左侧红竖线（c72d86a56）。
+- 市场安装确认改为带标题的卡片：标题写明「xx 版本 将安装以下内容」，右上角可关闭；已固定的版本先给绿色的「已按内容摘要核对」和摘要值，未固定或自己的版本仍先给提醒；提醒和「需要逐项看过」改成底色块，不再用左侧色条。内核的风险分组不变（7969fd7e8）。
 
 
 ---
@@ -91,3 +92,4 @@
 - The extensions page has one Add… menu: install from the market, from a repository, import a local folder (which opens the picker at once), or connect an external service, leaving out what this window cannot do now; the per-group Add and Connect buttons are gone. The runtime card moves to the foot of the list as one line on when changes apply, with Reload runtime beside it for edited extension code (62e1216f1).
 - Package and service rows carry three things: a status dot with the full name (never cut), one line under it, and the switch. Update, export, remove, reconnect and sign-in move into the row's body, and a row with a problem opens by itself (4807daf20).
 - Skill rows go on two lines: the name with its marks (drift from source in the warning colour, a missing source in red, subagent, read-only), then the description, with where it lives as a tag before the switch. A failed service is marked by its red dot alone; the red bar down its edge is gone (c72d86a56).
+- The market install confirmation is a titled card with a close button. A pinned version leads with the digest check in green and the digest beneath; an unpinned or own version keeps its warning first. Warnings and the read-each group are tinted boxes rather than edge bars; the kernel's risk grouping is unchanged (7969fd7e8).
