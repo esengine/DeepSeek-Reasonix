@@ -40,7 +40,7 @@ export function OwnInstall({ port, pkg, onBack, onInstalled, onViewInstalled, on
       .planOwnMarket({ slug: pkg.slug, replace })
       .then((p) => {
         if (!live()) return;
-        if (!p.ok) setError(p.error || p.next || t("该来源中没有可安装的内容"));
+        if (!p.ok) setError(p.error || p.next || t("ext.there_is_nothing_installable_at"));
         else setPlan(p);
       })
       .catch((e) => live() && setError(reason(e)))
@@ -73,7 +73,7 @@ export function OwnInstall({ port, pkg, onBack, onInstalled, onViewInstalled, on
 
   const back = (
     <button className="act" data-action="market.back" onClick={onBack}>
-      {t("返回我的发布")}
+      {t("ext.back_to_my_packages")}
     </button>
   );
 
@@ -87,9 +87,9 @@ export function OwnInstall({ port, pkg, onBack, onInstalled, onViewInstalled, on
         {installed.length > 0 && <ul className="mkt-installed">{installed.map((action, i) => <li key={`${action.kind}:${action.name}:${i}`}>{action.name}</li>)}</ul>}
         <div className="acts">
           {back}
-          {!done.ok && <button className="act" data-action="market.own-retry" onClick={() => setAttempt((n) => n + 1)}>{t("重试")}</button>}
+          {!done.ok && <button className="act" data-action="market.own-retry" onClick={() => setAttempt((n) => n + 1)}>{t("common.retry")}</button>}
           {location && onViewInstalled && (
-            <button className="act" data-action="market.view-installed" onClick={() => onViewInstalled(location.kind, location.name!)}>{t("查看已安装能力")}</button>
+            <button className="act" data-action="market.view-installed" onClick={() => onViewInstalled(location.kind, location.name!)}>{t("ext.view_installed_capabilities")}</button>
           )}
         </div>
       </div>
@@ -102,15 +102,15 @@ export function OwnInstall({ port, pkg, onBack, onInstalled, onViewInstalled, on
     <div className="mkt" aria-busy={busy}>
       {error ? (
         <div className="find" data-lvl="err" role="alert">
-          <span className="t">{t("无法预览 {name}", { name: pkg.slug })}</span>
+          <span className="t">{t("ext.could_not_preview_name", { name: pkg.slug })}</span>
           <span className="why">{error}</span>
         </div>
       ) : (
-        <div className="empty" role="status">{t("正在预览将安装的内容…")}</div>
+        <div className="empty" role="status">{t("ext.previewing_what_would_be_installed")}</div>
       )}
       <div className="acts">
         {back}
-        {error && !busy && <button className="act" data-action="market.own-retry" onClick={() => setAttempt((n) => n + 1)}>{t("重试")}</button>}
+        {error && !busy && <button className="act" data-action="market.own-retry" onClick={() => setAttempt((n) => n + 1)}>{t("common.retry")}</button>}
       </div>
     </div>
   );

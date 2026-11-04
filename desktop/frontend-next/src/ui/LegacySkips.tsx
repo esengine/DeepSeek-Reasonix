@@ -16,15 +16,15 @@ export function LegacySkips({ skipped }: { skipped: LegacySkip[] }) {
   if (skipped.length === 0) return null;
   return (
     <details className="legacy-skips">
-      <summary>{t("有 {n} 个会话没有导入", { n: skipped.length })}</summary>
-      <span className="hint">{t("这些文件仍在原位置，没有被移动或删除。可复制路径自行处理，或修复后重新导入。")}</span>
+      <summary>{t("ext.n_sessions_were_not_imported", { n: skipped.length })}</summary>
+      <span className="hint">{t("ext.these_files_are_still_where")}</span>
       {skipped.map((skip) => (
         <div className="item" key={skip.path}>
           <div className="l">
             <b>{skip.name}</b>
             <span className="hint">{t(REASON[skip.reason] ?? REASON.copy_failed)}</span>
             <span className="p">{skip.path}</span>
-            <CopyButton text={skip.path} label={t("复制路径")} ariaLabel={t("复制路径：{name}", { name: skip.name })} />
+            <CopyButton text={skip.path} label={t("common.copy_path")} ariaLabel={t("ext.copy_path_name", { name: skip.name })} />
           </div>
         </div>
       ))}

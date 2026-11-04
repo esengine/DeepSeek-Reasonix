@@ -14,8 +14,8 @@ export function UsageSettings({ port, onChanged }: { port: AgentPort; onChanged:
     <>
       <DisplayCurrency port={port} onChanged={() => { setRev((n) => n + 1); onChanged(); }} />
       <Group id="usage"
-        title={t("用量与成本")}
-        hint={t("本机记录的 token 用量与花费，仅保存在这台机器上，不会上传。命中缓存的输入按缓存价计费，因此命中率直接影响费用。")}
+        title={t("usage.usage_cost")}
+        hint={t("usage.token_usage_and_cost_recorded")}
       >
         <Usage key={rev} port={port} />
       </Group>

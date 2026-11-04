@@ -64,7 +64,7 @@ export function AgentPresets({ port, focusPersona = false }: { port: AgentPort; 
   const savedPreset = (version: AgentPresetVersion) => {
     setCatalog(prev => prev && ({ ...prev, presets: [...prev.presets.filter(v => v.definition.id !== version.definition.id), version] }));
     focusID.current = version.definition.id;
-    setSaved(t("已保存，新会话使用新版"));
+    setSaved(t("persona.saved_new_conversations_use_the"));
     close();
   };
   const importFile = async (file: File) => {
@@ -76,7 +76,7 @@ export function AgentPresets({ port, focusPersona = false }: { port: AgentPort; 
       const imported = await port.importAgentPreset(JSON.parse(await file.text()) as AgentComposition);
       if (!active()) return;
       open({ kind: "preset", entry: { definition: newPreset(imported.definition, catalog, true), version: null,
-        source: t("导入的预设"), diagnostics: imported.diagnostics } });
+        source: t("persona.imported_preset"), diagnostics: imported.diagnostics } });
     } catch (e) { if (active()) setError(reason(e)); }
   };
   return <section ref={root} id="set-agent-presets" data-setting="agent-presets" className="preset-workspace" data-editor={editor ? "" : undefined}>
@@ -84,7 +84,7 @@ export function AgentPresets({ port, focusPersona = false }: { port: AgentPort; 
       : editor?.kind === "preset" && catalog ? <PresetPage key={editor.key} entry={editor.entry} catalog={catalog} port={port}
         onClose={close} onSaved={savedPreset} onDeleted={() => {
           setCatalog(prev => prev && ({ ...prev, presets: prev.presets.filter(v => v.definition.id !== editor.entry.definition.id) }));
-          setSaved(t("预设已删除，已有会话保持原版本。")); close();
+          setSaved(t("persona.preset_deleted_existing_conversations_keep")); close();
         }} onCopy={d => copy(d, true)} onPersona={() => open({ kind: "persona" })} />
       : <div className="preset-list">
         {catalog ? <>
@@ -92,15 +92,15 @@ export function AgentPresets({ port, focusPersona = false }: { port: AgentPort; 
             onCopy={v => copy(v.definition, true)} onSelect={v => open({ kind: "preset", entry: { definition: v.definition, version: v,
               source: v.definition.id.startsWith("builtin:") ? t(v.definition.name) : v.definition.name } })} />
           <div className="composition-toolbar">
-            <label className="act preset-import">{t("导入预设文件（先预览，再保存）")}<input type="file" accept="application/json,.json"
-              aria-label={t("导入预设文件（先预览，再保存）")} data-action-change="agent-preset.import"
+            <label className="act preset-import">{t("persona.import_a_preset_file_preview")}<input type="file" accept="application/json,.json"
+              aria-label={t("persona.import_a_preset_file_preview")} data-action-change="agent-preset.import"
               onChange={e => { const file = e.target.files?.[0]; e.target.value = ""; if (file) void importFile(file); }} /></label>
-            <button className="act" data-action="agent-preset.reload" onClick={() => setRefresh(v => v + 1)}>{t("重新加载")}</button>
+            <button className="act" data-action="agent-preset.reload" onClick={() => setRefresh(v => v + 1)}>{t("common.reload")}</button>
           </div>
-          {current && <p className="ds">{t("当前会话")}: {current.id.startsWith("builtin:") ? t(current.name) : current.name} · {current.revision.slice(0, 12)} {t(current.started ? "已锁定" : "首次提交前可切换")}</p>}
+          {current && <p className="ds">{t("common.this_session")}: {current.id.startsWith("builtin:") ? t(current.name) : current.name} · {current.revision.slice(0, 12)} {t(current.started ? "persona.locked" : "persona.switch_before_the_first_message")}</p>}
           {catalog.diagnostics.map((d, i) => <p className="ds" key={i}>{d.module}: {d.detail}</p>)}
           <ApplyNote id="agent-presets" />
-        </> : <><CompositionPickerSetting /><div className="empty"><p>{error || t("读取预设中…")}</p><button className="act" data-action="agent-preset.reload" onClick={() => setRefresh(v => v + 1)}>{t("重新加载")}</button></div></>}
+        </> : <><CompositionPickerSetting /><div className="empty"><p>{error || t("persona.loading_presets")}</p><button className="act" data-action="agent-preset.reload" onClick={() => setRefresh(v => v + 1)}>{t("common.reload")}</button></div></>}
         {saved && <p className="find" role="status">{saved}</p>}
         {catalog && error && <p className="find" data-lvl="err" role="alert">{error}</p>}
       </div>}

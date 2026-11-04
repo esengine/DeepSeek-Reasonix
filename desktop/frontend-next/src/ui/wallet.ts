@@ -21,11 +21,11 @@ export function since(iso: string, now: number): string {
   const ms = now - Date.parse(iso);
   if (!Number.isFinite(ms)) return "";
   const minutes = Math.floor(Math.max(0, ms) / 60000);
-  if (minutes < 1) return t("刚刚");
-  if (minutes < 60) return t("{n} 分钟前", { n: minutes });
+  if (minutes < 1) return t("common.just_now");
+  if (minutes < 60) return t("usage.n_min_ago", { n: minutes });
   const hours = Math.floor(minutes / 60);
-  if (hours < 24) return t("{n} 小时前", { n: hours });
-  return t("{n} 天前", { n: Math.floor(hours / 24) });
+  if (hours < 24) return t("usage.n_h_ago", { n: hours });
+  return t("common.n_days_ago", { n: Math.floor(hours / 24) });
 }
 
 /** The account a wallet belongs to. modelRef is "<provider>/<model>", and the

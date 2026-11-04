@@ -212,10 +212,10 @@ export function Providers({ port, onChanged, onFailed, protocol, onProtocol, act
     if (!picked) setPicked(selected);
     rows.current.get(key)?.focus();
     if (writeProviderOrder(next)) onFailed("");
-    else onFailed(t("无法保存服务顺序。"));
+    else onFailed(t("models.could_not_save_the_service"));
   };
 
-  if (list === null) return <p className="acct-note">{t("正在读取…")}</p>;
+  if (list === null) return <p className="acct-note">{t("common.loading")}</p>;
 
   const query = q.trim().toLowerCase();
   const shown = accounts.filter((a) => !query || a.label.toLowerCase().includes(query) || a.host.toLowerCase().includes(query));
@@ -225,10 +225,10 @@ export function Providers({ port, onChanged, onFailed, protocol, onProtocol, act
       <div className="plist">
         {accounts.length >= SEARCH_FROM && (
           <input className="psearch" type="search" value={q} spellCheck={false}
-            placeholder={t("搜索已添加的服务")} aria-label={t("搜索已添加的服务")}
+            placeholder={t("models.search_added_services")} aria-label={t("models.search_added_services")}
             onChange={(e) => setQ(e.target.value)} />
         )}
-        <div className="plist-rows" role="group" aria-label={t("{n} 个来源", { n: accounts.length })}>
+        <div className="plist-rows" role="group" aria-label={t("models.n_sources", { n: accounts.length })}>
           {shown.map((a, index) => {
             const entries = Object.values(a.byKind);
             const dot = providerDot(entries);
@@ -237,8 +237,8 @@ export function Providers({ port, onChanged, onFailed, protocol, onProtocol, act
                 <div className="svcrow-wrap" data-selected="true" data-renaming="" key={a.key}>
                   <input className="svcrow-name" autoFocus maxLength={DISPLAY_NAME_MAX} spellCheck={false}
                     defaultValue={shownName(a) || a.derived} placeholder={a.derived}
-                    aria-label={t("重命名 {name}", { name: a.label })}
-                    title={t("回车保存，Esc 取消；留空恢复为「{name}」", { name: a.derived })}
+                    aria-label={t("models.rename_name", { name: a.label })}
+                    title={t("models.enter_saves_esc_cancels_leave", { name: a.derived })}
                     onFocus={(ev) => ev.currentTarget.select()}
                     onBlur={(ev) => void rename(a, ev.currentTarget.value)}
                     data-action-keydown="provider.rename" data-target={a.key}
@@ -283,26 +283,26 @@ export function Providers({ port, onChanged, onFailed, protocol, onProtocol, act
                 </button>
                 <span className="svcrow-order">
                   <button data-action="provider.rename-start" data-target={a.key} disabled={busy !== ""}
-                    aria-label={t("重命名 {name}（F2）", { name: a.label })}
-                    title={t("重命名 {name}（F2）", { name: a.label })}
+                    aria-label={t("models.rename_name_f2", { name: a.label })}
+                    title={t("models.rename_name_f2", { name: a.label })}
                     onClick={() => startRename(a.key)}><StudioIcon name="edit" /></button>
                   {index > 0 && <button data-action="provider.move" data-target={a.key} data-value="up"
-                    aria-label={t("上移 {name}（Alt+上方向键）", { name: a.label })}
-                    title={t("上移 {name}（Alt+上方向键）", { name: a.label })}
+                    aria-label={t("models.move_name_up_alt_up", { name: a.label })}
+                    title={t("models.move_name_up_alt_up", { name: a.label })}
                     onClick={() => move(a.key, -1)}><StudioIcon name="arrow" /></button>}
                   {index < shown.length - 1 && <button data-action="provider.move" data-target={a.key} data-value="down"
-                    aria-label={t("下移 {name}（Alt+下方向键）", { name: a.label })}
-                    title={t("下移 {name}（Alt+下方向键）", { name: a.label })}
+                    aria-label={t("models.move_name_down_alt_down", { name: a.label })}
+                    title={t("models.move_name_down_alt_down", { name: a.label })}
                     onClick={() => move(a.key, 1)}><StudioIcon name="arrow" className="svcrow-arrow-down" /></button>}
                 </span>
               </div>
             );
           })}
-          {accounts.length === 0 && <div className="empty">{t("尚未配置任何模型来源。")}</div>}
-          {accounts.length > 0 && shown.length === 0 && <div className="empty">{t("没有匹配的服务。")}</div>}
+          {accounts.length === 0 && <div className="empty">{t("models.no_model_sources_configured_yet")}</div>}
+          {accounts.length > 0 && shown.length === 0 && <div className="empty">{t("models.no_matching_service")}</div>}
         </div>
         <button className="act padd" data-action="provider.add-start" aria-pressed={adding} onClick={() => leave(() => setAdding(true))}>
-          <b aria-hidden="true">＋</b>{t("添加模型服务")}
+          <b aria-hidden="true">＋</b>{t("models.add_model_service")}
         </button>
       </div>
       <div className="pmain" ref={pmain}>
@@ -318,14 +318,14 @@ export function Providers({ port, onChanged, onFailed, protocol, onProtocol, act
               keepEditing();
             }}>
             <div className="wsconfirm-t">
-              <span className="q" id="provider-leave-q">{t("这个服务有未保存的更改")}</span>
-              <span className="h">{t("离开后这些更改会丢失。")}</span>
+              <span className="q" id="provider-leave-q">{t("models.this_service_has_unsaved_changes")}</span>
+              <span className="h">{t("common.they_will_be_lost_if")}</span>
             </div>
             <div className="wsconfirm-a">
-              <button autoFocus data-primary data-action="layer.dismiss" onClick={keepEditing}>{t("保留编辑")}</button>
+              <button autoFocus data-primary data-action="layer.dismiss" onClick={keepEditing}>{t("models.keep_editing")}</button>
               <button data-action="provider.discard-edits" data-danger
                 onClick={() => { const { go } = asked; setAsked(null); setDirty(false); go(); }}>
-                {t("放弃更改并离开")}
+                {t("models.discard_changes_and_leave")}
               </button>
             </div>
           </div>
@@ -354,7 +354,7 @@ export function Providers({ port, onChanged, onFailed, protocol, onProtocol, act
             onChecked={() => void reload()}
             onDirty={setDirty} />
         ) : (
-          <div className="empty">{t("添加一个模型服务后，在这里查看和修改它。")}</div>
+          <div className="empty">{t("models.add_a_model_service_to")}</div>
         )}
       </div>
     </div>

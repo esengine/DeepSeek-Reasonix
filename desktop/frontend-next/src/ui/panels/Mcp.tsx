@@ -22,29 +22,29 @@ export function Mcp({ servers, onOpen }: { servers: McpEntry[]; onOpen: () => vo
   const pending = waiting.filter((s) => s.state === "pending").length;
   const shown = waiting.slice(0, SHOWN);
   const count = pending === waiting.length
-    ? t("{n} 个待批准", { n: pending })
+    ? t("ext.n_awaiting_approval", { n: pending })
     : pending === 0
-      ? t("{n} 个无法连接", { n: waiting.length })
-      : t("{n} 个无法连接 · {p} 个待批准", { n: waiting.length - pending, p: pending });
+      ? t("ext.n_unreachable", { n: waiting.length })
+      : t("ext.n_unreachable_p_awaiting_approval", { n: waiting.length - pending, p: pending });
 
   return (
     <div className="block" data-b="mcp">
       <div className="lbl">
-        {t("外部服务")}<span className="c">{count}</span>
+        {t("ext.external_services")}<span className="c">{count}</span>
       </div>
       <div className="srvs">
         {shown.map((s) => (
           <button className="srvrow" key={s.name} data-action="chrome.settings" onClick={onOpen}
-            title={s.state === "pending" ? t("该服务由仓库声明，请在设置中决定是否允许其运行") : t("在设置的 MCP 面板中修复")}>
+            title={s.state === "pending" ? t("ext.this_server_was_declared_by") : t("ext.fix_it_in_the_mcp")}>
             <span className="hd">
               <i className="pip" data-s={s.state} />
               <span className="nm">{s.name}</span>
             </span>
-            <span className="fix">{s.state === "pending" ? t("去批准") : t("去修复")}</span>
+            <span className="fix">{s.state === "pending" ? t("ext.approve") : t("ext.fix")}</span>
           </button>
         ))}
         {waiting.length > shown.length && (
-          <span className="more">{t("另有 {n} 个，均在设置中", { n: waiting.length - shown.length })}</span>
+          <span className="more">{t("ext.n_more_all_in_settings", { n: waiting.length - shown.length })}</span>
         )}
       </div>
     </div>

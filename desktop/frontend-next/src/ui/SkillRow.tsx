@@ -22,8 +22,8 @@ export function SkillGroups({ skills, ...rowProps }: { skills: SkillEntry[] } & 
     groups.get(scope)!.push(sk);
   }
   return <>{Array.from(groups, ([scope, rows]) => rows.length > 0 && (
-    <section className="skgroup" key={scope} aria-label={t(SCOPE[scope] ?? scope) || t("其他")}>
-      <h4>{t(SCOPE[scope] ?? scope) || t("其他")}</h4>
+    <section className="skgroup" key={scope} aria-label={t(SCOPE[scope] ?? scope) || t("ext.other")}>
+      <h4>{t(SCOPE[scope] ?? scope) || t("ext.other")}</h4>
       {rows.map((sk) => <SkillRow key={sk.name} sk={sk} {...rowProps} />)}
     </section>
   ))}</>;
@@ -46,13 +46,13 @@ function triggerNote(sk: SkillEntry, implicit: boolean): { text: string; reachab
 function driftNote(source: SkillEntry["source"]): { text: string; says: string } | null {
   switch (source?.state) {
     case "source_changed":
-      return { text: t("源文件夹有更新"), says: t("来源文件夹里的内容比已安装的副本新：{path}", { path: source.path }) };
+      return { text: t("ext.source_has_changed"), says: t("ext.the_source_folder_has_newer", { path: source.path }) };
     case "local_edited":
-      return { text: t("副本被改过"), says: t("已安装的副本与安装时不同，来源文件夹没有变化：{path}", { path: source.path }) };
+      return { text: t("ext.copy_was_edited"), says: t("ext.the_installed_copy_differs_from", { path: source.path }) };
     case "diverged":
-      return { text: t("两边都改过"), says: t("已安装的副本和来源文件夹各自都改过：{path}", { path: source.path }) };
+      return { text: t("ext.both_changed"), says: t("ext.the_installed_copy_and_the", { path: source.path }) };
     case "source_missing":
-      return { text: t("源文件夹不见了"), says: t("找不到来源文件夹：{path}", { path: source.path }) };
+      return { text: t("ext.source_folder_is_gone"), says: t("ext.the_source_folder_cannot_be", { path: source.path }) };
   }
   return null;
 }
@@ -103,22 +103,22 @@ export function SkillRow({
     <div className="skrow" data-off={sk.enabled ? undefined : ""} data-local={local ? "" : undefined}>
       <span className="nm">
         {command || sk.name}
-        {command && <CopyButton key={command} text={command} iconOnly label={t("复制调用命令 {command}", { command })} />}
+        {command && <CopyButton key={command} text={command} iconOnly label={t("ext.copy_invocation_command", { command })} />}
       </span>
-      <span className="ds" title={sk.description || undefined}>{sk.description || t("未提供说明")}</span>
+      <span className="ds" title={sk.description || undefined}>{sk.description || t("ext.no_description_written")}</span>
       <span className="how">{note.text && <i className={note.reachable ? "w" : "w none"}>{t(note.text)}</i>}</span>
       <span className="face">
-        {sk.subagent && <i className="sa">{t("子代理")}</i>}
-        {sk.readOnly && <i className="ro">{t("只读")}</i>}
+        {sk.subagent && <i className="sa">{t("common.subagents")}</i>}
+        {sk.readOnly && <i className="ro">{t("common.read_only")}</i>}
         {drift && <i className="w" data-drift={sk.source?.state} title={drift.says} aria-label={`${drift.text}. ${drift.says}`}>{drift.text}</i>}
-        {updatable && !updating && <button className="act sm" data-action="skills.update-open" data-target={sk.name} onClick={() => setUpdating(true)}>{t("从源文件夹更新…")}</button>}
-        {removable && !removing && <button className="act sm" data-action="skills.remove-open" data-target={sk.name} onClick={() => setRemoving(true)}>{t("卸载…")}</button>}
+        {updatable && !updating && <button className="act sm" data-action="skills.update-open" data-target={sk.name} onClick={() => setUpdating(true)}>{t("ext.update_from_source_folder")}</button>}
+        {removable && !removing && <button className="act sm" data-action="skills.remove-open" data-target={sk.name} onClick={() => setRemoving(true)}>{t("ext.remove_2")}</button>}
       </span>
       <span className="sc" title={sk.path}>
         {sk.plugin || t(SCOPE[sk.scope ?? ""] ?? "") || sk.scope}
       </span>
       {local && <Exception onClear={() => act(() => port.clearSkillOverride(sk.name, root || undefined))} busy={busy} />}
-      <Switch data-action="skill.enabled" data-target={sk.name} on={sk.enabled} busy={busy} label={t(sk.enabled ? "关闭 {name}" : "启用 {name}", { name: sk.name })} onClick={toggle} />
+      <Switch data-action="skill.enabled" data-target={sk.name} on={sk.enabled} busy={busy} label={t(sk.enabled ? "common.disable_name" : "common.enable_name", { name: sk.name })} onClick={toggle} />
       <SkillDeclarations sk={sk} />
       <SkillSpecInfo sk={sk} />
     </div>

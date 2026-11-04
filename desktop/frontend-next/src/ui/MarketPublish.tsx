@@ -93,22 +93,22 @@ function PublishDraft({ port, handle, onMine, onApplying, initial }: PublishProp
         <div className="find" data-lvl="ok" role="status">
           {done.package.status === "private" ? (
             <>
-              <span className="t">{t("已保存 {slug} {version}，仅自己可见", { slug: done.package.slug, version: done.version })}</span>
-              <span className="why">{t("它不会进入审核，也不会在社区市场出现；在「我的发布」里可以安装它，或随时提交审核。")}</span>
+              <span className="t">{t("ext.saved_slug_version_visible_only", { slug: done.package.slug, version: done.version })}</span>
+              <span className="why">{t("ext.it_skips_review_and_never")}</span>
             </>
           ) : (
             <>
-              <span className="t">{t("已提交 {slug} {version}", { slug: done.package.slug, version: done.version })}</span>
-              <span className="why">{t("审核通过后会在社区市场公开；在「我的发布」里可以看到审核进度。")}</span>
+              <span className="t">{t("ext.submitted_slug_version", { slug: done.package.slug, version: done.version })}</span>
+              <span className="why">{t("ext.it_goes_public_in_the")}</span>
             </>
           )}
         </div>
         <div className="acts">
           <button className="act" data-action="market.publish-again" onClick={() => { setD(EMPTY); setDone(null); }}>
-            {t("再发布一个")}
+            {t("ext.publish_another")}
           </button>
           <button className="act" data-action="market.view" data-value="mine" data-primary onClick={onMine}>
-            {t("查看我的发布")}
+            {t("ext.see_my_packages")}
           </button>
         </div>
       </div>
@@ -121,74 +121,74 @@ function PublishDraft({ port, handle, onMine, onApplying, initial }: PublishProp
       onKeyDown={(event) => {
         if (event.key === "Enter" && !event.nativeEvent.isComposing && event.target instanceof HTMLInputElement && event.target.dataset.value !== "name" && event.target.dataset.value !== "source") event.preventDefault();
       }} onSubmit={(event) => { event.preventDefault(); if (ready) void submit(); }}>
-      {d.origin && <p className="mkt-sum">{t("从 {slug} 复用发布资料；请填写本次发布的来源地址。", { slug: d.origin })}</p>}
+      {d.origin && <p className="mkt-sum">{t("ext.reuse_details_from_slug_enter", { slug: d.origin })}</p>}
       <p className="mkt-sum">{t(d.private
-        ? "以 @{handle} 的名义保存，仅自己可见，不提交审核。只收来源地址，不上传文件。"
-        : "以 @{handle} 的名义提交，审核通过后公开。只收来源地址，不上传文件。", { handle })}</p>
-      <div className="seg" data-text role="radiogroup" aria-label={t("类型")} data-action-keydown="market.draft" data-value="kind" onKeyDown={arrowRadios}>
+        ? "ext.saved_as_handle_visible_only"
+        : "ext.submitted_as_handle_and_made", { handle })}</p>
+      <div className="seg" data-text role="radiogroup" aria-label={t("common.type")} data-action-keydown="market.draft" data-value="kind" onKeyDown={arrowRadios}>
         {KINDS.map(([id, name]) => (
           <button key={id} type="button" role="radio" aria-checked={d.kind === id} tabIndex={d.kind === id ? 0 : -1} disabled={busy} data-action="market.draft" data-value="kind" onClick={() => setD({ ...d, kind: id })}>
             {t(name)}
           </button>
         ))}
       </div>
-      {d.kind === "theme" && <p className="mkt-tip">{t("主题以插件包发布，包里只能有主题；带技能、钩子或 MCP 服务的包请按插件发布。")}</p>}
+      {d.kind === "theme" && <p className="mkt-tip">{t("ext.a_theme_is_published_as")}</p>}
       <div className="mkt-fields">
         <label>
-          <span>{t("名称")}</span>
+          <span>{t("common.name")}</span>
           <input value={d.name} disabled={busy} data-action="market.draft" data-value="name" placeholder="my-package" spellCheck={false} onChange={set("name")} />
-          <em className="mkt-tip">{t("小写字母、数字、点、下划线、连字符，最多 64 个字符。")}</em>
-          {d.origin && <em className="mkt-tip">{t("要发布这个包的新版本，请保持名称不变；改名会发布为另一个包。")}</em>}
+          <em className="mkt-tip">{t("ext.lowercase_letters_digits_dots_underscores")}</em>
+          {d.origin && <em className="mkt-tip">{t("ext.keep_this_name_to_publish")}</em>}
         </label>
         <label>
-          <span>{t("版本")}</span>
+          <span>{t("common.version")}</span>
           <input value={d.version} disabled={busy} data-action="market.draft" data-value="version" placeholder="0.1.0" spellCheck={false} onChange={set("version")} />
-          <em className="mkt-tip">{t("留空时新包为 0.1.0；更新只自动递增纯数字三段版本的补丁号，其他版本请明确填写。")}</em>
+          <em className="mkt-tip">{t("ext.blank_starts_a_new_package")}</em>
         </label>
         <label className="full">
-          <span>{t("来源地址")}</span>
+          <span>{t("ext.source_address")}</span>
           <input className="mono" value={d.source} disabled={busy} autoFocus={!!d.origin} data-action="market.draft" data-value="source" spellCheck={false} onChange={set("source")} />
           <em className="mkt-tip">{t(SOURCE_TIP[d.kind])}</em>
         </label>
         <label className="full">
-          <span>{t("摘要")}</span>
+          <span>{t("ext.summary")}</span>
           <input value={d.summary} disabled={busy} data-action="market.draft" data-value="summary" maxLength={200} onChange={set("summary")} />
         </label>
         <label className="full">
-          <span>{t("描述")}</span>
+          <span>{t("ext.description")}</span>
           <textarea rows={4} value={d.description} disabled={busy} data-action="market.draft" data-value="description" maxLength={8000} onChange={set("description")} />
         </label>
         <label>
-          <span>{t("仓库")}</span>
+          <span>{t("ext.repository")}</span>
           <input className="mono" value={d.repoUrl} disabled={busy} data-action="market.draft" data-value="repoUrl" placeholder="https://github.com/…" spellCheck={false} onChange={set("repoUrl")} />
         </label>
         {d.tags.map((tag, i) => <label key={i}>
-          <span>{t("已有标签 {n}", { n: i + 1 })}</span>
+          <span>{t("ext.existing_tag_n", { n: i + 1 })}</span>
           <input value={tag} disabled={busy} data-action="market.draft" data-value="tags" onChange={(e) => setD({ ...d, tags: d.tags.map((value, n) => n === i ? e.target.value : value) })} />
         </label>)}
         <label>
-          <span>{t(d.origin ? "新增标签" : "标签")}</span>
-          <input value={d.tagInput} disabled={busy} data-action="market.draft" data-value="tags" placeholder={t("用逗号分隔，最多 8 个")} onChange={set("tagInput")} />
+          <span>{t(d.origin ? "ext.add_tags" : "ext.tags")}</span>
+          <input value={d.tagInput} disabled={busy} data-action="market.draft" data-value="tags" placeholder={t("ext.comma_separated_up_to_8")} onChange={set("tagInput")} />
         </label>
       </div>
       <label className="mkt-seen">
         <input type="checkbox" data-action="market.draft" data-value="visibility" disabled={busy} checked={d.private} onChange={(e) => setD({ ...d, private: e.target.checked })} />
-        {t("仅自己可见：不提交审核，社区市场里只有你的账号能看到并安装")}
+        {t("ext.only_me_skip_review_in")}
       </label>
       {error && (
         <div className="find" data-lvl="err" role="alert">
-          <span className="t">{t("没有提交成功")}</span>
+          <span className="t">{t("ext.the_submission_did_not_go")}</span>
           <span className="why">{error}</span>
         </div>
       )}
       <div className="acts">
         <span className="note">
           {d.private
-            ? t("保存后只有你能看到；要公开时在「我的发布」里提交审核。")
-            : t("提交后进入审核队列；审核员会固定审核时的内容，之后只安装那一份。")}
+            ? t("ext.only_you_will_see_it")
+            : t("ext.it_joins_the_review_queue")}
         </span>
         <button type="submit" className="act" data-action="market.publish" data-primary disabled={!ready}>
-          {t(busy ? "提交中…" : d.private ? "保存为私有" : "提交审核")}
+          {t(busy ? "ext.submitting" : d.private ? "ext.save_as_private" : "ext.submit_for_review")}
         </button>
       </div>
     </form>
@@ -263,13 +263,13 @@ function PackageList({ port, onInstalled, onViewInstalled, onApplying, onPublish
     <div className="mkt" aria-busy={rows === null}>
       {error && (
         <div className="find" data-lvl="err" role="alert">
-          <span className="t">{t("无法读取我的发布")}</span>
+          <span className="t">{t("ext.could_not_read_your_packages")}</span>
           <span className="why">{error}</span>
-          <div className="acts"><button className="act" data-action="market.mine-retry" onClick={() => setAttempt((n) => n + 1)}>{t("重试")}</button></div>
+          <div className="acts"><button className="act" data-action="market.mine-retry" onClick={() => setAttempt((n) => n + 1)}>{t("common.retry")}</button></div>
         </div>
       )}
-      {rows === null && <div className="empty" role="status">{t("正在读取…")}</div>}
-      {rows?.length === 0 && !error && <div className="empty">{t("还没有发布过。")}</div>}
+      {rows === null && <div className="empty" role="status">{t("common.loading")}</div>}
+      {rows?.length === 0 && !error && <div className="empty">{t("ext.nothing_published_yet")}</div>}
       <ul className="mkt-list">
         {rows?.map((p) => {
           const [label, tone] = STATUS[p.status] ?? [p.status, undefined];
@@ -282,25 +282,25 @@ function PackageList({ port, onInstalled, onViewInstalled, onApplying, onPublish
                 <span className="nm">{p.name}</span>
                 <span className="mkt-kind">{t(KINDS.find(([k]) => k === p.kind)?.[1] ?? p.kind)}</span>
                 <span className="mkt-badge" data-tone={tone}>{t(label)}</span>
-                {p.installed && <span className="mkt-badge">{current ? t("已安装") : t("可更新")}</span>}
+                {p.installed && <span className="mkt-badge">{current ? t("ext.installed") : t("ext.update_available")}</span>}
               </span>
               {p.summary && <span className="mkt-sum">{p.summary}</span>}
               <span className="mkt-meta">
                 <span className="mkt-id">{`@${p.handle} · v${p.latestVersion}`}</span>
-                {p.status === "active" && <> · {t("{n} 次安装", { n: p.installCount })}</>}
-                {p.status === "private" && <> · {t("仅你可见，未提交审核")}</>}
+                {p.status === "active" && <> · {t("ext.n_installs", { n: p.installCount })}</>}
+                {p.status === "private" && <> · {t("ext.visible_only_to_you_not")}</>}
               </span>
               <span className="acts">
-                {onPublish && <button className="act" data-action="market.prepare-version" data-value={p.slug} disabled={sending === p.slug} onClick={() => onPublish(p)}>{t("发布新版本")}</button>}
-                {stuck && <span className="note">{t("技能不会被原地覆盖：先在「已安装」里移除旧版本，再回来安装")}</span>}
+                {onPublish && <button className="act" data-action="market.prepare-version" data-value={p.slug} disabled={sending === p.slug} onClick={() => onPublish(p)}>{t("ext.publish_new_version")}</button>}
+                {stuck && <span className="note">{t("ext.a_skill_is_not_overwritten")}</span>}
                 {p.status === "private" && (
                   <button className="act" data-action="market.submit" data-value={p.slug} disabled={!!sending} onClick={() => void submit(p.slug)}>
-                    {t(sending === p.slug ? "提交中…" : "提交审核")}
+                    {t(sending === p.slug ? "ext.submitting" : "ext.submit_for_review")}
                   </button>
                 )}
                 {!current && !stuck && (
                   <button className="act" data-action="market.own-inspect" data-value={p.slug} onClick={() => setOpen(p)}>
-                    {t(p.installed ? "查看更新内容" : "安装")}
+                    {t(p.installed ? "ext.see_what_the_update_installs" : "ext.install")}
                   </button>
                 )}
               </span>

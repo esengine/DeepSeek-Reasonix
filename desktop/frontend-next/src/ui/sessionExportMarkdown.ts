@@ -28,11 +28,11 @@ function turnOf(raw: unknown): { mine: boolean; text: string } | null {
 }
 
 export function toMarkdown(title: string, records: unknown[]): string {
-  const out: string[] = [`# ${title || t("会话")}`, ""];
+  const out: string[] = [`# ${title || t("common.session")}`, ""];
   for (const record of records) {
     const turn = turnOf(record);
     if (!turn) continue;
-    out.push(turn.mine ? `## ${t("我")}` : `## ${t("助手")}`, "", turn.text, "");
+    out.push(turn.mine ? `## ${t("data.me")}` : `## ${t("data.assistant")}`, "", turn.text, "");
   }
   return out.join("\n");
 }

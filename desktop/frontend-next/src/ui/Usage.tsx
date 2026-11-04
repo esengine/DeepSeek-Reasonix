@@ -194,14 +194,14 @@ interface BreakdownRow {
 // A chart is an overview; a phone cannot hover it precisely. This list is the
 // exact record underneath the same data, and it stays available on every input.
 function BreakdownTable({ rows, hourly }: { rows: BreakdownRow[]; hourly: boolean }) {
-  const title = hourly ? t("每小时明细") : t("每日明细");
+  const title = hourly ? t("usage.hourly_details") : t("usage.daily_details");
   return (
     <section className="ucard udaily">
-      <div className="ucard-h"><h3>{title}</h3><span className="hint">{hourly ? t("精确到每小时") : t("精确到每天")} <span className="utable-scroll-hint">{t("左右滚动查看")}</span></span></div>
+      <div className="ucard-h"><h3>{title}</h3><span className="hint">{hourly ? t("usage.exact_totals_for_each_hour") : t("usage.exact_totals_for_each_day")} <span className="utable-scroll-hint">{t("usage.scroll_sideways_for_all_columns")}</span></span></div>
       <div className="utable-wrap" role="region" aria-label={title} tabIndex={0}>
         <table className="utable" aria-label={title}>
           <thead>
-            <tr><th>{hourly ? t("时间") : t("日期")}</th><th>Tokens</th><th>{t("支出")}</th><th>{t("请求")}</th></tr>
+            <tr><th>{hourly ? t("usage.time") : t("usage.date")}</th><th>Tokens</th><th>{t("usage.spend")}</th><th>{t("common.requests")}</th></tr>
           </thead>
           <tbody>
             {rows.map((row) => (
@@ -210,7 +210,7 @@ function BreakdownTable({ rows, hourly }: { rows: BreakdownRow[]; hourly: boolea
                 <td>{count(row.total)}</td>
                 <td>
                   {moneyList(row.cost)}
-                  {row.estimateCost?.length ? <span className="udaily-est" title={t("按 API 价格估算的订阅用量，不是实际扣费")}>{t("等价估算")} {moneyList(row.estimateCost)}</span> : null}
+                  {row.estimateCost?.length ? <span className="udaily-est" title={t("usage.subscription_use_priced_at_api")}>{t("usage.api_priced_estimate")} {moneyList(row.estimateCost)}</span> : null}
                 </td>
                 <td>{count(row.requests)}</td>
               </tr>
@@ -341,13 +341,13 @@ export function Usage({ port }: { port: AgentPort }) {
   return (
     <div className="usage">
       <div className="uhead">
-        <div className="uranges" role="group" aria-label={t("时间范围")}>
-          <button type="button" data-action="usage.range.today" aria-pressed={range.kind === "today"} onClick={() => setRange({ kind: "today" })}>{t("今日")}</button>
+        <div className="uranges" role="group" aria-label={t("usage.time_range")}>
+          <button type="button" data-action="usage.range.today" aria-pressed={range.kind === "today"} onClick={() => setRange({ kind: "today" })}>{t("usage.today")}</button>
           {RANGES.map(([n, lbl]) => (
             <button key={n} type="button" aria-pressed={range.kind === "days" && range.days === n} onClick={() => setRange({ kind: "days", days: n })}>{t(lbl)}</button>
           ))}
-          <button type="button" aria-pressed={range.kind === "custom"} onClick={openCustom}>{t("自定义")}</button>
-          <button type="button" aria-pressed={range.kind === "month"} onClick={openMonth}>{t("自然月")}</button>
+          <button type="button" aria-pressed={range.kind === "custom"} onClick={openCustom}>{t("common.custom")}</button>
+          <button type="button" aria-pressed={range.kind === "month"} onClick={openMonth}>{t("usage.calendar_month")}</button>
         </div>
         {report && <span className="uspan">{report.from} → {report.to}</span>}
       </div>
@@ -360,15 +360,15 @@ export function Usage({ port }: { port: AgentPort }) {
             if (customValid) setRange({ kind: "custom", from: customFrom, to: customTo });
           }}
         >
-          <label>{t("开始日期")}<input data-action="usage.range.start" type="date" value={customFrom} max={customTo || undefined} onChange={(e) => setCustomFrom(e.target.value)} required /></label>
-          <label>{t("结束日期")}<input data-action="usage.range.end" type="date" value={customTo} min={customFrom || undefined} onChange={(e) => setCustomTo(e.target.value)} required /></label>
-          <button type="submit" disabled={!customValid}>{t("应用")}</button>
+          <label>{t("usage.start_date")}<input data-action="usage.range.start" type="date" value={customFrom} max={customTo || undefined} onChange={(e) => setCustomFrom(e.target.value)} required /></label>
+          <label>{t("usage.end_date")}<input data-action="usage.range.end" type="date" value={customTo} min={customFrom || undefined} onChange={(e) => setCustomTo(e.target.value)} required /></label>
+          <button type="submit" disabled={!customValid}>{t("usage.apply")}</button>
         </form>
       )}
 
       {range.kind === "month" && (
         <label className="umonth">
-          {t("选择月份")}
+          {t("usage.choose_month")}
           <input
             data-action="usage.range.month"
             type="month"
@@ -382,33 +382,33 @@ export function Usage({ port }: { port: AgentPort }) {
       )}
 
       {err && <div className="uerr" role="alert">{err}</div>}
-      {!report && !err && <div className="uwait">{t("正在读取记录…")}</div>}
+      {!report && !err && <div className="uwait">{t("usage.reading_the_records")}</div>}
       {report && <>
       <section className="uhero">
         {/* "Paid" is only honest while every folded quote came from the
             provider and priced its call. One fallback-priced or unpriced row
             and the label needs the caveat. */}
-        <div className="uhero-k">{report.costEstimated || report.costIncomplete ? t("花费") : t("实付")}</div>
+        <div className="uhero-k">{report.costEstimated || report.costIncomplete ? t("usage.spend_2") : t("usage.paid")}</div>
         <div className="uhero-fig">
           <div className="uhero-v">{moneyList(report.cost)}</div>
-          {pricedFrom && <span className="uhero-scope">{t("{day} 起 · {n} 天有记录", { day: pricedFrom.slice(5), n: priced.length })}</span>}
-          {report.costEstimated && <span className="uhero-scope">{t("含估算")}</span>}
+          {pricedFrom && <span className="uhero-scope">{t("usage.from_day_n_days_recorded", { day: pricedFrom.slice(5), n: priced.length })}</span>}
+          {report.costEstimated && <span className="uhero-scope">{t("usage.includes_estimates")}</span>}
           {report.costIncomplete && (
             <span className="uhero-scope">
-              {t("未定价调用未计入")}
-              {report.unpricedCalls ? ` · ${t("其中 {n} 笔未定价", { n: report.unpricedCalls })}` : null}
+              {t("usage.unpriced_calls_not_included")}
+              {report.unpricedCalls ? ` · ${t("usage.n_calls_unpriced", { n: report.unpricedCalls })}` : null}
             </span>
           )}
         </div>
         {report.estimateCost?.length ? (
           <div className="uhero-est">
-            <span className="uhero-estk">{t("等价估算")}</span>
+            <span className="uhero-estk">{t("usage.api_priced_estimate")}</span>
             <span className="uhero-estv">{moneyList(report.estimateCost)}</span>
-            <span className="uhero-scope">{t("订阅用量按 API 价格估算，不是实际扣费，也不计入上面的实付")}</span>
+            <span className="uhero-scope">{t("usage.subscription_use_priced_at_api_2")}</span>
           </div>
         ) : null}
         <p className="uhero-note">
-          {t("该时间段送入的 {tok} 输入 tokens 中，{rate}% 命中前缀缓存 —— 命中部分按缓存价计费，较未命中低一个数量级。", {
+          {t("usage.of_the_tok_input_tokens", {
             tok: fmtTokens(input), rate: hitRate.toFixed(1),
           })}
         </p>
@@ -416,18 +416,18 @@ export function Usage({ port }: { port: AgentPort }) {
 
       <div className="utiles">
         <div className="utile"><div className="k">Tokens</div><div className="v">{fmtTokens(report.tokens)}</div>
-          <div className="m">{t("其中输入 {n}：命中 {a} · 未命中 {b}", { n: fmtTokens(input), a: fmtTokens(report.cache_hit), b: fmtTokens(report.cache_miss) })}</div></div>
-        <div className="utile"><div className="k">{t("缓存命中率")}</div><div className="v">{hitRate.toFixed(1)}%</div>
-          <div className="m">{t("命中率越高成本越低 —— 需保持前缀稳定")}</div></div>
+          <div className="m">{t("usage.of_which_n_input_a", { n: fmtTokens(input), a: fmtTokens(report.cache_hit), b: fmtTokens(report.cache_miss) })}</div></div>
+        <div className="utile"><div className="k">{t("usage.cache_hit_rate")}</div><div className="v">{hitRate.toFixed(1)}%</div>
+          <div className="m">{t("usage.higher_is_cheaper_keep_the")}</div></div>
         <div className="utile"><div className="k">Turns</div><div className="v">{fmtTokens(report.turns)}</div>
-          <div className="m">{t("{n} 次 API 请求", { n: fmtTokens(report.requests) })}</div></div>
-        <div className="utile"><div className="k">{t("活跃天数")}</div><div className="v">{report.active_days}</div>
-          <div className="m">{t("共 {n} 天中", { n: report.daily.length })}</div></div>
+          <div className="m">{t("usage.n_api_requests", { n: fmtTokens(report.requests) })}</div></div>
+        <div className="utile"><div className="k">{t("usage.active_days")}</div><div className="v">{report.active_days}</div>
+          <div className="m">{t("usage.of_n_days", { n: report.daily.length })}</div></div>
       </div>
 
       <section className="ucard">
-        <div className="ucard-h"><h3>{hourView ? t("每小时用量") : t("每日用量")}</h3><span className="hint">{hourView ? t("悬停查看某个小时") : t("悬停查看某天")}</span></div>
-        <Plot points={usagePoints} label={(v) => fmtTokens(Math.round(v))} aria={hourView ? t("每小时 tokens") : t("每日 tokens")} />
+        <div className="ucard-h"><h3>{hourView ? t("usage.hourly_usage") : t("usage.daily_usage")}</h3><span className="hint">{hourView ? t("usage.hover_for_an_hour") : t("usage.hover_for_a_day")}</span></div>
+        <Plot points={usagePoints} label={(v) => fmtTokens(Math.round(v))} aria={hourView ? t("usage.hourly_tokens") : t("usage.daily_tokens")} />
       </section>
 
       <BreakdownTable rows={hourView ? hourRows : dayRows} hourly={hourView} />
@@ -437,18 +437,18 @@ export function Usage({ port }: { port: AgentPort }) {
           them apart everywhere else would be undone by one merged plot. */}
       {currencies.map((code, at) => (
         <section className="ucard" key={code}>
-          <div className="ucard-h"><h3>{hourView ? t("每小时支出") : t("每日支出")}</h3><span className="hint">{code}</span></div>
-          <p className="ucard-s">{t("与用量分开画：两者量纲不同，共用一根轴会读错")}</p>
+          <div className="ucard-h"><h3>{hourView ? t("usage.hourly_spend") : t("usage.daily_spend")}</h3><span className="hint">{code}</span></div>
+          <p className="ucard-s">{t("usage.drawn_apart_from_usage_different")}</p>
           <Plot
             points={hourView
               ? visibleHours.map((h) => ({ key: h.hour, axis: h.hour, tip: h.hour, value: Number(h.cost?.find((c) => c.currency === code)?.amount ?? 0) }))
               : priced.filter((d) => d.cost?.some((c) => c.currency === code)).map((d) => ({ key: d.day, axis: d.day.slice(5), tip: d.day, value: Number(d.cost?.find((c) => c.currency === code)?.amount ?? 0) }))}
             label={(v) => money(v, code)}
-            aria={hourView ? t("每小时支出") : t("每日支出")}
+            aria={hourView ? t("usage.hourly_spend") : t("usage.daily_spend")}
           />
           {at === currencies.length - 1 && unpricedDays > 0 && (
             <div className="unote">
-              {t("另有 {n} 天有用量但没有成本记录 —— 不是那几天没花费，是成本字段后来才开始持久化。", { n: unpricedDays })}
+              {t("usage.n_more_days_have_usage", { n: unpricedDays })}
             </div>
           )}
         </section>
@@ -456,12 +456,12 @@ export function Usage({ port }: { port: AgentPort }) {
 
       <div className="utwo">
         <section className="ucard">
-          <div className="ucard-h"><h3>{t("按模型")}</h3></div>
+          <div className="ucard-h"><h3>{t("usage.by_model")}</h3></div>
           <Bars rows={report.models.map((m) => [m.model, m.model, m.tokens, `${fmtTokens(m.tokens)}  ${m.percent.toFixed(1)}%`])} />
         </section>
         <section className="ucard">
-          <div className="ucard-h"><h3>{t("按来源")}</h3></div>
-          <Bars rows={report.providers.map((p) => [p.provider, providerLabels[p.provider] ?? t("未知来源"), p.tokens, `${fmtTokens(p.tokens)}  ${p.percent.toFixed(1)}%`, sourceColor(p.provider)])} />
+          <div className="ucard-h"><h3>{t("common.by_source")}</h3></div>
+          <Bars rows={report.providers.map((p) => [p.provider, providerLabels[p.provider] ?? t("usage.unknown_source"), p.tokens, `${fmtTokens(p.tokens)}  ${p.percent.toFixed(1)}%`, sourceColor(p.provider)])} />
         </section>
       </div>
       </>}

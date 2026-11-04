@@ -43,10 +43,10 @@ export function ModelLimits({
   const set = (model: string, patch: Partial<LimitText>) =>
     onChange({ ...value, [model]: { ...(value[model] ?? { win: "", out: "" }), ...patch } });
   return (
-    <div className="ml-group" role="group" aria-label={t("按模型设置限制")}>
+    <div className="ml-group" role="group" aria-label={t("models.limits_per_model")}>
       <div className="ml-head">
-        <strong>{t("按模型设置限制")}</strong>
-        <span>{t("留空的模型沿用上面的值，灰字是它当前继承到的值；填写后只对该模型生效。")}</span>
+        <strong>{t("models.limits_per_model")}</strong>
+        <span>{t("models.a_blank_field_follows_the")}</span>
       </div>
       <ul className="me-list ml-list">
         {models.map((model) => {
@@ -59,18 +59,18 @@ export function ModelLimits({
               <span className="unit-field">
                 <input
                   data-action="provider.draft" data-value="model-window"
-                  aria-label={t("{model} 的上下文窗口", { model })} inputMode="numeric" value={cur.win}
-                  placeholder={from?.contextWindow ? t("继承 {n}", { n: from.contextWindow.toLocaleString("en-US") }) : t("继承：未声明")}
+                  aria-label={t("models.context_window_for_model", { model })} inputMode="numeric" value={cur.win}
+                  placeholder={from?.contextWindow ? t("models.inherits_n", { n: from.contextWindow.toLocaleString("en-US") }) : t("models.inherits_not_declared")}
                   onChange={(e) => set(model, { win: digits(e.target.value) })}
-                /><i>{t("窗口")}</i>
+                /><i>{t("common.window")}</i>
               </span>
               <span className="unit-field">
                 <input
                   data-action="provider.draft" data-value="model-max-output"
-                  aria-label={t("{model} 的最大输出", { model })} inputMode="numeric" value={cur.out}
-                  placeholder={from?.maxOutputTokens && from.maxOutputTokens > 0 ? t("继承 {n}", { n: from.maxOutputTokens.toLocaleString("en-US") }) : t("继承：自动")}
+                  aria-label={t("models.max_output_for_model", { model })} inputMode="numeric" value={cur.out}
+                  placeholder={from?.maxOutputTokens && from.maxOutputTokens > 0 ? t("models.inherits_n", { n: from.maxOutputTokens.toLocaleString("en-US") }) : t("models.inherits_automatic")}
                   onChange={(e) => set(model, { out: digits(e.target.value) })}
-                /><i>{t("输出")}</i>
+                /><i>{t("common.output")}</i>
               </span>
             </li>
           );

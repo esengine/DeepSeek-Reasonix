@@ -51,11 +51,11 @@ function PresetLeaveDialog({ onKeep, onDiscard }: { onKeep: () => void; onDiscar
   }, [onKeep]);
   return createPortal(<div className="preset-confirm-veil">
     <div className="preset-confirm" ref={root} role="alertdialog" aria-modal="true" aria-labelledby={title}>
-      <h3 id={title}>{t("放弃未保存的更改？")}</h3>
-      <p>{t("离开后这些更改会丢失。")}</p>
+      <h3 id={title}>{t("persona.discard_unsaved_changes")}</h3>
+      <p>{t("common.they_will_be_lost_if")}</p>
       <div className="preset-confirm-actions">
-        <button className="btn" data-action="agent-preset.leave-cancel" onClick={onKeep}>{t("继续编辑")}</button>
-        <button className="btn" data-danger="" data-action="agent-preset.leave-discard" onClick={onDiscard}>{t("放弃更改")}</button>
+        <button className="btn" data-action="agent-preset.leave-cancel" onClick={onKeep}>{t("persona.keep_editing")}</button>
+        <button className="btn" data-danger="" data-action="agent-preset.leave-discard" onClick={onDiscard}>{t("persona.discard_changes")}</button>
       </div>
     </div>
   </div>, document.body);

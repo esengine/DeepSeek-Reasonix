@@ -16,32 +16,32 @@ export function PresetActions({ port, version, busy, run, onDeleted, onPersona }
   const [note, setNote] = useState("");
   const d = version.definition;
   return <details className="composition-extra">
-    <summary>{t("更多操作")}</summary>
-    {d.id === "builtin:general" && <button type="button" className="act" data-action="agent-preset.persona" disabled={busy} onClick={onPersona}>{t("编辑日常搭档人设")}</button>}
+    <summary>{t("common.more_actions")}</summary>
+    {d.id === "builtin:general" && <button type="button" className="act" data-action="agent-preset.persona" disabled={busy} onClick={onPersona}>{t("persona.edit_everyday_partner_persona")}</button>}
     <div className="composition-toolbar">
       <button type="button" className="act" data-action="agent-preset.export" disabled={busy} onClick={() => void run(async () => {
         setExported(JSON.stringify(await port.exportAgentPreset(d.id), null, 2));
-      })}>{t("导出文件")}</button>
-      {!d.id.startsWith("builtin:") && <button type="button" className="act" data-action="agent-preset.delete-preview" disabled={busy} onClick={() => setDeleting(true)}>{t("删除预设")}</button>}
+      })}>{t("persona.export_file")}</button>
+      {!d.id.startsWith("builtin:") && <button type="button" className="act" data-action="agent-preset.delete-preview" disabled={busy} onClick={() => setDeleting(true)}>{t("persona.delete_preset")}</button>}
     </div>
     {exported && <a className="act" download="agent-preset.json"
-      href={`data:application/json;charset=utf-8,${encodeURIComponent(exported)}`}>{t("下载预设 JSON")}</a>}
-    {deleting && <div className="find" role="group" aria-label={t("删除预设")}>
-      <p>{t("删除后不再供新会话选择，已有会话保留绑定版本。")}</p>
+      href={`data:application/json;charset=utf-8,${encodeURIComponent(exported)}`}>{t("persona.download_preset_json")}</a>}
+    {deleting && <div className="find" role="group" aria-label={t("persona.delete_preset")}>
+      <p>{t("persona.deleting_removes_it_from_new")}</p>
       <button type="button" className="act" data-action="agent-preset.delete" disabled={busy} onClick={() => void run(async () => {
         await port.deleteAgentPreset(d.id, version.revision);
         onDeleted();
-      })}>{t("确认删除")}</button>
-      <button type="button" className="act" data-action="agent-preset.delete-cancel" disabled={busy} onClick={() => setDeleting(false)}>{t("取消删除")}</button>
+      })}>{t("common.confirm_delete")}</button>
+      <button type="button" className="act" data-action="agent-preset.delete-cancel" disabled={busy} onClick={() => setDeleting(false)}>{t("persona.cancel_deletion")}</button>
     </div>}
     <details>
-      <summary>{t("显式默认配置")}</summary>
-      <p className="ds">{t("仅在显式选择 default 时使用，与本机卡片设置的新任务默认独立。")}</p>
+      <summary>{t("persona.explicit_default_configuration")}</summary>
+      <p className="ds">{t("persona.used_only_when_explicitly_selecting")}</p>
       <div className="composition-toolbar">
         <button type="button" className="act" data-action="agent-preset.default" disabled={busy || d.id.startsWith("project:")}
-          onClick={() => void run(async () => { await port.setDefaultAgentPreset(d.id, false); setNote(t("已设为个人首选预设")); })}>{t("设为个人首选")}</button>
+          onClick={() => void run(async () => { await port.setDefaultAgentPreset(d.id, false); setNote(t("persona.set_as_personal_preference")); })}>{t("persona.set_personal_preference")}</button>
         <button type="button" className="act" data-action="agent-preset.workspace-default" disabled={busy}
-          onClick={() => void run(async () => { await port.setDefaultAgentPreset(d.id, true); setNote(t("已设为当前项目首选预设")); })}>{t("设为项目首选")}</button>
+          onClick={() => void run(async () => { await port.setDefaultAgentPreset(d.id, true); setNote(t("persona.set_as_workspace_preference")); })}>{t("persona.set_workspace_preference")}</button>
       </div>
       {note && <p role="status">{note}</p>}
     </details>

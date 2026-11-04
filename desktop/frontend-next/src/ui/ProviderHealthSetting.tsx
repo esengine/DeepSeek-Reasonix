@@ -25,11 +25,11 @@ export function ProviderHealthSetting({ port, onChanged, onFailed }: {
     });
     return () => { live = false; generation.current++; };
   }, [port]);
-  return <Group id="provider-health" title={t("自动检测连接与余额")}
-    hint={t("默认关闭。开启后，打开模型列表会使用已保存密钥检查已授权的全局连接和余额，不发送生成请求。")}
+  return <Group id="provider-health" title={t("models.automatically_check_connections_and_balances")}
+    hint={t("models.off_by_default_when_enabled")}
     action={<Switch data-action="provider.health-setting" on={enabled === true}
       busy={busy || enabled === null || !port.saveProviderHealthSettings}
-      label={t("自动检测连接与余额")} onClick={async () => {
+      label={t("models.automatically_check_connections_and_balances")} onClick={async () => {
         if (!port.saveProviderHealthSettings) return;
         const version = generation.current;
         setBusy(true);
@@ -40,7 +40,7 @@ export function ProviderHealthSetting({ port, onChanged, onFailed }: {
         finally { if (version === generation.current) setBusy(false); }
       }} />}>
     {unavailable && <p className="note" role="status">{t(unavailable === "unsupported"
-      ? "当前服务器不支持自动检测，请升级服务器后重试。"
-      : "无法读取检测设置，请检查连接或权限后重试。")}</p>}
+      ? "models.this_server_does_not_support"
+      : "models.cannot_read_check_settings_check")}</p>}
   </Group>;
 }

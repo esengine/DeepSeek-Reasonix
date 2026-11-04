@@ -35,18 +35,18 @@ export function DisplayCurrency({ port, onChanged }: { port: AgentPort; onChange
   };
 
   return (
-    <Group id="currency" title={t("费用显示币种")}
-      hint={t("只决定费用以哪种货币显示，不改动各来源的价目表。「自动」跟随账户余额的币种，没有余额信息时按价目表的币种显示。")}>
+    <Group id="currency" title={t("usage.cost_display_currency")}
+      hint={t("usage.only_decides_which_currency_costs")}>
       {!state ? (
-        <div className="empty">{t("无法读取币种设置。")}</div>
+        <div className="empty">{t("usage.could_not_read_the_currency")}</div>
       ) : (
         <div className="box">
           <div className="lrow">
             <span className="tx">
-              <span className="lb">{t("显示币种")}</span>
-              <span className="ds">{t("当前会话的费用、余额与用量页立即按所选币种显示，无需重启。")}</span>
+              <span className="lb">{t("usage.display_currency")}</span>
+              <span className="ds">{t("usage.the_sessions_cost_the_balance")}</span>
             </span>
-            <div className="seg" data-text role="group" aria-label={t("显示币种")}>
+            <div className="seg" data-text role="group" aria-label={t("usage.display_currency")}>
               {MODES.map(([m, label]) => (
                 <button key={m} data-action="currency.mode" data-value={m} aria-pressed={state.mode === m} disabled={busy} onClick={() => void pick(m)}>
                   {t(label)}
@@ -56,7 +56,7 @@ export function DisplayCurrency({ port, onChanged }: { port: AgentPort; onChange
           </div>
           {state.mode !== "auto" && state.unconverted.length > 0 && (
             <div className="why">
-              {t("这些模型的价格不在官方价目表里，无法换算成所选币种，费用只能按原币种显示：{models}。到「服务商」编辑该模型，点「恢复官方价」即可。", {
+              {t("usage.these_models_prices_are_not", {
                 models: state.unconverted.map((u) => t("{model}（{currency}）", { model: u.model, currency: u.currency })).join(t("、")),
               })}
             </div>

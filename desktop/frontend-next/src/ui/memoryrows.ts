@@ -17,5 +17,5 @@ const ORDER: FeedbackProcessType[] = ["renderer", "browser", "gpu", "utility", "
 export function memoryLines(rows: FeedbackProcessMemory[]): string[] {
   return [...rows]
     .sort((a, b) => ORDER.indexOf(a.process) - ORDER.indexOf(b.process) || b.workingSetKB - a.workingSetKB)
-    .map((r) => t("{name}：{set}（私有 {own}）", { name: t(NAME[r.process]), set: bytes(r.workingSetKB * 1024), own: bytes(r.privateKB * 1024) }));
+    .map((r) => t("memory.name_set_private_own", { name: t(NAME[r.process]), set: bytes(r.workingSetKB * 1024), own: bytes(r.privateKB * 1024) }));
 }

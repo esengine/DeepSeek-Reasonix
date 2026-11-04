@@ -45,20 +45,20 @@ const RECIPES: Recipe[] = [
 const SCOPE_LABEL = { user: "我的", project: "这个项目" } as const;
 
 const EVENT_LABELS = new Map<string, () => string>([
-  ["PreToolUse", () => t("工具执行前")],
-  ["PostToolUse", () => t("工具执行后")],
-  ["PostToolUseFailure", () => t("工具执行失败后")],
-  ["PermissionRequest", () => t("请求权限时")],
-  ["UserPromptSubmit", () => t("提交消息时")],
-  ["Stop", () => t("本轮结束时")],
-  ["StopFailure", () => t("本轮失败时")],
-  ["PostLLMCall", () => t("模型响应完成后")],
-  ["SessionStart", () => t("会话开始时")],
-  ["SessionEnd", () => t("会话结束时")],
-  ["SubagentStart", () => t("子代理开始时")],
-  ["SubagentStop", () => t("子代理结束时")],
-  ["Notification", () => t("需要你关注时")],
-  ["PreCompact", () => t("压缩上下文前")],
+  ["PreToolUse", () => t("ext.before_a_tool_runs")],
+  ["PostToolUse", () => t("ext.after_a_tool_runs")],
+  ["PostToolUseFailure", () => t("ext.after_a_tool_fails")],
+  ["PermissionRequest", () => t("ext.when_permission_is_requested")],
+  ["UserPromptSubmit", () => t("ext.when_a_message_is_submitted")],
+  ["Stop", () => t("ext.when_the_turn_ends")],
+  ["StopFailure", () => t("ext.when_the_turn_fails")],
+  ["PostLLMCall", () => t("ext.after_a_model_response_completes")],
+  ["SessionStart", () => t("ext.when_a_session_starts")],
+  ["SessionEnd", () => t("ext.when_a_session_ends")],
+  ["SubagentStart", () => t("ext.when_a_subagent_starts")],
+  ["SubagentStop", () => t("ext.when_a_subagent_ends")],
+  ["Notification", () => t("ext.when_your_attention_is_needed")],
+  ["PreCompact", () => t("ext.before_context_is_compacted")],
 ]);
 
 function eventLabel(event: string): string {
@@ -98,7 +98,7 @@ export function Hooks({ port, onChanged }: Props) {
   };
   useEffect(reload, [port]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  if (!cat) return <div className="empty">{t("无法读取 hooks 配置。")}</div>;
+  if (!cat) return <div className="empty">{t("ext.could_not_read_the_hooks")}</div>;
 
   const plugin = cat.hooks.filter((h) => h.scope === "plugin");
   const broken = cat.sources.filter((s) => s.status === "malformed" || s.status === "unreadable");
@@ -144,7 +144,7 @@ export function Hooks({ port, onChanged }: Props) {
 
   return (
     <div className="hooks">
-      <div className="scope" role="radiogroup" aria-label={t("规则写入位置")}>
+      <div className="scope" role="radiogroup" aria-label={t("ext.where_these_rules_live")}>
         {(["user", "project"] as const).map((s) => (
           <button
             key={s}
@@ -154,15 +154,15 @@ export function Hooks({ port, onChanged }: Props) {
             onClick={() => setScope(s)}
           >
             {t(SCOPE_LABEL[s])}
-            <i>{t(s === "user" ? "只在这台机器上" : "写入仓库，clone 仓库的人也会获得")}</i>
+            <i>{t(s === "user" ? "ext.this_machine_only" : "ext.written_into_the_repository_so")}</i>
           </button>
         ))}
       </div>
-      <p className="path">{scope === "user" ? cat.globalPath : cat.projectPath || t("没有打开项目")}</p>
+      <p className="path">{scope === "user" ? cat.globalPath : cat.projectPath || t("ext.no_project_open")}</p>
 
       {broken.map((s) => (
         <div className="why" key={s.path}>
-          {s.path} {t("无法读取：")}{s.parseError || s.status}
+          {s.path} {t("ext.could_not_be_read")}{s.parseError || s.status}
         </div>
       ))}
 
@@ -190,8 +190,8 @@ export function Hooks({ port, onChanged }: Props) {
       </div>
 
       <button className="more" aria-expanded={expert} onClick={() => setExpert((v) => !v)}>
-        {t(expert ? "收起" : "手动添加")}
-        <span className="c">{t("{n} 条规则", { n: mine.length })}</span>
+        {t(expert ? "common.collapse" : "ext.write_one_manually")}
+        <span className="c">{t("common.n_rules", { n: mine.length })}</span>
       </button>
 
       {expert && (
@@ -250,19 +250,19 @@ function Expert({
                 <input
                   className="match"
                   value={h.match ?? ""}
-                  placeholder={t("匹配哪些工具（正则，留空=全部）")}
+                  placeholder={t("ext.which_tools_to_match_regex")}
                   onChange={(e) => patch(i, { match: e.target.value })}
                 />
               )}
-              {meta?.blocking && <i className="warn">{t("可拦截 agent")}</i>}
+              {meta?.blocking && <i className="warn">{t("ext.can_stop_the_agent")}</i>}
                 <button className="act ghost" data-action="hooks.remove" onClick={() => onSave(draft.filter((_, k) => k !== i))}>
-                {t("删除")}
+                {t("common.delete")}
               </button>
             </div>
             <input
               className="cmd"
               value={h.command}
-              placeholder={t("要运行的命令")}
+              placeholder={t("ext.the_command_to_run")}
               onChange={(e) => patch(i, { command: e.target.value })}
             />
             {h.issues?.map((msg) => (
@@ -272,11 +272,11 @@ function Expert({
             ))}
             <div className="line">
                 <button className="act" data-action="hooks.run-once" disabled={busy === key} onClick={() => onTry(h, key)}>
-                {t(busy === key ? "运行中…" : "试运行")}
+                {t(busy === key ? "ext.running" : "ext.dry_run_once")}
               </button>
               {/* The command really runs. Saying so is the difference between a
                   button that checks syntax and one that might delete a file. */}
-              <span className="note">{t("将实际执行该命令")}</span>
+              <span className="note">{t("ext.really_runs_this_command")}</span>
             </div>
             {trial?.result && <DryRun res={trial.result} blocking={!!meta?.blocking} />}
             {trial?.error && <div className="why">{trial.error}</div>}
@@ -289,21 +289,21 @@ function Expert({
           className="act"
           onClick={() => setDraft((d) => [...d, { event: "PostToolUse", command: "", scope }])}
         >
-          {t("添加规则")}
+          {t("common.add_a_rule")}
         </button>
             <button className="act" data-action="hooks.save" data-primary disabled={busy === "save"} onClick={() => onSave(draft)}>
-          {t(busy === "save" ? "保存中…" : "保存")}
+          {t(busy === "save" ? "common.saving" : "common.save")}
         </button>
       </div>
 
       {plugin.length > 0 && (
         <div className="fromplugin">
-          <span className="lb">{t("插件带来的 {n} 条", { n: plugin.length })}</span>
+          <span className="lb">{t("ext.n_from_plugins", { n: plugin.length })}</span>
           {plugin.map((h, i) => (
             <div className="hookrow" key={i}>
               <span className="ev" title={eventLabel(h.event)}>{eventLabel(h.event)}</span>
               <span className="cm">{h.command}</span>
-              <span className="sc">{t("只读")}</span>
+              <span className="sc">{t("common.read_only")}</span>
             </div>
           ))}
         </div>

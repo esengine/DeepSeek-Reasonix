@@ -28,7 +28,6 @@ export const EN_REMOTE: Record<string, string> = {
   "地址": "Address",
   "用户": "User",
   "默认": "Default",
-  "设为默认": "Make default",
   "已连接": "Connected",
   "重连中": "Reconnecting",
   "部分转发未建立": "A forward did not attach",
@@ -44,7 +43,6 @@ export const EN_REMOTE: Record<string, string> = {
   "{host} 上的 reasonix 已启动，但始终未报告端口。请查看该机器上 ~/.reasonix/remote 下的日志": "reasonix started on {host} but never reported a port. Look at the logs under ~/.reasonix/remote over there",
   "{host} 上已有一个正在运行的 reasonix serve，它的模型来源（本机代理或该机器自带的密钥）与本次连接的设置不一致。为避免打断它正在做的事，没有替换它。请把该主机的 provider 改成与它一致，或先在该机器上运行 reasonix remote serve stop 再连接": "A reasonix serve is already running on {host}, and it resolves models differently from this connection (this machine's broker versus the host's own keys). It was left alone so its work is not interrupted. Set this host's provider to match it, or run reasonix remote serve stop on that machine first and connect again",
   "{host} 上已有一个正在运行的 reasonix serve 占用着该工作区，但无法接入（令牌文件或地址不可读）。请先在该机器上结束那个进程（进程号记在该机器 .reasonix/remote 目录下的 .pid 文件里），再重新连接": "A reasonix serve is already running for this workspace on {host}, but it cannot be attached to (its token file or address is unreadable). End that process over there (its id is in the .pid file in that machine's .reasonix/remote directory), then connect again",
-  "自动选择": "Pick one automatically",
   "机器": "Machine",
   "上传": "upload",
   "下载": "download",
@@ -62,6 +60,5 @@ export const EN_REMOTE: Record<string, string> = {
   "需要重新登录": "Sign in again",
   "为了安全，远程控制在登录满 24 小时或退出登录后需要重新登录。": "For security, remote control asks you to sign in again 24 hours after signing in, or after you sign out.",
   "重新登录": "Sign in",
-  "换一个": "New code",
   "这台手机的提醒": "This phone's reminders",
 };

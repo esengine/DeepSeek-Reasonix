@@ -9,11 +9,6 @@ export const EN_METRICS: Record<string, string> = {
   "前缀变了": "prefix changed",
   "正文变了": "body changed",
   "前缀哈希": "Prefix hash",
-  "按兜底价估算": "fallback price",
-  "已结算": "settled",
-  "本回合": "this turn ",
-  "原币种": "as quoted",
-  "两种结算币种不予合并 —— 合成单一总额需要虚构一个汇率。": "Two settlement currencies do not add up — one total would mean inventing a rate.",
   "工具 schema": "Tool schema",
   "该来源未声明窗口大小，因此无法显示已用比例，也不会自动压缩。中转服务转发的是第三方模型，其容量只有你知道。":
     "Nobody has said how large this source's window is, so there is no share to draw — and no automatic compaction either. A relay forwards somebody else's model, so only you know what it holds.",
@@ -24,8 +19,6 @@ export const EN_METRICS: Record<string, string> = {
   "填写模型文档中的上下文上限，而非最大输出长度。":
     "The context ceiling from the model's docs, not its max output.",
   "{n} 会话": "{n} sessions",
-  "每回合用量": "Tokens per round",
-  "峰值 {peak} · 均 {avg}": "peak {peak} · avg {avg}",
   "改了 {n} 次": "edited {n} times",
   "改过": "Modified",
 };

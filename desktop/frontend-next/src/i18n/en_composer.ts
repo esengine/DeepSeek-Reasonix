@@ -51,7 +51,6 @@ export const EN_COMPOSER: Record<string, string> = {
   "插话": "Steer",
   "知道了": "Got it",
   "报告此问题": "Report this problem",
-  "按服务商筛选": "Filter by provider",
   "当前项目「{name}」之前选了“暂不信任”，所以定时运行读不了它。信任后，在有系统沙盒的电脑上，默认设置下它的编辑和命令不再逐条询问；你手动选定的批准模式不受影响。": "The open project \u201c{name}\u201d was declined earlier, so scheduled runs cannot read it. Once trusted, on a machine with the system sandbox its edits and commands stop asking one by one under the default settings; an approval mode you chose yourself is unchanged.",
   "当前项目「{name}」还没有受信任，所以定时运行读不了它。信任后，在有系统沙盒的电脑上，默认设置下它的编辑和命令不再逐条询问；你手动选定的批准模式不受影响。": "The open project \u201c{name}\u201d is not trusted yet, so scheduled runs cannot read it. Once trusted, on a machine with the system sandbox its edits and commands stop asking one by one under the default settings; an approval mode you chose yourself is unchanged.",
   "信任此文件夹": "Trust this folder",

@@ -44,29 +44,29 @@ export function PresetGallery({ load, onPick, disabled }: {
   if (failed) {
     return (
       <p className="addp-presets-note" role="alert">
-        {t("常用服务列表没能读到：{detail}", { detail: failed })}
-        <button type="button" className="act" data-action="provider.preset-retry" onClick={read}>{t("重试")}</button>
+        {t("persona.the_list_of_common_services", { detail: failed })}
+        <button type="button" className="act" data-action="provider.preset-retry" onClick={read}>{t("common.retry")}</button>
       </p>
     );
   }
   if (presets === null) return null;
-  if (presets.length === 0) return <p className="addp-presets-note">{t("内核没有提供常用服务预设，可以在下面手动填写。")}</p>;
+  if (presets.length === 0) return <p className="addp-presets-note">{t("persona.the_kernel_offers_no_service")}</p>;
   return (
     <div className="addp-presets">
       <button type="button" className="addp-presets-toggle" data-action="provider.preset-toggle" aria-expanded={open} onClick={() => setOpen((v) => !v)}>
-        <strong>{t("从常用服务开始")}</strong>
+        <strong>{t("persona.start_from_a_common_service")}</strong>
         <span>{presets.length}</span>
       </button>
       {open && (
         <>
           <div className="fields">
             <label className="grow full">
-              <input type="search" data-action="provider.draft" data-value="preset-query" aria-label={t("搜索常用服务")} placeholder={t("搜索常用服务")} value={query} onChange={(e) => setQuery(e.target.value)} spellCheck={false} />
+              <input type="search" data-action="provider.draft" data-value="preset-query" aria-label={t("persona.search_services")} placeholder={t("persona.search_services")} value={query} onChange={(e) => setQuery(e.target.value)} spellCheck={false} />
             </label>
           </div>
           {vendors.length > 0 && (
-            <div className="addp-vendors" role="group" aria-label={t("按厂商筛选")}>
-              <button type="button" data-action="provider.preset-vendor" data-target="" aria-pressed={vendor === ""} onClick={() => setVendor("")}>{t("全部")}</button>
+            <div className="addp-vendors" role="group" aria-label={t("persona.filter_by_vendor")}>
+              <button type="button" data-action="provider.preset-vendor" data-target="" aria-pressed={vendor === ""} onClick={() => setVendor("")}>{t("common.all")}</button>
               {vendors.map((v) => (
                 <button key={v} type="button" data-action="provider.preset-vendor" data-target={v} aria-pressed={vendor === v} onClick={() => setVendor(v)}>
                   {hasVendorMark(v) && <VendorMark slug={v} size={14} />}
@@ -75,7 +75,7 @@ export function PresetGallery({ load, onPick, disabled }: {
               ))}
             </div>
           )}
-          {groups.length === 0 && <p className="addp-presets-note">{t("没有匹配的服务")}</p>}
+          {groups.length === 0 && <p className="addp-presets-note">{t("persona.no_matching_service")}</p>}
           {groups.map(([host, items]) => (
             <section key={host} className="addp-presets-group" aria-label={host}>
               <h4>{host}</h4>

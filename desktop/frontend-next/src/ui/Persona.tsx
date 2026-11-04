@@ -29,20 +29,20 @@ const isPreset = (p: PersonaPreset, d: PersonaDraft) =>
 // page shows about them are this interface's, so they go through t() here.
 function presetName(id: string): string {
   switch (id) {
-    case "engineer": return t("严谨工程师");
-    case "concise": return t("简洁");
-    case "mentor": return t("教学导师");
-    case "critic": return t("严苛评审");
+    case "engineer": return t("persona.rigorous_engineer");
+    case "concise": return t("persona.concise");
+    case "mentor": return t("persona.mentor");
+    case "critic": return t("persona.critic");
     default: return id;
   }
 }
 
 function presetAbout(id: string): string {
   switch (id) {
-    case "engineer": return t("先验证再下结论，只做最少的正确改动，并说明剩余风险。");
-    case "concise": return t("回答简短直接，不铺垫，优先代码与要点。");
-    case "mentor": return t("像老师一样说明取舍与原理，把决定权留给你。");
-    case "critic": return t("以审查者的立场找问题：先指出失效方式和证据，再谈通过。");
+    case "engineer": return t("persona.verify_before_concluding_make_the");
+    case "concise": return t("persona.answer_briefly_and_directly_skip");
+    case "mentor": return t("persona.explain_trade_offs_and_reasoning");
+    case "critic": return t("persona.review_adversarially_name_the_failure");
     default: return "";
   }
 }
@@ -91,7 +91,7 @@ export function Persona({ port, onDirtyChange, onBusyChange, onSaved }: { port: 
   const blank = !draft.prefix && !draft.suffix;
   // A draft the presets do not describe is the user's own; saying so is the
   // answer to "which of these am I looking at".
-  const now = !state ? undefined : preset ? presetName(preset.id) : blank ? undefined : t("自定义");
+  const now = !state ? undefined : preset ? presetName(preset.id) : blank ? undefined : t("common.custom");
   const changed = !!state && !sameDraft(draft, draftOf(state));
   useEffect(() => { onDirtyChange?.(changed); }, [onDirtyChange, changed]);
   useEffect(() => { onBusyChange?.(busy); }, [onBusyChange, busy]);
@@ -99,17 +99,17 @@ export function Persona({ port, onDirtyChange, onBusyChange, onSaved }: { port: 
   return (
     <Group
       id="persona"
-      title={t("系统人设")}
+      title={t("persona.system_persona")}
       now={now}
-      hint={t("系统人设决定 agent 的身份：前缀写在系统提示词最前面，后缀写在内置指令之后。保存不会立即重建会话；新会话及现有会话下一次重建（例如切换模型）时生效。")}
+      hint={t("persona.the_system_persona_shapes_the")}
     >
       {!state ? (
-        <div className="empty">{t("无法读取人设设置。")}</div>
+        <div className="empty">{t("persona.couldnt_read_the_persona_settings")}</div>
       ) : (
         <div className="box">
           {state.presets.length > 0 && (
             <>
-              <div className="seg" data-text role="group" aria-label={t("预设")}>
+              <div className="seg" data-text role="group" aria-label={t("persona.presets")}>
                 {state.presets.map((p) => (
                   <button
                     key={p.id}
@@ -132,22 +132,22 @@ export function Persona({ port, onDirtyChange, onBusyChange, onSaved }: { port: 
                 {preset
                   ? presetAbout(preset.id)
                   : blank
-                    ? t("未应用预设；直接填写下面的两段即可。")
-                    : t("已修改预设内容，按下面的字段保存。")}
+                    ? t("persona.no_preset_applied_fill_in")
+                    : t("persona.the_preset_text_has_been")}
               </p>
             </>
           )}
 
           <div className="pers-field">
-            <label className="lb" htmlFor={prefixId}>{t("系统提示词开头")}</label>
-            <span className="ds">{t("作为系统提示词的第一段，写在内置指令之前；留空表示不添加。")}</span>
+            <label className="lb" htmlFor={prefixId}>{t("persona.start_of_the_system_prompt")}</label>
+            <span className="ds">{t("persona.leads_the_system_prompt_ahead")}</span>
             <textarea
               id={prefixId}
               dir="auto"
               rows={5}
               maxLength={LIMIT}
               spellCheck={false}
-              aria-label={t("系统提示词开头")}
+              aria-label={t("persona.start_of_the_system_prompt")}
               data-action-change="persona.prefix"
               value={draft.prefix}
               disabled={busy}
@@ -156,15 +156,15 @@ export function Persona({ port, onDirtyChange, onBusyChange, onSaved }: { port: 
           </div>
 
           <div className="pers-field">
-            <label className="lb" htmlFor={suffixId}>{t("补充要求")}</label>
-            <span className="ds" id={`${suffixId}-help`}>{t("放在内置系统指令之后，留空则不添加")}</span>
+            <label className="lb" htmlFor={suffixId}>{t("persona.additional_instructions")}</label>
+            <span className="ds" id={`${suffixId}-help`}>{t("persona.placed_after_the_built_in")}</span>
             <textarea
               id={suffixId}
               dir="auto"
               rows={5}
               maxLength={LIMIT}
               spellCheck={false}
-              aria-label={t("补充要求")}
+              aria-label={t("persona.additional_instructions")}
               aria-describedby={`${suffixId}-help`}
               data-action-change="persona.suffix"
               value={draft.suffix}
@@ -175,37 +175,37 @@ export function Persona({ port, onDirtyChange, onBusyChange, onSaved }: { port: 
 
           <div className="lrow">
             <span className="tx">
-              <span className="lb">{t("不注入可选运行时上下文")}</span>
-              <span className="ds">{t("开启后不注入探测到的运行环境与离线提示；指令、记忆与技能照常写入。")}</span>
+              <span className="lb">{t("persona.do_not_inject_optional_runtime")}</span>
+              <span className="ds">{t("persona.when_on_the_probed_environment")}</span>
             </span>
             <Switch
               data-action="persona.runtime-context"
               on={!draft.include_runtime_context}
               busy={busy}
-              label={t("不注入可选运行时上下文")}
+              label={t("persona.do_not_inject_optional_runtime")}
               onClick={() => change({ include_runtime_context: !draft.include_runtime_context })}
             />
           </div>
 
           <div className="lrow">
             <span className="tx">
-              <span className="lb">{t("保存")}</span>
-              <span className="ds">{t("写入用户配置，在新会话及现有会话下一次重建时生效；保存本身不会重建会话。")}</span>
+              <span className="lb">{t("common.save")}</span>
+              <span className="ds">{t("persona.writes_the_user_config_applies")}</span>
             </span>
             <button className="act" data-action="persona.save" disabled={busy || !changed} onClick={() => void save()}>
-              {t(busy ? "保存中…" : "保存")}
+              {t(busy ? "common.saving" : "common.save")}
             </button>
           </div>
 
           {saved && (
             <div className="find" data-lvl="ok" role="status">
-              <span className="t">{t("已保存，下次会话构建时生效")}</span>
+              <span className="t">{t("persona.saved_applies_at_the_next")}</span>
               <span className="why"><code>{state.path}</code></span>
             </div>
           )}
           {error && (
             <div className="find" data-lvl="err" role="alert">
-              <span className="t">{t("操作未完成")}</span>
+              <span className="t">{t("common.that_did_not_go_through")}</span>
               <span className="why">{error}</span>
             </div>
           )}

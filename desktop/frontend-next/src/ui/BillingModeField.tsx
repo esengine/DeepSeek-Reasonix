@@ -8,12 +8,12 @@ export const SUBSCRIPTION = "subscription_equivalent";
 export function BillingModeField({ value, onChange }: { value: string; onChange: (v: string) => void }) {
   return (
     <label className="grow full">
-      <span>{t("计费方式")}</span>
-      <select aria-label={t("计费方式")} data-action="provider.draft" data-value="billing-mode" value={value} onChange={(e) => onChange(e.target.value)}>
-        <option value={PAYG}>{t("按量计费（默认）")}</option>
-        <option value={SUBSCRIPTION}>{t("订阅套餐（按价格折算的估算）")}</option>
+      <span>{t("usage.billing")}</span>
+      <select aria-label={t("usage.billing")} data-action="provider.draft" data-value="billing-mode" value={value} onChange={(e) => onChange(e.target.value)}>
+        <option value={PAYG}>{t("usage.pay_as_you_go_default")}</option>
+        <option value={SUBSCRIPTION}>{t("usage.subscription_plan_estimated_at_the")}</option>
       </select>
-      <i className="tip">{t("订阅套餐的用量按上面的价格折算成估算值，单独显示，不会计入实际花费。")}</i>
+      <i className="tip">{t("usage.a_plans_usage_is_converted")}</i>
     </label>
   );
 }

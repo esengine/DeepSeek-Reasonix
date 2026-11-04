@@ -30,8 +30,8 @@ export function SkillUpdate({ port, name, onClose, onDone }: { port: AgentPort; 
   };
   useEffect(load, [port, name]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  if (error && !plan) return <div className="skupd mkt addpkg"><div className="why" role="alert">{error}</div><div className="acts"><button className="act" data-action="skills.update-close" onClick={onClose}>{t("关闭")}</button></div></div>;
-  if (!plan) return <div className="skupd mkt addpkg" aria-busy="true"><div className="why">{t("正在读取更新内容…")}</div></div>;
+  if (error && !plan) return <div className="skupd mkt addpkg"><div className="why" role="alert">{error}</div><div className="acts"><button className="act" data-action="skills.update-close" onClick={onClose}>{t("common.close")}</button></div></div>;
+  if (!plan) return <div className="skupd mkt addpkg" aria-busy="true"><div className="why">{t("common.loading_whats_new")}</div></div>;
 
   const code = plan.changes.filter((c) => c.code);
   const text = plan.changes.filter((c) => !c.code);
@@ -58,48 +58,48 @@ export function SkillUpdate({ port, name, onClose, onDone }: { port: AgentPort; 
     <details className="cand" key={c.path} onToggle={(e) => { if ((e.currentTarget as HTMLDetailsElement).open) setOpened((s) => new Set(s).add(c.path)); }}>
       <summary className="cand-hd">
         <span className="nm">{SIGN[c.kind]} {c.path}</span>
-        <span className="meta">{t(c.kind === "added" ? "新增" : c.kind === "removed" ? "删除" : "修改")}</span>
+        <span className="meta">{t(c.kind === "added" ? "ext.added" : c.kind === "removed" ? "common.delete" : "ext.changed")}</span>
       </summary>
-      {c.truncated ? <div className="why">{t("文件太大，这里不显示内容。请到来源文件夹里查看：{path}", { path: plan.source })}</div>
-        : c.binary ? <div className="why">{t("不是文本文件，这里不显示内容。")}</div>
-        : <pre className="skupd-diff">{c.diff ? c.diff.replace(/\n$/, "").split("\n").map((line, i) => <span key={i} data-d={line.startsWith("---") || line.startsWith("+++") ? undefined : line[0]}>{line}{"\n"}</span>) : t("（没有可显示的差异）")}</pre>}
+      {c.truncated ? <div className="why">{t("ext.this_file_is_too_large", { path: plan.source })}</div>
+        : c.binary ? <div className="why">{t("ext.not_a_text_file_so")}</div>
+        : <pre className="skupd-diff">{c.diff ? c.diff.replace(/\n$/, "").split("\n").map((line, i) => <span key={i} data-d={line.startsWith("---") || line.startsWith("+++") ? undefined : line[0]}>{line}{"\n"}</span>) : t("ext.no_difference_to_show")}</pre>}
     </details>
   );
 
   return (
     <div className="skupd mkt addpkg" data-stage="confirm" aria-busy={busy}>
       <div className="find">
-        <span className="t">{plan.changes.length > 0 ? t("更新 {name}：来源文件夹有 {n} 处变化", { name: plan.name, n: plan.changes.length }) : record ? t("{name} 的内容已与来源文件夹一致，只是安装记录还停在旧版本", { name: plan.name }) : t("{name} 与来源文件夹的内容一致，没有可更新的内容", { name: plan.name })}</span>
-        <span className="why">{t("来源：{path}。更新后，已安装的副本会与来源文件夹完全一致。只有你点击“更新”才会执行，AI 不能触发。", { path: plan.source })}</span>
+        <span className="t">{plan.changes.length > 0 ? t("ext.update_name_n_change_s", { name: plan.name, n: plan.changes.length }) : record ? t("ext.name_already_matches_its_source", { name: plan.name }) : t("ext.name_matches_its_source_folder", { name: plan.name })}</span>
+        <span className="why">{t("ext.source_path_after_the_update", { path: plan.source })}</span>
       </div>
       {plan.overwritesLocal && (
         <div className="find" data-lvl="warn">
-          <span className="t">{t("已安装的副本在安装后被改过")}</span>
-          <span className="why">{t("更新会让副本与来源文件夹完全一致，覆盖这些本地改动。")}</span>
-          <label className="mkt-seen"><input type="checkbox" data-action="skills.update-overwrite" checked={sureOverwrite} disabled={busy} onChange={(e) => setSureOverwrite(e.target.checked)} />{t("我知道会覆盖本地改动")}</label>
+          <span className="t">{t("ext.the_installed_copy_was_edited")}</span>
+          <span className="why">{t("ext.the_update_makes_the_copy")}</span>
+          <label className="mkt-seen"><input type="checkbox" data-action="skills.update-overwrite" checked={sureOverwrite} disabled={busy} onChange={(e) => setSureOverwrite(e.target.checked)} />{t("ext.i_understand_this_overwrites_local")}</label>
         </div>
       )}
       {code.length > 0 && (
         <section className="rgrp" data-lvl="high">
-          <h3>{t("以下文件不是说明文字，需要逐项展开看过")}</h3>
+          <h3>{t("ext.these_files_are_not_plain")}</h3>
           {code.map(file)}
-          {unread > 0 && <div className="why">{t("还有 {n} 个文件没有展开", { n: unread })}</div>}
+          {unread > 0 && <div className="why">{t("ext.n_file_s_not_opened", { n: unread })}</div>}
         </section>
       )}
       {text.length > 0 && (
         <section className="rgrp" data-lvl="low">
-          <h3>{t("以下文件是说明文字")}</h3>
+          <h3>{t("ext.these_files_are_plain_instructions")}</h3>
           {text.map(file)}
         </section>
       )}
       {hidden.length > 0 && (
-        <label className="mkt-seen"><input type="checkbox" data-action="skills.update-hidden" checked={sureTruncated} disabled={busy} onChange={(e) => setSureTruncated(e.target.checked)} />{t("有 {n} 个文件在这里无法显示，我已在来源文件夹里看过", { n: hidden.length })}</label>
+        <label className="mkt-seen"><input type="checkbox" data-action="skills.update-hidden" checked={sureTruncated} disabled={busy} onChange={(e) => setSureTruncated(e.target.checked)} />{t("ext.n_file_s_cannot_be", { n: hidden.length })}</label>
       )}
       <div className="acts">
-        <span className="note">{t("替换「我的」里已安装的副本，所有项目均可使用")}</span>
-        {stale && <button className="act" data-action="skills.update-reload" disabled={busy} onClick={load}>{t("重新查看")}</button>}
-        <button className="act" data-action="skills.update-close" disabled={busy} onClick={onClose}>{t("取消")}</button>
-        <button className="act" data-action="skills.update-apply" data-primary disabled={busy || !ready} onClick={() => void apply()}>{t(busy ? "更新中…" : "更新")}</button>
+        <span className="note">{t("ext.replaces_the_installed_copy_under")}</span>
+        {stale && <button className="act" data-action="skills.update-reload" disabled={busy} onClick={load}>{t("ext.review_again")}</button>}
+        <button className="act" data-action="skills.update-close" disabled={busy} onClick={onClose}>{t("common.cancel")}</button>
+        <button className="act" data-action="skills.update-apply" data-primary disabled={busy || !ready} onClick={() => void apply()}>{t(busy ? "ext.updating" : "ext.update")}</button>
       </div>
       {error && <div className="why" role="alert">{error}</div>}
     </div>

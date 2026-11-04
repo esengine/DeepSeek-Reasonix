@@ -6,8 +6,8 @@ import { HttpError, type AgentPort, type MarketPackage, type MarketVote as Vote 
 // How the list reads a package's reception. The share is the registry's
 // up / (up + down); with no votes there is no share, which is not 0%.
 export function approvalLabel(p: Pick<MarketPackage, "approvalRate" | "upCount" | "downCount">): string {
-  if (p.approvalRate == null) return t("暂无评价");
-  return t("好评 {pct}%（{n} 票）", { pct: Math.round(p.approvalRate * 100), n: p.upCount + p.downCount });
+  if (p.approvalRate == null) return t("ext.no_votes_yet");
+  return t("ext.pct_positive_n_votes", { pct: Math.round(p.approvalRate * 100), n: p.upCount + p.downCount });
 }
 
 // One vote per account: pressing the lit button again withdraws it. Whether
@@ -70,29 +70,29 @@ export function MarketVote({ port, pkg, onSignIn }: { port: AgentPort; pkg: Mark
   const note = !vote
     ? ""
     : off
-      ? t("在这台设备上不能评价")
+      ? t("ext.voting_is_not_available_on")
       : !signedIn
         ? ""
         : vote.own
-          ? t("不能评价自己发布的包")
+          ? t("ext.you_cannot_vote_on_a")
           : vote.emailVerified === false
-            ? t("验证账号邮箱后才能评价")
+            ? t("ext.verify_your_account_email_to")
             : "";
 
   return (
     <div className="mkt-vote" data-mine={mine} aria-busy={busy}>
       <span className="mkt-vote-rate">{approvalLabel({ approvalRate: rate ?? null, upCount: up, downCount: down })}</span>
-      <div className="mkt-vote-btns" role="group" aria-label={t("评价")} ref={buttons} tabIndex={-1}>
+      <div className="mkt-vote-btns" role="group" aria-label={t("ext.vote")} ref={buttons} tabIndex={-1}>
         <button
           className="act"
           data-action="market.vote"
           data-value="up"
           aria-pressed={mine === 1}
           disabled={!can || busy}
-          title={mine === 1 ? t("撤回赞") : t("赞")}
+          title={mine === 1 ? t("ext.withdraw_upvote") : t("ext.upvote")}
           onClick={() => void cast(1)}
         >
-          <span aria-hidden="true">▲</span> {t("赞")} <span className="n">{up}</span>
+          <span aria-hidden="true">▲</span> {t("ext.upvote")} <span className="n">{up}</span>
         </button>
         <button
           className="act"
@@ -100,22 +100,22 @@ export function MarketVote({ port, pkg, onSignIn }: { port: AgentPort; pkg: Mark
           data-value="down"
           aria-pressed={mine === -1}
           disabled={!can || busy}
-          title={mine === -1 ? t("撤回踩") : t("踩")}
+          title={mine === -1 ? t("ext.withdraw_downvote") : t("ext.downvote")}
           onClick={() => void cast(-1)}
         >
-          <span aria-hidden="true">▼</span> {t("踩")} <span className="n">{down}</span>
+          <span aria-hidden="true">▼</span> {t("ext.downvote")} <span className="n">{down}</span>
         </button>
       </div>
       {vote && !signedIn && !off && (
         <button className="act mkt-vote-signin" data-action="market.signin" onClick={onSignIn} disabled={!onSignIn}>
-          {t("登录后评价")}
+          {t("ext.sign_in_to_vote")}
         </button>
       )}
       {note && <span className="note">{note}</span>}
       {error && <span className="why" role="alert">{error}</span>}
       {!vote && (error || attempt > 0) && (
         <button className="act" data-action="market.vote-retry" disabled={busy} onClick={() => { buttons.current?.focus(); setAttempt((n) => n + 1); }}>
-          {t(busy ? "正在读取…" : "重试")}
+          {t(busy ? "common.loading" : "common.retry")}
         </button>
       )}
     </div>

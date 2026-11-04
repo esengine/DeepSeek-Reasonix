@@ -22,17 +22,17 @@ export function UploadUsage({ port }: { port: Pick<AgentPort, "uploadUsage"> }) 
   const today = report?.daily[report.daily.length - 1]?.bytes ?? 0;
   return (
     <Group id="upload-usage"
-      title={t("上传量")}
-      hint={t("发给模型服务商的请求内容大小（不含连接本身的开销，也不含下载）。每次请求都会带上完整的对话，所以它取决于上下文有多长、请求有多少次，缓存命中只省费用、不省流量。")}
+      title={t("usage.upload_volume")}
+      hint={t("usage.the_size_of_the_request")}
     >
       {failed && <p className="note" role="alert">{failed}</p>}
-      {report && report.requests === 0 && <p className="note">{t("还没有记录：从这个版本起开始统计。")}</p>}
+      {report && report.requests === 0 && <p className="note">{t("usage.nothing_recorded_yet_counting_starts")}</p>}
       {report && report.requests > 0 && (
         <>
-          <div className="lrow"><span className="ds">{t("今天上传")}</span><span className="sc">{bytes(today)}</span></div>
+          <div className="lrow"><span className="ds">{t("usage.uploaded_today")}</span><span className="sc">{bytes(today)}</span></div>
           <div className="lrow">
-            <span className="ds">{t("近 {n} 天上传", { n: DAYS })}</span>
-            <span className="sc">{t("{size}，{n} 次请求，平均每次 {avg}", { size: bytes(report.bytes), n: count(report.requests), avg: bytes(Math.round(report.bytes / report.requests)) })}</span>
+            <span className="ds">{t("usage.uploaded_in_the_last_n", { n: DAYS })}</span>
+            <span className="sc">{t("usage.size_in_n_requests_avg", { size: bytes(report.bytes), n: count(report.requests), avg: bytes(Math.round(report.bytes / report.requests)) })}</span>
           </div>
           {report.providers.map((p) => (
             <div className="lrow" key={p.provider}>

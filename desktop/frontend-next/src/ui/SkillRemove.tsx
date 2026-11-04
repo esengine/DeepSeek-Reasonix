@@ -30,14 +30,14 @@ export function SkillRemove({ port, sk, onClose, onDone }: { port: AgentPort; sk
   return (
     <div className="skupd mkt addpkg" data-stage="confirm" aria-busy={busy}>
       <div className="find" data-lvl="warn">
-        <span className="t">{t("卸载技能「{name}」？", { name: sk.name })}</span>
-        <span className="why">{t(sk.removesFolder ? "会从磁盘删除下面这个文件夹及其中所有文件，不能撤销。要再用它，需要重新安装。" : "会从磁盘删除下面这个文件，不能撤销。要再用它，需要重新安装。")}</span>
+        <span className="t">{t("ext.remove_the_skill_name", { name: sk.name })}</span>
+        <span className="why">{t(sk.removesFolder ? "ext.this_deletes_the_folder_below" : "ext.this_deletes_the_file_below")}</span>
         <code>{sk.removes}</code>
       </div>
       <div className="acts">
-        {stale && <button className="act" data-action="skills.remove-reload" onClick={onDone}>{t("重新读取")}</button>}
-        <button className="act" data-action="skills.remove-cancel" disabled={busy} onClick={onClose}>{t("取消")}</button>
-        <button className="act danger" data-action="skills.remove-confirm" disabled={busy} onClick={() => void remove()}>{t(busy ? "卸载中…" : "卸载")}</button>
+        {stale && <button className="act" data-action="skills.remove-reload" onClick={onDone}>{t("common.read_again")}</button>}
+        <button className="act" data-action="skills.remove-cancel" disabled={busy} onClick={onClose}>{t("common.cancel")}</button>
+        <button className="act danger" data-action="skills.remove-confirm" disabled={busy} onClick={() => void remove()}>{t(busy ? "ext.removing" : "ext.remove")}</button>
       </div>
       {error && <div className="why" role="alert">{error}</div>}
     </div>

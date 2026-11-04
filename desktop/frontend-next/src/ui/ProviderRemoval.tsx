@@ -2,15 +2,15 @@ import { t } from "../i18n";
 import type { ProviderRemoval } from "../port/port";
 
 const ROLE_LABEL: Record<string, () => string> = {
-  default: () => t("默认模型"),
-  planner: () => t("计划"),
-  subagent: () => t("子代理"),
-  vision: () => t("看图"),
-  guardian: () => t("复核"),
-  recovery: () => t("恢复审查"),
-  triage: () => t("小型分类"),
-  decision: () => t("决策"),
-  advisor: () => t("顾问"),
+  default: () => t("common.default_model"),
+  planner: () => t("common.plan"),
+  subagent: () => t("common.subagents"),
+  vision: () => t("models.vision"),
+  guardian: () => t("models.review"),
+  recovery: () => t("models.recovery_review"),
+  triage: () => t("models.small_classifications"),
+  decision: () => t("models.decision"),
+  advisor: () => t("models.advisor"),
 };
 
 export function roleLabel(id: string): string {
@@ -37,10 +37,10 @@ export function RemovalNotice({ removal }: { removal: Removal }) {
   const cleared = report?.cleared.map(roleLabel).join("、") ?? "";
   return (
     <div className="find" data-lvl="warn" role={why ? "alert" : "status"}>
-      <span className="t">{why ? t("{name} 的删除没有完整完成", { name }) : t("已删除 {name}", { name })}</span>
+      <span className="t">{why ? t("models.removing_name_did_not_fully", { name }) : t("models.removed_name", { name })}</span>
       {why && <span className="why">{why}</span>}
-      {moved && <span className="why">{t("已改用 {to}：{roles}", { to: report?.movedTo ?? "", roles: moved })}</span>}
-      {cleared && <span className="why">{t("已清空，对应功能已关闭：{roles}", { roles: cleared })}</span>}
+      {moved && <span className="why">{t("models.now_using_to_for_roles", { to: report?.movedTo ?? "", roles: moved })}</span>}
+      {cleared && <span className="why">{t("models.cleared_so_these_are_off", { roles: cleared })}</span>}
     </div>
   );
 }

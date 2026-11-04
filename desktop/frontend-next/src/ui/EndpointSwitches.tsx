@@ -34,39 +34,39 @@ export function EndpointSwitches({
     <div className="pdetail-options">
       {entry.canWebSearch && (
         <div className="vway">
-          <span className="lb">{t("联网搜索")}</span>
-          <div className="seg" role="group" aria-label={t("{name} 的联网搜索", { name: label })}>
+          <span className="lb">{t("models.web_search")}</span>
+          <div className="seg" role="group" aria-label={t("models.web_search_for_name", { name: label })}>
             {[true, false].map((on) => (
               <button key={String(on)} type="button" data-action="provider.draft" data-value={`web-search:${on}`}
                 aria-pressed={search === on} disabled={disabled} onClick={() => onSearch(on)}>
-                {t(on ? "开" : "关")}
+                {t(on ? "models.on" : "common.off")}
               </button>
             ))}
           </div>
-          <span className="why">{t("端点自己执行的搜索，不占本地工具。")}</span>
+          <span className="why">{t("models.the_endpoint_runs_the_search")}</span>
         </div>
       )}
       {entry.canSetThinking && (
         <div className="vway">
-          <span className="lb">{t("思考参数")}</span>
-          <div className="seg" role="group" aria-label={t("{name} 的思考参数", { name: label })}>
+          <span className="lb">{t("models.thinking_parameter")}</span>
+          <div className="seg" role="group" aria-label={t("models.thinking_parameter_for_name", { name: label })}>
             {[true, false].map((on) => (
               <button key={String(on)} type="button" data-action="provider.draft" data-value={`thinking:${on}`}
                 aria-pressed={sendsThinking === on} disabled={disabled} onClick={() => onThinking(on)}>
-                {t(on ? "自动" : "不发送")}
+                {t(on ? "common.auto" : "models.do_not_send")}
               </button>
             ))}
           </div>
           <span className="why">
-            {t(sendsThinking ? "部分中转站不支持思考控制字段，会拒绝整个请求。遇到这种情况请切换为「不发送」。" : "只发送常规聊天参数，不再指定思考深度；模型自身的推理行为不受影响。")}
+            {t(sendsThinking ? "models.some_relays_do_not_accept" : "models.sends_only_the_ordinary_chat")}
           </span>
           {sendsThinking && shape}
         </div>
       )}
       {entry.canSetContinuation && (
         <div className="vway">
-          <span className="lb">{t("上下文续接")}</span>
-          <div className="seg" role="group" aria-label={t("{name} 的上下文续接方式", { name: label })}>
+          <span className="lb">{t("models.carrying_context")}</span>
+          <div className="seg" role="group" aria-label={t("models.how_name_carries_context_between", { name: label })}>
             {CONTINUATIONS.map(([mode, text]) => (
               <button key={mode} type="button" data-action="provider.draft" data-value={`continuation:${mode || "auto"}`}
                 aria-pressed={continuation === mode} disabled={disabled} onClick={() => onContinuation(mode)}>

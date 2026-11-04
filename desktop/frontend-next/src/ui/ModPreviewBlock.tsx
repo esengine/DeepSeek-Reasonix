@@ -38,42 +38,42 @@ export function ModPreviewBlock({ mod }: { mod: ModPreview }) {
   const dynamic = mod.events.filter((e) => e.dynamic).length;
   const calls = mod.api.map((c) => (c.dynamic ? "$.…" : c.method ? `$.${c.namespace}.${c.method}` : `$.${c.namespace}`));
   return (
-    <section className="modpreview" aria-label={t("Claude Code mod 预览")}>
+    <section className="modpreview" aria-label={t("ext.claude_code_mod_preview")}>
       <div className="risk" data-kind="shell">
-        <span className="lb">{t("Claude Code mod · 完全信任")}</span>
-        <span className="why">{t("它的代码会在这台电脑上以你的权限运行：没有沙盒，不受网络出口治理，它做的事也不会被本应用观测到。只有在设置里打开「运行 Claude Code mod」后才会运行。")}</span>
+        <span className="lb">{t("ext.claude_code_mod_full_trust")}</span>
+        <span className="why">{t("ext.its_code_runs_on_this")}</span>
       </div>
-      <p className="why">{t("下面是读取代码语法树得到的静态清单，不是保证：imports 是看不见的代码；eval、new Function 和用计算出来的名字访问接口，都会让清单列不全。")}</p>
+      <p className="why">{t("ext.what_follows_is_a_static")}</p>
       {!mod.listed ? (
         <div className="risk" data-kind="secret">
-          <span className="lb">{t("未预览")}</span>
+          <span className="lb">{t("ext.not_previewed")}</span>
           <span className="dt">{t(NOT_LISTED[mod.reason ?? ""] ?? mod.reason ?? "")}</span>
-          <span className="why">{t("这不等于没问题：读不了的代码按“未预览”处理。")}</span>
+          <span className="why">{t("ext.that_does_not_mean_it")}</span>
         </div>
       ) : (
         <>
-          <div className="risk"><span className="lb">{t("它挂钩的事件")}</span><span className="dt">{mod.events.filter((e) => !e.dynamic).map((e) => e.name).join(", ") || t("（没有列出）")}</span></div>
-          {dynamic > 0 && <div className="risk" data-kind="secret"><span className="lb">{t("名字无法列出的事件")}</span><span className="dt">{dynamic}</span></div>}
-          {calls.length > 0 && <div className="risk"><span className="lb">{t("它用到的接口")}</span><span className="dt">{calls.join(", ")}</span></div>}
-          {mod.session.some((m) => SESSION_READ.has(m)) && <div className="risk"><span className="lb">{t("读你的对话")}</span><span className="dt">{mod.session.filter((m) => SESSION_READ.has(m)).join(", ")}</span></div>}
-          {mod.session.includes("submit") && <div className="risk" data-kind="secret"><span className="lb">{t("往模型面前排提示")}</span><span className="dt">{t("以它自己的名义，不冒充你")}</span></div>}
+          <div className="risk"><span className="lb">{t("ext.events_it_hooks")}</span><span className="dt">{mod.events.filter((e) => !e.dynamic).map((e) => e.name).join(", ") || t("ext.none_listed")}</span></div>
+          {dynamic > 0 && <div className="risk" data-kind="secret"><span className="lb">{t("ext.events_whose_names_cannot_be")}</span><span className="dt">{dynamic}</span></div>}
+          {calls.length > 0 && <div className="risk"><span className="lb">{t("ext.api_it_uses")}</span><span className="dt">{calls.join(", ")}</span></div>}
+          {mod.session.some((m) => SESSION_READ.has(m)) && <div className="risk"><span className="lb">{t("ext.reads_your_conversation")}</span><span className="dt">{mod.session.filter((m) => SESSION_READ.has(m)).join(", ")}</span></div>}
+          {mod.session.includes("submit") && <div className="risk" data-kind="secret"><span className="lb">{t("ext.queues_prompts_in_front_of")}</span><span className="dt">{t("ext.under_its_own_name_never")}</span></div>}
           {mod.imports.length > 0 && (
             <div className="risk" data-kind="secret">
-              <span className="lb">{t("它引入的代码（看不见）")}</span>
+              <span className="lb">{t("ext.code_it_pulls_in_not")}</span>
               <span className="dt">{mod.imports.map((i) => `${IMPORT_KIND[i.kind] ?? i.kind} ${i.spec}`).join(", ")}</span>
             </div>
           )}
           {mod.findings.length > 0 && (
             <div className="risk" data-kind="secret">
-              <span className="lb">{t("会让清单列不全的写法")}</span>
+              <span className="lb">{t("ext.constructs_that_leave_the_listing")}</span>
               <span className="dt">{list(mod.findings.map((f) => t(FINDING[f.kind] ?? f.kind)))}</span>
             </div>
           )}
-          {mod.unserved.length > 0 && <div className="risk"><span className="lb">{t("本应用不会触发的事件")}</span><span className="dt">{mod.unserved.join(", ")}</span></div>}
+          {mod.unserved.length > 0 && <div className="risk"><span className="lb">{t("ext.events_this_app_never_raises")}</span><span className="dt">{mod.unserved.join(", ")}</span></div>}
         </>
       )}
       <div className="risk">
-        <span className="lb">{t("模块")}</span>
+        <span className="lb">{t("ext.module")}</span>
         <span className="dt" title={mod.sha256}>{mod.module} · {mod.sha256.slice(0, 12)}</span>
       </div>
     </section>

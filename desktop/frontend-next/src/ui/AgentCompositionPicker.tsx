@@ -15,7 +15,7 @@ function compositionName(id: string, name: string): string {
 }
 
 function compositionSource(id: string): string {
-  return t(id.startsWith("builtin:") ? "内置" : id.startsWith("project:") ? "项目" : "个人");
+  return t(id.startsWith("builtin:") ? "common.built_in" : id.startsWith("project:") ? "common.project" : "persona.personal");
 }
 
 export function AgentCompositionPicker({ port, binding, locked: statusLocked, running, onChanged, onSettings, onError }: {
@@ -44,20 +44,20 @@ export function AgentCompositionPicker({ port, binding, locked: statusLocked, ru
   }, [enabled, port, running, binding?.digest, binding?.started]);
   if (!enabled) return null;
   if (unavailable) return <button className="mode composition-trigger" onClick={onSettings}
-    data-action="agent-composition.unavailable">{t("Agent 预设暂不可用")}</button>;
+    data-action="agent-composition.unavailable">{t("persona.agent_presets_unavailable")}</button>;
   if (!catalog) return null;
   const selected = catalog.presets.find((v) => v.definition.id === (current?.id ?? "builtin:general"))?.definition;
   const locked = running || statusLocked || !!current?.started;
-  const label = current ? compositionName(current.id, current.name) : t(selected?.name ?? "日常搭档");
+  const label = current ? compositionName(current.id, current.name) : t(selected?.name ?? "persona.everyday_partner");
   const items: MenuItem[] = locked && !createNew ? [] : catalog.presets.map(({ definition }) => ({
     value: definition.id,
     label: compositionName(definition.id, definition.name),
     meta: compositionSource(definition.id),
     desc: definition.id.startsWith("builtin:") ? t(definition.description) : definition.description,
-    right: locked ? t("新建会话") : undefined,
+    right: locked ? t("common.start_a_new_session") : undefined,
     disabled: busy,
   }));
-  items.push({ value: MANAGE, label: `${t("管理 Agent 预设")}…`, plain: true, divide: true });
+  items.push({ value: MANAGE, label: `${t("persona.manage_agent_presets")}…`, plain: true, divide: true });
   const choose = (id: string) => {
     if (id === MANAGE) { onSettings(); return; }
     if (busy) return;
@@ -70,18 +70,18 @@ export function AgentCompositionPicker({ port, binding, locked: statusLocked, ru
     <Picker
       className="mode composition-trigger"
       menuClassName="composer-menu composition-menu"
-      ariaLabel={`${t("Agent 组合")}：${label}${current ? ` · ${compositionSource(current.id)}` : ""}${locked ? ` · ${t("已锁定")}` : ""}`}
+      ariaLabel={`${t("persona.agent_composition")}：${label}${current ? ` · ${compositionSource(current.id)}` : ""}${locked ? ` · ${t("persona.locked")}` : ""}`}
       data-action={(id) => id === MANAGE ? "agent-composition.manage" : locked ? "agent-composition.new" : "agent-composition.select"}
-      title={locked ? t("该会话已开始，模式已锁定。请用其他模式新建会话。") : selected?.description ? (selected.id.startsWith("builtin:") ? t(selected.description) : selected.description) : t("首次提交前可切换 Agent 组合")}
+      title={locked ? t("persona.this_conversation_has_started_and") : selected?.description ? (selected.id.startsWith("builtin:") ? t(selected.description) : selected.description) : t("persona.choose_an_agent_composition_before")}
       pending={busy}
       label={<><span className="nm">{label}</span><StudioIcon name="down" /></>}
-      menuTitle={<><b>{t("Agent 预设")}</b><small>{t(locked ? "已锁定" : "首次提交前可切换")}</small></>}
-      head={<>{locked && <p className="composition-menu-note">{t("该会话已开始，模式已锁定。请用其他模式新建会话。")}</p>}{current && current.resourceMode !== "live" && <p className="composition-menu-note">{t("已固定资源快照")}</p>}</>}
+      menuTitle={<><b>{t("persona.agent_presets")}</b><small>{t(locked ? "persona.locked" : "persona.switch_before_the_first_message")}</small></>}
+      head={<>{locked && <p className="composition-menu-note">{t("persona.this_conversation_has_started_and")}</p>}{current && current.resourceMode !== "live" && <p className="composition-menu-note">{t("persona.resources_fixed_to_a_saved")}</p>}</>}
       items={items}
       current={locked ? undefined : current?.id ?? "builtin:general"}
       onPick={choose}
       place="bottom"
     />
-    {current?.unavailable && <span role="alert" title={current.unavailable}>{t("组合资源不可用，当前会话仅可查看历史。")}</span>}
+    {current?.unavailable && <span role="alert" title={current.unavailable}>{t("persona.composition_resources_are_unavailable_this")}</span>}
   </span>;
 }

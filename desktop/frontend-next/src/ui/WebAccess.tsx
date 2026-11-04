@@ -24,9 +24,9 @@ const PROBE: Record<string, string> = {
   "search.searxng_address_refused": "测试不会连接这个地址：它是链路本地、云元数据或未指定地址。自托管实例请用本机或局域网地址。",
 };
 const probeSaid = (r: SearxngProbe) =>
-  r.ok ? t("连通：这个 SearXNG 能返回 JSON 搜索结果。")
+  r.ok ? t("models.connected_this_searxng_returns_json")
     : PROBE[r.code ?? ""] ? t(PROBE[r.code ?? ""])
-      : t("这个 SearXNG 拒绝了测试搜索（HTTP {status}）：稍后重试，或查看它的日志。", { status: String(r.status ?? "") });
+      : t("models.this_searxng_refused_the_test", { status: String(r.status ?? "") });
 const said = (kind: Kind, id: string) => (NAME[kind][id] ? t(NAME[kind][id]) : id);
 
 /** Where the agent looks things up and reads pages from: an ordered list per
@@ -101,11 +101,11 @@ export function WebAccess({ port }: { port: AgentPort }) {
     const order = (next: string[]) => apply(kind === "search" ? { search_backends: next } : { fetch_backends: next });
     const consent = (next: string[]) => apply(kind === "search" ? { search_paid_allowed: next } : { fetch_paid_allowed: next });
     const rows = [...on.filter((id) => known.includes(id)), ...known.filter((id) => !on.includes(id))];
-    const title = kind === "search" ? t("网页搜索") : t("网页抓取");
+    const title = kind === "search" ? t("common.web_search") : t("models.web_fetch");
     return (
       <div className="wa-sec" role="group" aria-label={title}>
-        <div className="peernote"><b>{title}</b>{" "}{kind === "search" ? t("按顺序试：先用前面的免费后端，都失败了才会用付费的。") : t("按顺序试：先用前面的免费后端，都失败了才会用付费的。")}</div>
-        {on.length === 0 && <div className="peernote">{kind === "search" ? t("没有启用任何搜索后端：沿用模型自带的搜索。") : t("没有启用任何抓取后端：只用本机抓取。")}</div>}
+        <div className="peernote"><b>{title}</b>{" "}{kind === "search" ? t("models.tried_in_order_the_free") : t("models.tried_in_order_the_free")}</div>
+        {on.length === 0 && <div className="peernote">{kind === "search" ? t("models.no_search_backend_is_on") : t("models.no_fetch_backend_is_on")}</div>}
         <ul className="wa-list">
           {rows.map((id) => {
             const idx = on.indexOf(id);
@@ -116,23 +116,23 @@ export function WebAccess({ port }: { port: AgentPort }) {
                 <span className="tx"><span className="lb">{said(kind, id)}</span><span className="ds">{NOTE[kind][id] ? t(NOTE[kind][id]) : ""}</span></span>
                 {enabled && (
                   <span className="acts">
-                    <button className="act" data-action="web-access.move" data-value="up" disabled={locked || idx === 0} aria-label={t("上移 {name}", { name: said(kind, id) })}
+                    <button className="act" data-action="web-access.move" data-value="up" disabled={locked || idx === 0} aria-label={t("common.move_name_up", { name: said(kind, id) })}
                       onClick={() => void order(on.map((x, i) => (i === idx - 1 ? id : i === idx ? on[idx - 1] : x)))}>↑</button>
-                    <button className="act" data-action="web-access.move" data-value="down" disabled={locked || idx === on.length - 1} aria-label={t("下移 {name}", { name: said(kind, id) })}
+                    <button className="act" data-action="web-access.move" data-value="down" disabled={locked || idx === on.length - 1} aria-label={t("common.move_name_down", { name: said(kind, id) })}
                       onClick={() => void order(on.map((x, i) => (i === idx + 1 ? id : i === idx ? on[idx + 1] : x)))}>↓</button>
                   </span>
                 )}
                 <Switch data-action="web-access.backend" data-value={id} on={enabled} busy={locked}
-                  label={t("启用 {name}", { name: said(kind, id) })}
+                  label={t("common.enable_name", { name: said(kind, id) })}
                   onClick={() => void order(enabled ? on.filter((x) => x !== id) : [...on, id])} />
                 {paid && (enabled || allowed.includes(id)) && (
                   <div className="wa-consent">
                     <span className="tx">
-                      <span className="lb">{kind === "search" ? t("同意网页搜索按次计费") : t("同意网页抓取按次计费")}</span>
-                      <span className="ds">{state.deepseek_api_ready || allowed.includes(id) ? t("同意后，前面的后端都失败时才会调用它，费用记在你的 DeepSeek 账户上。不勾选就不会用它。") : t("需要一个带密钥的 DeepSeek 提供方，才能使用并同意这一项。")}</span>
+                      <span className="lb">{kind === "search" ? t("models.agree_to_be_billed_per_2") : t("models.agree_to_be_billed_per")}</span>
+                      <span className="ds">{state.deepseek_api_ready || allowed.includes(id) ? t("models.once_you_agree_it_is") : t("models.this_needs_a_deepseek_provider")}</span>
                     </span>
                     <Switch data-action="web-access.consent" data-value={`${kind}:${id}`} on={allowed.includes(id)} busy={locked || (!state.deepseek_api_ready && !allowed.includes(id))}
-                      label={kind === "search" ? t("同意网页搜索按次计费") : t("同意网页抓取按次计费")}
+                      label={kind === "search" ? t("models.agree_to_be_billed_per_2") : t("models.agree_to_be_billed_per")}
                       onClick={() => void consent(allowed.includes(id) ? allowed.filter((x) => x !== id) : [...allowed, id])} />
                   </div>
                 )}
@@ -142,12 +142,12 @@ export function WebAccess({ port }: { port: AgentPort }) {
         </ul>
         {kind === "search" && on.includes("searxng") && (
           <div className="wa-url">
-            <label className="peernote" htmlFor="searxng-url">{t("SearXNG 地址")}</label>
-            <input id="searxng-url" className="peerfield" data-action-change="web-access.searxng-url" aria-label={t("SearXNG 地址")} placeholder="http://127.0.0.1:8080"
+            <label className="peernote" htmlFor="searxng-url">{t("models.searxng_address")}</label>
+            <input id="searxng-url" className="peerfield" data-action-change="web-access.searxng-url" aria-label={t("models.searxng_address")} placeholder="http://127.0.0.1:8080"
               value={url} disabled={locked} onChange={(e) => setUrl(e.target.value)}
               onBlur={() => { if (url.trim() !== state.searxng_url) void apply({ searxng_url: url.trim() }); }} />
             <div className="wa-test">
-              <button className="act" data-action="web-access.probe" disabled={readOnly || probing || !url.trim()} onClick={() => void test()}>{probing ? t("正在测试…") : t("测试连接")}</button>
+              <button className="act" data-action="web-access.probe" disabled={readOnly || probing || !url.trim()} onClick={() => void test()}>{probing ? t("models.testing") : t("common.test_it")}</button>
               {probe && <div className={probe.ok ? "peernote" : "peernote bad"} role="status">{probeSaid(probe)}</div>}
             </div>
           </div>
@@ -157,25 +157,25 @@ export function WebAccess({ port }: { port: AgentPort }) {
   };
 
   return (
-    <Group id="web-access" title={t("联网：搜索与抓取")} hint={t("agent 查资料和读网页时用哪些后端。免费的先试，付费的只有你明确同意、并且前面的都失败时才会用。")}>
+    <Group id="web-access" title={t("models.web_search_and_fetch")} hint={t("models.which_backends_the_agent_uses")}>
       <div className="box">
         {section("search")}
         {section("fetch")}
-        <div className="wa-sec" role="group" aria-label={t("视频地址")}>
-          <div className="peernote"><b>{t("视频地址")}</b>{" "}{t("模型可以把你在对话里写的公开视频地址交给模型厂商读取。默认关闭，立即生效。")}</div>
+        <div className="wa-sec" role="group" aria-label={t("models.video_addresses")}>
+          <div className="peernote"><b>{t("models.video_addresses")}</b>{" "}{t("models.the_model_can_hand_a")}</div>
           <ul className="wa-list">
             <li>
               <span className="tx">
-                <span className="lb">{t("把视频地址交给模型厂商")}</span>
-                <span className="ds">{t("开启后，该网址会被厂商直接访问：由厂商的服务器去打开它，不是本机下载。只有你自己写在对话里的地址才会交出去，且所选模型的厂商要支持。")}</span>
+                <span className="lb">{t("models.hand_video_addresses_to_the")}</span>
+                <span className="ds">{t("models.when_on_the_address_is")}</span>
               </span>
-              <Switch data-action="web-access.video-url" on={state.video_url_passthrough} busy={locked} label={t("把视频地址交给模型厂商")}
+              <Switch data-action="web-access.video-url" on={state.video_url_passthrough} busy={locked} label={t("models.hand_video_addresses_to_the")}
                 onClick={() => void apply({ video_url_passthrough: !state.video_url_passthrough })} />
             </li>
           </ul>
         </div>
-        <div className="peernote">{t("保存后只对之后新开的窗格生效，已开的窗格沿用旧设置。这些设置写在用户配置文件里：")}<code>{state.path}</code></div>
-        {readOnly && <div className="peernote" role="status">{t("这些设置现在是只读的：这个窗口没有被授予编辑权限。")}</div>}
+        <div className="peernote">{t("models.a_saved_change_reaches_only")}<code>{state.path}</code></div>
+        {readOnly && <div className="peernote" role="status">{t("common.these_settings_are_read_only")}</div>}
         {error && <div className="why" role="alert">{error}</div>}
       </div>
     </Group>

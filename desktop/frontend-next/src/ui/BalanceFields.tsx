@@ -24,9 +24,9 @@ export function BalanceFields({ entry, url, format, onUrl, onFormat }: {
   return (
     <>
       <label className="grow full">
-        <span>{t("余额地址")}</span>
+        <span>{t("usage.balance_address")}</span>
         <input
-          aria-label={t("余额地址")}
+          aria-label={t("usage.balance_address")}
           data-action="provider.draft"
           data-value="balance-url"
           value={url}
@@ -34,21 +34,21 @@ export function BalanceFields({ entry, url, format, onUrl, onFormat }: {
           placeholder="https://api.deepseek.com/user/balance"
           onChange={(e) => onUrl(e.target.value)}
         />
-        <i className="tip">{t("留空则不显示余额。密钥只会发给这个地址，不会跟随跳转。")}</i>
+        <i className="tip">{t("usage.leave_empty_to_show_no")}</i>
       </label>
       {url.trim() !== "" && (
         <label className="grow full">
-          <span>{t("余额格式")}</span>
-          <select aria-label={t("余额格式")} data-action="provider.draft" data-value="balance-format" value={format} onChange={(e) => onFormat(e.target.value)}>
-            <option value="">{implied ? t("按地址推断（{format}）", { format: t(FORMAT_LABEL[implied] ?? implied) }) : t("未选择")}</option>
+          <span>{t("usage.balance_format")}</span>
+          <select aria-label={t("usage.balance_format")} data-action="provider.draft" data-value="balance-format" value={format} onChange={(e) => onFormat(e.target.value)}>
+            <option value="">{implied ? t("usage.from_the_address_format", { format: t(FORMAT_LABEL[implied] ?? implied) }) : t("common.no_selection")}</option>
             {formats.map((f) => (
               <option key={f} value={f}>{t(FORMAT_LABEL[f] ?? f)}</option>
             ))}
           </select>
-          <i className="tip">{t("供应商自己的域名会按它的格式读取；其他地址（例如中转站）必须选择它返回的格式，否则不读取余额。")}</i>
+          <i className="tip">{t("usage.a_vendors_own_domain_is")}</i>
         </label>
       )}
-      {needs && <div className="why">{t("余额格式未配置：这个地址不是供应商自己的域名，选择格式之前不会读取余额。")}</div>}
+      {needs && <div className="why">{t("usage.balance_format_not_set_this")}</div>}
     </>
   );
 }

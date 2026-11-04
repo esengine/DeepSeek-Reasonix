@@ -23,7 +23,7 @@ export function Extensions({
   return (
     <div className="block" data-b="extpanels">
       <div className="lbl">
-        {t("扩展")}<span className="c">{panels.length + views.length}</span>
+        {t("ext.extension")}<span className="c">{panels.length + views.length}</span>
       </div>
       {views.map((v) => (
         <div className="extpanel" key={`${v.pluginId}:${v.surfaceId}`}>

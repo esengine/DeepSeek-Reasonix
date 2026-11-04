@@ -46,7 +46,7 @@ function NetworkInput({ port, host }: { port: AgentPort; host: string }) {
     return () => { current = false; live.current = false; };
   }, [port]);
 
-  if (!settings) return <div className="empty" role={error ? "alert" : "status"}>{error || t("正在读取网络配置…")}</div>;
+  if (!settings) return <div className="empty" role={error ? "alert" : "status"}>{error || t("models.loading_network_settings")}</div>;
   const { saved, draft: net } = settings;
   const changed = EDITABLE.some((key) => net[key] !== saved[key]) || password !== "" || clearPassword;
 
@@ -96,9 +96,9 @@ function NetworkInput({ port, host }: { port: AgentPort; host: string }) {
   return (
     <div className="net">
       {host && (
-        <p className="note">{t("以下是 {host} 上的网络设置。本机的代理需要在打开本机会话时设置。", { host })}</p>
+        <p className="note">{t("models.these_are_the_network_settings", { host })}</p>
       )}
-      <div className="seg" data-text role="radiogroup" aria-label={t("代理模式")}>
+      <div className="seg" data-text role="radiogroup" aria-label={t("models.proxy_mode")}>
         {MODES.map(([id, label]) => (
           <button key={id} role="radio" aria-checked={net.mode === id} disabled={busy === "save"} onClick={() => patch({ mode: id })}>
             {t(label)}
@@ -108,18 +108,18 @@ function NetworkInput({ port, host }: { port: AgentPort; host: string }) {
       <p className="note">{t(MODES.find(([id]) => id === net.mode)?.[2] ?? "")}</p>
 
       <div className="kv">
-        <span className="k">{t("当前生效")}</span>
+        <span className="k">{t("common.in_effect")}</span>
         <span className="v">{saved.effective || "—"}</span>
       </div>
       {saved.endpoint && (
         <div className="kv">
-          <span className="k">{t("测试目标")}</span>
+          <span className="k">{t("models.test_target")}</span>
           <span className="v">{saved.endpoint}</span>
         </div>
       )}
       {!!saved.direct?.length && (
         <div className="kv">
-          <span className="k">{t("始终直连")}</span>
+          <span className="k">{t("models.always_connect_directly")}</span>
           <span className="v">{saved.direct.join(", ")}</span>
         </div>
       )}
@@ -127,7 +127,7 @@ function NetworkInput({ port, host }: { port: AgentPort; host: string }) {
       {net.mode === "custom" && (
         <div className="fields">
           <label>
-            <span>{t("协议")}</span>
+            <span>{t("models.protocol")}</span>
             <select value={net.type || "http"} disabled={busy === "save"} onChange={(e) => patch({ type: e.target.value })}>
               {TYPES.map((t) => (
                 <option key={t} value={t}>
@@ -137,11 +137,11 @@ function NetworkInput({ port, host }: { port: AgentPort; host: string }) {
             </select>
           </label>
           <label className="grow">
-            <span>{t("服务器")}</span>
+            <span>{t("models.server")}</span>
             <input value={net.server ?? ""} disabled={busy === "save"} placeholder="proxy.corp" onChange={(e) => patch({ server: e.target.value })} />
           </label>
           <label>
-            <span>{t("端口")}</span>
+            <span>{t("common.port")}</span>
             <input
               className="port"
               inputMode="numeric"
@@ -152,16 +152,16 @@ function NetworkInput({ port, host }: { port: AgentPort; host: string }) {
             />
           </label>
           <label className="grow">
-            <span>{t("用户名（可选）")}</span>
+            <span>{t("models.username_optional")}</span>
             <input value={net.username ?? ""} disabled={busy === "save"} onChange={(e) => patch({ username: e.target.value })} />
           </label>
           <label className="grow">
-            <span>{t("密码（可选）")}</span>
+            <span>{t("models.password_optional")}</span>
             <input
               type="password"
               disabled={busy === "save"}
               value={password}
-              placeholder={t(net.hasPassword ? "已保存，留空即保持不变" : "可填写 ${PROXY_PASSWORD}")}
+              placeholder={t(net.hasPassword ? "models.saved_leave_blank_to_keep" : "models.you_can_write_proxy_password")}
               onChange={(e) => {
                 if (!live.current || pending.current === "save") return;
                 setPassword(e.target.value);
@@ -174,11 +174,11 @@ function NetworkInput({ port, host }: { port: AgentPort; host: string }) {
               <input type="checkbox" checked={clearPassword} disabled={busy === "save"} onChange={(e) => {
                 if (live.current && pending.current !== "save") setClear(e.target.checked);
               }} />
-              <span>{t("删除已保存的密码")}</span>
+              <span>{t("models.delete_the_saved_password")}</span>
             </label>
           )}
           <label className="grow full">
-            <span>{t("这些地址直连")}</span>
+            <span>{t("models.reach_these_addresses_directly")}</span>
             <input
               value={net.noProxy ?? ""}
               disabled={busy === "save"}
@@ -191,16 +191,16 @@ function NetworkInput({ port, host }: { port: AgentPort; host: string }) {
 
       <div className="acts">
         <button className="act" data-action="network.diagnose" disabled={!!busy} onClick={() => void diagnose()}>
-          {t(busy === "test" ? "测试中…" : "测试已保存配置")}
+          {t(busy === "test" ? "models.testing_2" : "models.test_saved_settings")}
         </button>
         <button className="act" data-action="network.save" data-primary disabled={!!busy || !changed} onClick={() => void save()}>
-          {t(busy === "save" ? "保存中…" : "保存")}
+          {t(busy === "save" ? "common.saving" : "common.save")}
         </button>
       </div>
-      {changed && <p className="note" role="status">{t("有未保存的改动；连接测试使用已保存的配置。")}</p>}
+      {changed && <p className="note" role="status">{t("models.there_are_unsaved_changes_connection")}</p>}
 
       {probes && (
-        <div className="probes" role="region" aria-label={t("已保存配置的测试结果")}>
+        <div className="probes" role="region" aria-label={t("models.test_results_for_saved_settings")}>
           {probes.map((p, i) => (
             <div className="probe" key={i} data-ok={p.ok ? "" : undefined}>
               <i className="mk">{p.ok ? "✓" : "×"}</i>

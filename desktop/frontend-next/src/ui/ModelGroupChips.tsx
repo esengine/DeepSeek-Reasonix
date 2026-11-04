@@ -6,7 +6,7 @@ import type { MenuItem } from "./Menu";
 export function ModelGroupChips({ headings, chosen, onChange }: { headings: MenuItem[]; chosen: readonly string[]; onChange: (next: string[]) => void }) {
   if (headings.length < 2) return null;
   return (
-    <div className="mchips" role="group" aria-label={t("按服务商筛选")}>
+    <div className="mchips" role="group" aria-label={t("models.filter_by_provider")}>
       {headings.map((h) => {
         const on = chosen.includes(h.value);
         return (
@@ -25,7 +25,7 @@ export function ModelGroupChips({ headings, chosen, onChange }: { headings: Menu
       })}
       {chosen.length > 0 && (
         <button type="button" className="mchip clear" data-action="model.group-clear" onClick={() => onChange([])}>
-          {t("清除")}
+          {t("common.clear_2")}
         </button>
       )}
     </div>

@@ -78,12 +78,12 @@ function MemoryPanel({ port }: { port: AgentPort }) {
   }, [items]);
 
   const authoring = (
-    <p className="note">{tx("如需手动记录，请在输入框中使用 {cmd} 命令。", { cmd: <code>/remember</code> })}</p>
+    <p className="note">{tx("memory.to_write_one_yourself_use", { cmd: <code>/remember</code> })}</p>
   );
 
   const unreadableNotice = unreadable.length > 0 ? (
     <div className="find" data-lvl="warn" role="alert">
-      <span className="t">{t("这些记忆无法读取")}</span>
+      <span className="t">{t("memory.these_memories_could_not_be")}</span>
       <span className="why">{unreadable.map((u) => `${u.name}: ${u.error}`).join("；")}</span>
     </div>
   ) : null;
@@ -91,21 +91,21 @@ function MemoryPanel({ port }: { port: AgentPort }) {
   if (unread)
     return (
       <div className="find" data-lvl="warn" role="alert">
-        <span className="t">{t("无法读取记忆")}</span>
+        <span className="t">{t("memory.memory_could_not_be_read")}</span>
         <span className="why">
           {unread}
           <button className="lnk" data-action="memory.reload" onClick={reload}>
-            {t("重试")}
+            {t("common.retry")}
           </button>
         </span>
       </div>
     );
-  if (!items) return <div className="empty">{t("正在读取记忆…")}</div>;
+  if (!items) return <div className="empty">{t("memory.loading_memory")}</div>;
   if (items.length === 0)
     return (
       <>
         {unreadableNotice}
-        {unreadable.length === 0 && <div className="empty">{t("暂无记录。")}</div>}
+        {unreadable.length === 0 && <div className="empty">{t("memory.no_entries_yet")}</div>}
         {authoring}
       </>
     );
@@ -187,29 +187,29 @@ function MemoryPanel({ port }: { port: AgentPort }) {
       {unreadableNotice}
       {query && (
         <p className="recall">
-          {t("上一轮以「{q}」为线索检索了一次记忆", { q: clip(query) })}
-          {usedCount > 0 ? t("，命中 {n} 条", { n: usedCount }) : t("，未命中任何条目")}
+          {t("memory.last_turn_searched_memory_from", { q: clip(query) })}
+          {usedCount > 0 ? t("memory.n_of_them_used", { n: usedCount }) : t("memory.none_of_them_used")}
         </p>
       )}
       <div className="memgrid">
-        <nav className="memrail" aria-label={t("记忆分类")}>
-          {railItem({ kind: "all" }, <Icon name="all" />, t("全部"))}
-          {railItem({ kind: "new" }, <Icon name="new" />, t("新的"))}
-          {railItem({ kind: "constraint" }, <Icon name="constraint" />, t("约束"))}
-          <div className="sec">{t("类型")}</div>
+        <nav className="memrail" aria-label={t("memory.memory_categories")}>
+          {railItem({ kind: "all" }, <Icon name="all" />, t("common.all"))}
+          {railItem({ kind: "new" }, <Icon name="new" />, t("memory.new"))}
+          {railItem({ kind: "constraint" }, <Icon name="constraint" />, t("memory.constraints"))}
+          <div className="sec">{t("common.type")}</div>
           {TYPES.filter(([id]) => id !== "constraint").map(([id, name]) => railItem({ kind: "type", value: id }, <Icon name={id} />, t(name)))}
-          {galaxies.length > 0 && <div className="sec">{t("星系")}</div>}
+          {galaxies.length > 0 && <div className="sec">{t("memory.galaxy")}</div>}
           {galaxies.map(([g]) => railItem({ kind: "galaxy", value: g }, <Icon name="galaxy" />, g))}
           <div className="sec" />
-          {railItem({ kind: "faded" }, <StateIcon state="faded" />, t("已淡忘"))}
+          {railItem({ kind: "faded" }, <StateIcon state="faded" />, t("memory.faded"))}
         </nav>
         <div className="memlist">
           <label className="memsearch">
             <Icon name="search" size={14} />
-            <input type="search" data-action="memory.search" placeholder={t("搜索记忆")} aria-label={t("搜索记忆")} value={search}
+            <input type="search" data-action="memory.search" placeholder={t("memory.search_memory")} aria-label={t("memory.search_memory")} value={search}
               onChange={(e) => { setSearch(e.target.value); setShown(PAGE); }} />
           </label>
-          {page.length === 0 && <div className="empty">{t(filter.kind === "new" ? "没有等你确认的记忆。" : "没有符合的记忆。")}</div>}
+          {page.length === 0 && <div className="empty">{t(filter.kind === "new" ? "memory.nothing_is_waiting_for_you" : "memory.no_memories_match")}</div>}
           {page.map((m) => (
             <div className="memrow" key={m.name} data-target={m.name} data-used={m.usedLastTurn ? "" : undefined}
               aria-current={selected?.name === m.name || undefined} data-dim={m.state === "faded" && !m.noDecay ? "" : undefined}>
@@ -217,24 +217,24 @@ function MemoryPanel({ port }: { port: AgentPort }) {
                 <span className="txt">
                   <span className="line">
                     <span className="ti">{m.title || m.name}</span>
-                    {m.new && <span className="badge">{t("新")}</span>}
-                    {!m.noDecay && m.state === "fuzzy" && <span className="fade">{t("快淡忘了")}</span>}
-                    {!m.noDecay && m.state === "faded" && <span className="fade">{t("已淡忘")}</span>}
+                    {m.new && <span className="badge">{t("common.new")}</span>}
+                    {!m.noDecay && m.state === "fuzzy" && <span className="fade">{t("memory.fading")}</span>}
+                    {!m.noDecay && m.state === "faded" && <span className="fade">{t("memory.faded")}</span>}
                   </span>
                   <span className="gx">
-                    {t(TYPE_NAME[typeOf(m)])} · {m.galaxy || t("未归类")}
-                    {filter.kind === "new" && m.createdAt ? t(" · 来自 {d} 的对话", { d: m.createdAt.slice(5) }) : ""}
+                    {t(TYPE_NAME[typeOf(m)])} · {m.galaxy || t("memory.no_galaxy")}
+                    {filter.kind === "new" && m.createdAt ? t("memory.from_the_d_conversation", { d: m.createdAt.slice(5) }) : ""}
                   </span>
                 </span>
-                {m.usedLastTurn && <i className="dot" title={t("上一轮已使用")} />}
+                {m.usedLastTurn && <i className="dot" title={t("memory.used_last_turn")} />}
               </button>
               {filter.kind === "new" ? (
                 <span className="quick">
                   <button className="memchip" data-action="memory.confirm" data-target={m.name} disabled={busy.includes(m.name)} onClick={() => confirm(m.name)}>
-                    <Icon name="check" size={13} />{t("对")}
+                    <Icon name="check" size={13} />{t("memory.right")}
                   </button>
                   <button className="memchip" data-action="memory.forget" data-target={m.name} disabled={busy.includes(m.name)} onClick={() => forget(m.name)}>
-                    <Icon name="cross" size={13} />{t("忘掉")}
+                    <Icon name="cross" size={13} />{t("memory.forget")}
                   </button>
                 </span>
               ) : null}
@@ -242,7 +242,7 @@ function MemoryPanel({ port }: { port: AgentPort }) {
           ))}
           {list.length > shown && (
             <button className="lnk more" data-action="memory.more" onClick={() => setShown(shown + PAGE)}>
-              {t("再显示 {n} 条（共 {total} 条）", { n: Math.min(PAGE, list.length - shown), total: list.length })}
+              {t("memory.show_n_more_total_in", { n: Math.min(PAGE, list.length - shown), total: list.length })}
             </button>
           )}
         </div>

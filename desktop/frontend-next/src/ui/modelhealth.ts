@@ -51,7 +51,7 @@ export function useModelHealth(port: AgentPort, pulse: number) {
 
 export function modelHealthNote(health: ProviderHealth | "checking" | undefined): string | undefined {
   if (!health || health !== "checking" && health.connection === "disabled") return undefined;
-  if (health === "checking") return t("正在检测连接与余额…");
+  if (health === "checking") return t("models.checking_connection_and_balance");
   const connection: Record<string, string> = {
     reachable: "连接正常，模型调用未验证",
     auth: "连接鉴权失败，请检查密钥或权限",
@@ -70,22 +70,22 @@ export function modelHealthNote(health: ProviderHealth | "checking" | undefined)
     unknown: "余额暂时无法确认",
   };
   const issue = wallet[health.wallet];
-  const status = t(connection[health.connection] ?? "连接状态尚未确认");
+  const status = t(connection[health.connection] ?? "models.connection_status_unconfirmed");
   return issue ? `${t(issue)} · ${status}` : status;
 }
 
 export function modelHealthStatus(health: ProviderHealth | "checking" | undefined): MenuStatus | undefined {
   if (!health || health !== "checking" && health.connection === "disabled") return undefined;
   const detail = modelHealthNote(health);
-  if (health === "checking") return { label: t("检测中"), tone: "checking", detail };
-  if (health.wallet === "insufficient") return { label: t("余额不足"), tone: "warning", detail };
+  if (health === "checking") return { label: t("models.checking"), tone: "checking", detail };
+  if (health.wallet === "insufficient") return { label: t("common.insufficient_balance"), tone: "warning", detail };
   const failures: Record<string, string> = {
     auth: "鉴权失败", missing_key: "缺少密钥", payment_required: "需要付费",
     quota_exhausted: "配额耗尽", rate_limited: "暂时限流", timeout: "连接超时",
     unreachable: "连接异常", redirect_refused: "跳转被拒",
   };
   if (failures[health.connection]) return { label: t(failures[health.connection]), tone: "warning", detail };
-  if (health.wallet === "auth") return { label: t("余额查询失败"), tone: "warning", detail };
-  if (health.connection === "reachable") return { label: t("连接正常"), tone: "positive", detail };
-  return { label: t("连接待确认"), tone: "neutral", detail };
+  if (health.wallet === "auth") return { label: t("models.balance_check_failed"), tone: "warning", detail };
+  if (health.connection === "reachable") return { label: t("models.connected"), tone: "positive", detail };
+  return { label: t("models.unconfirmed"), tone: "neutral", detail };
 }

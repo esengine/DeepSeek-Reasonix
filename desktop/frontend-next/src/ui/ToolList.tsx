@@ -11,10 +11,10 @@ import { toolBlurb } from "./toolBlurbs";
 // it; a tool another feature needs has no switch and says which feature.
 // What needs a tool, by the kernel's feature id; an id this build does not know is shown as sent.
 function feature(id: string): string {
-  if (id === "goal_mode") return t("目标模式");
-  if (id === "deferred_mcp_tools") return t("加载延后的 MCP 工具");
-  if (id === "plan_steps") return t("计划步骤跟踪");
-  if (id === "turn_exit") return t("结束一个宿主留着没完的回合");
+  if (id === "goal_mode") return t("ext.goal_mode");
+  if (id === "deferred_mcp_tools") return t("ext.loading_deferred_mcp_tools");
+  if (id === "plan_steps") return t("ext.plan_step_tracking");
+  if (id === "turn_exit") return t("ext.ending_a_turn_the_host");
   return id;
 }
 
@@ -31,12 +31,12 @@ export function ToolList({ port }: { port: AgentPort }) {
   }, [port]);
 
   const group = (body: React.ReactNode) => (
-    <Group id="tool-list" title={t("模型可用的工具")} hint={t("关掉的工具不会再出现在发给模型的请求里，模型也调用不了它；可以省下每次请求里的提示词开销。新开的对话生效，已有对话不受影响。")}>
+    <Group id="tool-list" title={t("ext.tools_the_model_can_use")} hint={t("ext.a_tool_you_turn_off")}>
       {body}
     </Group>
   );
 
-  if (!state) return group(<div className="empty">{t("无法读取工具列表。")}</div>);
+  if (!state) return group(<div className="empty">{t("ext.could_not_read_the_tool")}</div>);
 
   const flip = async (name: string, disabled: boolean) => {
     setBusy(name);
@@ -58,9 +58,9 @@ export function ToolList({ port }: { port: AgentPort }) {
             <span className="lb">{tool.name}</span>
             <span className="ds">
               {tool.requiredBy
-                ? t("{feature}需要它，不能关闭。", { feature: feature(tool.requiredBy) })
+                ? t("ext.feature_needs_it_so_it", { feature: feature(tool.requiredBy) })
                 : tool.byProject
-                  ? t("这个项目的配置文件把它关掉了；要重新打开，请在项目的 reasonix.toml 里去掉。")
+                  ? t("ext.this_projects_config_file_turned")
                   : (toolBlurb(tool.name) ?? tool.description)}
             </span>
           </span>

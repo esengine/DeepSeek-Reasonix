@@ -63,34 +63,34 @@ export function ProviderDetail({
           <span className="pdetail-name">
             <h3>{a.label}</h3>
             <button className="pdetail-rename" data-action="provider.rename-start" data-target={a.key} disabled={busy !== ""}
-              aria-label={t("重命名 {name}（F2）", { name: a.label })} title={t("重命名 {name}（F2）", { name: a.label })}
+              aria-label={t("models.rename_name_f2", { name: a.label })} title={t("models.rename_name_f2", { name: a.label })}
               onClick={onRename}><StudioIcon name="edit" /></button>
           </span>
           <small title={`${t(KIND_LABEL[entry.kind] ?? entry.kind)} · ${a.host}`}>{t(KIND_LABEL[entry.kind] ?? entry.kind)} · {a.host}</small>
         </span>
-        {inUse && <i className="pdetail-use">{t("正在用")}</i>}
+        {inUse && <i className="pdetail-use">{t("models.in_use")}</i>}
         <button className="act" data-action="provider.probe" onClick={check} disabled={busy !== ""}>
-          {t(checking ? "测试中…" : "测试连接")}
+          {t(checking ? "models.testing_2" : "common.test_it")}
         </button>
         <button className="act" data-danger data-action="provider.remove" data-target={entry.name} onClick={() => onRemove(entry.name)} disabled={busy !== ""}>
-          {t("删除")}
+          {t("common.delete")}
         </button>
       </header>
       {removeFailed && (
         <div className="find" data-lvl="warn" role="alert">
-          <span className="t">{t("操作未完成")}</span>
+          <span className="t">{t("common.that_did_not_go_through")}</span>
           <span className="why">{removeFailed}</span>
         </div>
       )}
       {refused && (
         <div className="find" data-lvl="warn" role="status">
           <span className="t">{refused}</span>
-          <span className="why">{t("模型来源要在运行内核的那台机器上配置。")}</span>
+          <span className="why">{t("models.model_sources_are_configured_on")}</span>
         </div>
       )}
       {unanswered && (
         <div className="find" data-lvl="warn" role="status">
-          <span className="t">{t("无法连接")}</span>
+          <span className="t">{t("models.unreachable")}</span>
           <span className="why">{unanswered}</span>
         </div>
       )}
@@ -98,18 +98,18 @@ export function ProviderDetail({
         <div className="find" data-lvl={found.ok ? "ok" : "warn"} role="status">
           <span className="t">
             {found.ok
-              ? `${t("连上了")} · ${t(KIND_LABEL[found.kind ?? ""] ?? found.kind ?? "")} · ${t("{n} 个模型", { n: found.models?.length ?? 0 })}`
-              : t("无法连接")}
+              ? `${t("common.connected")} · ${t(KIND_LABEL[found.kind ?? ""] ?? found.kind ?? "")} · ${t("models.n_models", { n: found.models?.length ?? 0 })}`
+              : t("models.unreachable")}
           </span>
           <span className="why">
             {!found.ok && checkFailure(found)}
             {found.ok && found.matches === false &&
-              t("记的是 {had}，但它答的是 {got}。", { had: t(KIND_LABEL[entry.kind] ?? entry.kind), got: t(KIND_LABEL[found.kind ?? ""] ?? found.kind ?? "") })}
-            {found.ok && found.matches !== false && t("key 有效，协议也对得上。")}
-            {found.ok && found.baseUrl && " " + t("读取可用模型时，模型列表只在 {url} 下响应。聊天若能正常使用就不用改；可选：把接口地址改成它。", { url: found.baseUrl })}
-            {found.ok && found.noProxy && " " + t("走代理连不上、直连可以。")}
+              t("models.recorded_as_had_but_it", { had: t(KIND_LABEL[entry.kind] ?? entry.kind), got: t(KIND_LABEL[found.kind ?? ""] ?? found.kind ?? "") })}
+            {found.ok && found.matches !== false && t("models.the_key_works_and_the")}
+            {found.ok && found.baseUrl && " " + t("models.the_model_list_only_answers", { url: found.baseUrl })}
+            {found.ok && found.noProxy && " " + t("models.the_proxy_cannot_reach_it")}
             {found.ok && unlisted.length > 0 &&
-              " " + t("这个端点还有 {n} 个模型不在列表里：{names}。点「从服务商读取可用模型」把它们加进来。", {
+              " " + t("models.this_endpoint_has_n_more", {
                 n: unlisted.length,
                 names: unlisted.slice(0, 3).join("、") + (unlisted.length > 3 ? "…" : ""),
               })}
@@ -120,19 +120,19 @@ export function ProviderDetail({
         <div className="pdetail-options">
           {a.kinds.length > 1 && (
             <div className="vway">
-              <span className="lb">{t("接入方式")}</span>
-              <div className="seg" role="group" aria-label={t("{name} 的接入方式", { name: a.label })}>
+              <span className="lb">{t("common.protocol")}</span>
+              <div className="seg" role="group" aria-label={t("models.protocol_for_name", { name: a.label })}>
                 {a.kinds.map((k) => (
                   <button key={k} data-action="provider.protocol" data-target={entry.name} data-value={k} aria-pressed={k === kind} disabled={busy !== ""} onClick={() => onProtocol(k)}>
                     {t(KIND_LABEL[k] ?? k)}
                     {/* A door that carries a capability the other lacks has to say
                         so on itself: switching is otherwise a silent downgrade. */}
-                    {a.byKind[k].canWebSearch && <i className="perk">{t("联网搜索")}</i>}
+                    {a.byKind[k].canWebSearch && <i className="perk">{t("models.web_search")}</i>}
                   </button>
                 ))}
               </div>
               <span className="why">
-                {t(a.kinds.some((k) => a.byKind[k].canWebSearch) && !entry.canWebSearch ? "同一账号的两种接入方式。当前这一种不支持联网搜索；这是协议差异，不是可配置项。" : "同一账号的两种接入方式。切换后下方的模型列表随之改变。")}
+                {t(a.kinds.some((k) => a.byKind[k].canWebSearch) && !entry.canWebSearch ? "models.two_ways_in_to_the_2" : "models.two_ways_in_to_the")}
               </span>
             </div>
           )}

@@ -42,7 +42,7 @@ export interface RestoreSource {
 
 export function accountBackupSource(port: AgentPort, backup: BackupEntry): RestoreSource {
   return {
-    name: backup.label || t("未命名备份"),
+    name: backup.label || t("data.untitled_backup"),
     preview: (passphrase) => port.previewBackup(backup.id, passphrase),
     apply: (planId, items, consented) => port.applyBackup(planId, items, consented),
   };
@@ -101,16 +101,16 @@ export function BackupRestore({ port, source, onClose }: { port: AgentPort; sour
   if (result) {
     return (
       <div className="bk-restore" data-action="backup.result">
-        <p className="acct-note">{t("已恢复 {n} 项。", { n: result.applied.length })}</p>
+        <p className="acct-note">{t("data.restored_n_items", { n: result.applied.length })}</p>
         {result.failed?.map((f) => (
           <p key={f.id} className="acct-note" data-err="">
             {f.id}：{f.error}
           </p>
         ))}
-        {result.reloadError && <p className="acct-note">{t("配置已写入，但当前会话未能重新加载：{e}", { e: result.reloadError })}</p>}
+        {result.reloadError && <p className="acct-note">{t("data.the_setup_was_written_but", { e: result.reloadError })}</p>}
         {!!result.plugins?.length && (
           <>
-            <p className="acct-note">{t("以下插件需要走正常的安装确认：")}</p>
+            <p className="acct-note">{t("data.these_plugins_go_through_the")}</p>
             <ul className="bk-list">
               {result.plugins.map((p) => (
                 <li key={p.name} className="bk-row">
@@ -119,7 +119,7 @@ export function BackupRestore({ port, source, onClose }: { port: AgentPort; sour
                     <code className="meta">{p.source}{p.version ? " · " + p.version : ""}</code>
                   </div>
                   <button className="btn sm" data-action="backup.install-plugin" data-target={p.name} disabled={installing?.name === p.name} onClick={() => setInstalling({ ...p })}>
-                    {t("安装…")}
+                    {t("data.install")}
                   </button>
                 </li>
               ))}
@@ -127,7 +127,7 @@ export function BackupRestore({ port, source, onClose }: { port: AgentPort; sour
           </>
         )}
         <div className="bk-acts">
-          <button className="act" data-action="backup.done" onClick={onClose}>{t("完成")}</button>
+          <button className="act" data-action="backup.done" onClick={onClose}>{t("common.done")}</button>
         </div>
         {installing && (
           <AddPlugin key={installing.name} port={port} source={installing.source} onClose={() => setInstalling(null)} onInstalled={() => setInstalling((current) => current === installing ? null : current)} />
@@ -139,18 +139,18 @@ export function BackupRestore({ port, source, onClose }: { port: AgentPort; sour
   if (!plan) {
     return (
       <div className="bk-restore">
-        <p className="acct-note">{t("输入备份「{name}」的加密口令，先预览它和本机的差异，不会立即写入。", { name: source.name })}</p>
+        <p className="acct-note">{t("data.enter_the_passphrase_for_name", { name: source.name })}</p>
         <div className="bk-fields">
           <label className="grow">
-            <span>{t("加密口令")}</span>
+            <span>{t("data.passphrase")}</span>
             <input data-action="backup.passphrase" data-target="open" type="password" autoComplete="current-password" disabled={busy} value={pass} onChange={(e) => setPass(e.target.value)} />
           </label>
         </div>
         <div className="bk-acts">
           <button className="act" data-primary data-action="backup.preview" disabled={!pass || busy} onClick={() => void open()}>
-            {t(busy ? "正在解密…" : "预览差异")}
+            {t(busy ? "data.decrypting" : "data.preview_differences")}
           </button>
-          <button className="act" data-action="backup.cancel" onClick={onClose}>{t("取消")}</button>
+          <button className="act" data-action="backup.cancel" onClick={onClose}>{t("common.cancel")}</button>
         </div>
         {error && <p className="acct-note" data-err="">{error}</p>}
       </div>
@@ -161,8 +161,8 @@ export function BackupRestore({ port, source, onClose }: { port: AgentPort; sour
     <div className="bk-restore">
       {!plan.samePlatform && (
         <div className="find" data-lvl="warn" role="note">
-          <span className="t">{t("这份备份来自 {p}", { p: plan.platform })}</span>
-          <span className="why">{t("命令和路径在另一种系统上可能无法运行，这类项目默认不勾选。")}</span>
+          <span className="t">{t("data.this_backup_comes_from_p", { p: plan.platform })}</span>
+          <span className="why">{t("data.commands_and_paths_may_not")}</span>
         </div>
       )}
       <ul className="bk-plan">
@@ -179,12 +179,12 @@ export function BackupRestore({ port, source, onClose }: { port: AgentPort; sour
               <code key={d} className="sum">{d}</code>
             ))}
             {it.content !== undefined && it.content !== "" && <pre className="body">{it.content}</pre>}
-            {it.previous && <span className="prev">{t("本机现为：")}<code>{it.previous}</code></span>}
-            {!!it.files && <span className="prev">{t("{n} 个文件", { n: it.files })}</span>}
+            {it.previous && <span className="prev">{t("data.here_now")}<code>{it.previous}</code></span>}
+            {!!it.files && <span className="prev">{t("common.n_files", { n: it.files })}</span>}
             {it.paths?.filter((p) => !p.exists).map((p) => (
-              <span key={p.path} className="warn">{t("本机不存在：{p}", { p: p.path })}</span>
+              <span key={p.path} className="warn">{t("data.missing_here_p", { p: p.path })}</span>
             ))}
-            {it.crossPlatform && <span className="warn">{t("来自另一种系统，可能无法运行")}</span>}
+            {it.crossPlatform && <span className="warn">{t("data.from_another_system_it_may")}</span>}
             {it.consent && picked.has(it.id) && (
               <label className="allow">
                 <input type="checkbox" disabled={busy} checked={allowed.has(it.id)} onChange={() => setAllowed((s) => flip(s, it.id))} data-action="backup.allow" data-target={it.id} />
@@ -194,13 +194,13 @@ export function BackupRestore({ port, source, onClose }: { port: AgentPort; sour
           </li>
         ))}
       </ul>
-      {!!plan.omitted?.length && <p className="acct-note">{t("备份时有 {n} 个文件过大或无法读取，未包含在内。", { n: plan.omitted.length })}</p>}
+      {!!plan.omitted?.length && <p className="acct-note">{t("data.n_files_were_too_large", { n: plan.omitted.length })}</p>}
       <div className="bk-acts">
         <button className="act" data-primary data-action="backup.apply" disabled={busy || picked.size === 0 || blocked.length > 0} onClick={() => void apply()}>
-          {t(busy ? "正在恢复…" : "恢复所选 {n} 项", { n: picked.size })}
+          {t(busy ? "data.restoring" : "data.restore_n_selected", { n: picked.size })}
         </button>
-        <button className="act" data-action="backup.cancel" onClick={onClose}>{t("取消")}</button>
-        {blocked.length > 0 && <span className="acct-note">{t("还有 {n} 项需要逐项确认", { n: blocked.length })}</span>}
+        <button className="act" data-action="backup.cancel" onClick={onClose}>{t("common.cancel")}</button>
+        {blocked.length > 0 && <span className="acct-note">{t("data.n_items_still_need_confirmation", { n: blocked.length })}</span>}
       </div>
       {error && <p className="acct-note" data-err="">{error}</p>}
     </div>
