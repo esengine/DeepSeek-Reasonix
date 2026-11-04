@@ -42,9 +42,10 @@ it("without the icon rail has one way into the remote settings, and it opens tha
   expect(onSettings).toHaveBeenCalledWith("remote");
 });
 
-it("draws the shortcut rows with their label only, the shortcuts staying on the tooltip", () => {
+it("shows the shortcut of new session and search beside their label", () => {
   draw(false);
-  expect(document.querySelectorAll(".studio-quicknav small, .studio-new-task kbd, .studio-search kbd")).toHaveLength(0);
+  expect(document.querySelector(".studio-new-task kbd")?.textContent).toBe("Alt N");
+  expect(document.querySelector(".studio-search kbd")?.textContent).toBe("Ctrl K");
   expect(document.querySelector(".studio-new-task")?.getAttribute("title")).toBe("Alt N");
   expect(document.querySelector(".studio-search")?.getAttribute("title")).toBe("Ctrl K");
 });

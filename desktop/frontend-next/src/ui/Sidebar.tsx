@@ -306,25 +306,11 @@ export function Sidebar({
           title="Alt N"
           onClick={() => void startConversation().catch(onError)}
         >
-          <span aria-hidden="true"><StudioIcon name="plus" /></span><b className="studio-label">{t("新建会话")}</b>
+          <span aria-hidden="true"><StudioIcon name="plus" /></span><b className="studio-label">{t("新建会话")}</b><kbd>Alt N</kbd>
         </button>
         <button className="studio-search" data-action="workspace.search" title="Ctrl K" onClick={() => setPalette(true)}>
-          <span aria-hidden="true"><StudioIcon name="search" /></span><b className="studio-label">{t("搜索与快捷操作")}</b>
+          <span aria-hidden="true"><StudioIcon name="search" /></span><b className="studio-label">{t("搜索会话与操作")}</b><kbd>Ctrl K</kbd>
         </button>
-        {!navShown && (
-          <div className="studio-quicknav">
-            {destinations.filter(([mark]) => mark !== "usage").map(([mark, label, section]) => mark === "files" ? (
-              <button key={mark} data-action="files.open" onClick={onFiles}>
-                <span aria-hidden="true"><StudioIcon name="file" /></span><b>{t(label)}</b>
-              </button>
-            ) : (
-              <button key={mark} data-action="settings.section" data-value={section} onClick={() => onSettings(section)}>
-                <span aria-hidden="true"><svg viewBox="0 0 16 16" width={15} height={15} fill="none" stroke="currentColor" strokeWidth={1} strokeLinecap="round" strokeLinejoin="round">{ICON[mark as Section]}</svg></span><b>{t(label)}</b>
-                {section === "remote" && online > 0 && <em className="qv">{t("{n} 台在线", { n: online })}</em>}
-              </button>
-            ))}
-          </div>
-        )}
         <div className="studio-session-filters" role="group" aria-label={t("会话范围")}>
           <SessionFilter scope={railScope} counts={scopeCounts} onScope={setRailScope} />
         </div>
@@ -393,6 +379,18 @@ export function Sidebar({
       </RailSearch>
       </div>
       {!navShown && <div className="railfoot">
+      <div className="studio-quicknav">
+          {destinations.filter(([mark]) => mark !== "usage").map(([mark, label, section]) => mark === "files" ? (
+            <button key={mark} data-action="files.open" onClick={onFiles}>
+              <span aria-hidden="true"><StudioIcon name="file" /></span><b>{t(label)}</b>
+            </button>
+          ) : (
+            <button key={mark} data-action="settings.section" data-value={section} onClick={() => onSettings(section)}>
+              <span aria-hidden="true"><svg viewBox="0 0 16 16" width={15} height={15} fill="none" stroke="currentColor" strokeWidth={1} strokeLinecap="round" strokeLinejoin="round">{ICON[mark as Section]}</svg></span><b>{t(label)}</b>
+              {section === "remote" && online > 0 && <em className="qv">{t("{n} 台在线", { n: online })}</em>}
+            </button>
+          ))}
+      </div>
         {destinations.some(([mark]) => mark === "usage") && <button className="studio-wallet" data-action="settings.section" data-value="usage" onClick={() => onSettings("usage")}><span aria-hidden="true"><StudioIcon name="wallet" /></span><b>{t("钱包与用量")}</b>{wallet && <small>{hideAmounts ? MASK : wallet}</small>}</button>}
         <button className="studio-wallet studio-feedback" data-action="feedback.open" onClick={() => onFeedback(feedbackEntryTab(feedbackUnread))}>
           <span aria-hidden="true"><StudioIcon name="feedback" /></span>
