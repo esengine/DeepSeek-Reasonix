@@ -5510,3 +5510,10 @@
 .prefs-sheet > .prefs-hd > .prefs-find { margin: 0 12px; width: calc(100% - 24px); }
 .prefs-hd h1 { padding: 18px 22px 12px; }
 .prefs-nav { padding-top: 12px; }
+.prefs-card > .grp:has(> .grp-items > .lrow:only-child) > .grp-hd, .prefs-card > .grp:has(> .grp-items > .lrow:only-child) > .hint { display: none; }
+.prefs-card > .grp:has(> .grp-items > .lrow:only-child) > .grp-items { margin-top: 0; }
+.prefs-card > .grp:has(> .grp-items > .lrow:only-child) .lrow { padding: 0; border: 0; }
+.prefs-card > .grp:has(> .grp-items > .box > .lrow):not(:has(.lrow ~ .lrow)) > .grp-hd,
+.prefs-card > .grp:has(> .grp-items > .box > .lrow):not(:has(.lrow ~ .lrow)) > .hint { display: none; }
+.prefs-card > .grp:has(> .grp-items > .box > .lrow):not(:has(.lrow ~ .lrow)) > .grp-items { margin-top: 0; }
+.prefs-card > .grp:has(> .grp-items > .box > .lrow):not(:has(.lrow ~ .lrow)) .lrow { padding: 0; border: 0; }
