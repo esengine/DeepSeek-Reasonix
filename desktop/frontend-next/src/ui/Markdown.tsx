@@ -2,6 +2,7 @@ import { createElement, isValidElement, memo, useEffect, useState, type JSX, typ
 import ReactMarkdown, { type Components, type ExtraProps } from "react-markdown";
 import { t } from "../i18n";
 import { CodeBlock } from "./CodeBlock";
+import { MermaidDiagram } from "./MermaidDiagram";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import { remarkCodeSpanLink, remarkTrimAutolink } from "./autolink";
@@ -255,7 +256,9 @@ const Block = memo(function Block({ src, math, emoji, code, tail, live, local, i
             <span className="md-noimg">{alt}</span>
           );
         },
-        pre: ({ children }) => (
+        pre: ({ children }) => langOf(children).toLowerCase() === "mermaid" ? (
+          <MermaidDiagram source={textOf(children)} live={live} />
+        ) : (
           <CodeBlock lang={langOf(children)} source={textOf(children)} live={live}>{children}</CodeBlock>
         ),
         table: ({ children }) => (

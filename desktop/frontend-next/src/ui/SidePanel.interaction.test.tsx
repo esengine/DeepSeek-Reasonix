@@ -8,6 +8,9 @@ import { MockPort } from "../port/mock";
 import type { AgentPort } from "../port/port";
 import type { SideProgress } from "../port/side";
 
+const mermaid = vi.hoisted(() => ({ render: vi.fn(async () => '<svg xmlns="http://www.w3.org/2000/svg"><text>Browser</text></svg>') }));
+vi.mock("./mermaid", () => ({ renderMermaid: mermaid.render }));
+
 function deferred() {
   let resolve!: (value: string) => void;
   let reject!: (error: Error) => void;
@@ -18,6 +21,28 @@ function deferred() {
 afterEach(() => {
   cleanup();
   window.getSelection()?.removeAllRanges();
+});
+
+it("keeps a side-answer Mermaid tail as source until the request settles", async () => {
+  const { port } = draw();
+  const pending = deferred();
+  let progress!: (event: SideProgress) => void;
+  vi.spyOn(port, "askSide").mockImplementation((_id, _question, _quotes, notify) => {
+    progress = notify!;
+    return pending.promise;
+  });
+  await userEvent.type(screen.getByRole("textbox", { name: "向辅助会话提问" }), "Show the architecture");
+  await userEvent.click(screen.getByRole("button", { name: "发送" }));
+  act(() => progress({ kind: "text", text: "**Architecture**\n\n```mermaid\nflowchart TD\n  Browser -->" }));
+  expect(document.querySelector('.sideturn[data-role="side"] .md')?.hasAttribute("data-live")).toBe(true);
+  expect(document.querySelector(".mermaid-source")?.textContent).toContain("Browser -->");
+  expect(mermaid.render).not.toHaveBeenCalled();
+  expect(screen.queryByRole("button", { name: "复制 Mermaid 源代码" })).toBeNull();
+  pending.resolve("**Architecture**\n\n```mermaid\nflowchart TD\n  Browser --> App\n```\n\n`neighbor`");
+  expect(await screen.findByRole("img", { name: "Mermaid 图表" })).toBeTruthy();
+  expect(document.querySelector('.sideturn[data-role="side"] strong')?.textContent).toBe("Architecture");
+  expect(screen.getByText("neighbor").tagName).toBe("CODE");
+  expect(document.querySelector('.sideturn[data-role="side"] .md')?.hasAttribute("data-live")).toBe(false);
 });
 
 function draw(extra: Partial<AgentPort> = {}) {

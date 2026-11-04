@@ -1,0 +1,9 @@
+.mermaid-wrap { margin-block: 1em; border: 1px solid var(--hair); border-radius: var(--r-md); overflow: hidden; background: var(--face-code); }
+.mermaid-mode { color: var(--muted); background: none; border: 0; padding: 4px 8px; border-radius: var(--r-xs); cursor: pointer; font: inherit; }
+.mermaid-mode[aria-pressed="true"] { background: var(--accent-wash); color: var(--text); }
+.mermaid-mode:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+.mermaid-preview { overflow: auto; padding: 16px; text-align: center; }
+.mermaid-preview img { display: block; width: auto; height: auto; max-width: 100%; max-height: 70vh; object-fit: contain; margin: 0 auto; }
+.md .mermaid-source { margin: 0; padding: 16px; overflow: auto; max-height: 28em; border: 0; border-radius: 0; background: transparent; white-space: pre; }
+.mermaid-error, .mermaid-loading { padding: 12px 16px; margin: 0; overflow-wrap: anywhere; color: var(--muted); }
+.mermaid-error { color: var(--err); white-space: pre-wrap; }

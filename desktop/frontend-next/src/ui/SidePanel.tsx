@@ -176,7 +176,7 @@ export function SidePanel({ port, onClose }: { port: AgentPort; onClose: () => v
               <p>{pending.question}</p>
             </div>
             {pending.text && <div className="sideturn" data-role="side">
-              <Markdown text={pending.text} images={false} />
+              <Markdown text={pending.text} streaming={busy} images={false} />
               {pending.phase === "failed" && <small className="sidehint">{t("已中断")}</small>}
             </div>}
           </>
