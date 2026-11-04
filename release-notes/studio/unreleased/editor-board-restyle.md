@@ -18,6 +18,7 @@
 - 后台任务结束后不再消失：浮层分「在跑」和「已结束」两段，每行写用时、命令和最后一行输出，结束的还写退出码；停止要再点一次确定，结束的可以「清除」。底部读数在跑时是蓝色，有失败时变红，直到你打开看过（b4b7abd35）。
 - 后台任务的「看输出」改为在工作台里开一个页签，不再用弹窗盖住对话：顶部写用时或「跑完了，退出 N」，在跑时可以停止；默认跟着最新输出，往上翻就停住，点箭头回到最新（bd9839a59）。
 - 执行过程里，放到后台跑的命令写成「放到后台运行」，同一行跟着任务实时更新：在跑时写已跑多久，并说明不用等它、可以「看输出」；跑完后原地变成用时和退出码（8db18c129）。
+- 对话右边的消息导航条按设计稿重做：横线按每条消息在整段对话里的位置铺满整列，不再挤在中间；灰底竖条标出现在看到的那一段；改过文件的消息横线长一点，星标是橙色。悬停时指着的那条和邻居像程序坞一样变长，左边的卡片写「你的第n条 · 改了n个文件」和两行内容；挤不下的连成一段，悬停展开带编号和星标的列表；还有更早没加载的消息时，顶上显示条数，点击加载；Ctrl ↑↓ 逐条走时当前那条有焦点框。点一条会平滑滚过去，那条消息闪一下。至少 3 条你的消息才显示（c91a653e9）。
 
 ---
 <!-- lang:en -->
@@ -42,3 +43,4 @@
 - Background jobs no longer vanish when they end: the list shows running jobs above ended ones, each with its duration, command and last line of output, an ended one with its exit status; stopping asks again, and ended jobs can be cleared. The rail reading is blue while one runs and stays red after a failure until you open it (b4b7abd35).
 - A background job's output opens as a workbench tab instead of a dialog over the conversation: its head reads the run time or "Finished, exit N", a running job can be stopped there, and the output follows the newest line until you scroll up (bd9839a59).
 - In the execution group a command sent to the background reads "Sent to the background", and its row follows the job live: how long it has run, with a note that the turn goes on and a way to its output, then how long it took and its exit status once it ends (8db18c129).
+- The message rail beside the conversation follows the Msg-Rail board: marks sit at each message's place in the whole conversation and fill the column instead of bunching in the middle; a grey band shows the stretch on screen; a message that changed files draws longer and stars are orange. Hovering grows the pointed line and its neighbours and opens a card with "Your message n · changed n files" and two lines of the message; crowded marks join into segments that list their messages with numbers and stars; unloaded earlier messages show as a count at the top that loads them; Ctrl+Up/Down rings the mark it is on. A press glides to the message and flashes it. The rail appears from three of your messages (c91a653e9).
