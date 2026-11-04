@@ -600,6 +600,8 @@ export const EN: Record<string, string> = {
   "正在执行已批准的计划": "Executing an approved plan",
   "尚未制定": "None yet",
   "后台任务": "Background jobs",
+  "全部停止": "Stop all",
+  "全部停止？": "Stop all?",
   "个后台任务在跑": "background jobs running",
   "个后台任务失败了": "background jobs failed",
   "个后台任务已结束": "background jobs done",

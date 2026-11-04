@@ -206,6 +206,7 @@ export const ACTIONS: UIAction[] = [
   { id: "tool.stop", kind: "kernel-mutation", target: "entity", proof: "interaction" },
   { id: "session.open-match", kind: "navigation", target: "entity", proof: "interaction" },
   { id: "job.cancel", kind: "kernel-mutation", target: "entity", proof: "authority-effect" },
+  { id: "job.cancel-all", kind: "kernel-mutation", target: "none", proof: "interaction" },
   { id: "job.tip", kind: "view", target: "entity", proof: "interaction" },
   { id: "job.view", kind: "view", target: "entity", proof: "interaction" },
   { id: "job.close", kind: "view", target: "none", proof: "interaction" },
@@ -446,6 +447,7 @@ export const ACTIONS: UIAction[] = [
   { id: "session.move-to-add", kind: "view", target: "none", proof: "interaction" },
   { id: "activity.earlier", kind: "view", target: "none", proof: "interaction" },
   { id: "job.arm", kind: "view", target: "entity", proof: "interaction" },
+  { id: "job.arm-all", kind: "view", target: "none", proof: "interaction" },
   { id: "workspace.reorder", kind: "kernel-mutation", target: "entity", proof: "authority-effect" },
 
   // ── Taking a change back ─────────────────────────────────────────────────

@@ -36,11 +36,25 @@ export function Jobs({ jobs, onCancel, onView }: { jobs: JobEntry[]; onCancel?: 
   // block coming and going moves only what is below it — cheaper than a
   // standing row a reader has learned to skip.
   if (jobs.length === 0) return null;
+  const live = jobs.filter((j) => j.status === "running");
+  const stopAll = () => {
+    setArmed("");
+    for (const j of live) void onCancel?.(j.id);
+  };
 
   return (
     <div className="block" data-b="jobs">
       <div className="lbl">
-        {t("后台任务")}<span className="c">{jobs.length}</span>
+        {t("后台任务")}
+        {onCancel && live.length >= 2 && (armed === "*" ? (
+          <span className="job-confirm">
+            <span>{t("全部停止？")}</span>
+            <button type="button" className="job-stop" data-action="job.cancel-all" onClick={stopAll}>{t("确定")}</button>
+          </span>
+        ) : (
+          <button type="button" className="job-stop-all" data-action="job.arm-all" onClick={() => setArmed("*")}>{t("全部停止")}</button>
+        ))}
+        <span className="c">{jobs.length}</span>
       </div>
       <div className="jobs">
         {jobs.map((j) => {
