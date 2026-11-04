@@ -40,6 +40,7 @@
 - Excel / Word 预览按设计稿：顶部常驻「只读」标签和说明，两种都能缩放，Word 另有「适应宽度」；工作表在底部切换，超出行列时在右侧写明。没开启 Office 预览时写明文件名，并给出「用系统应用打开」和「去设置开启预览」两个出路（69e4e002a）。
 - 写新反馈按设计稿：类别做成带说明的卡片；正文保留预览和字数，下方写明「只有登记为议题才公开」；截图、「截取当前窗口」「添加图片」排成一行，截图隐私提醒放在下面；昵称和联系方式保留；随附信息收成一行，点开看完整环境和日志文件夹；「按安全策略私下报告」移到底部发送旁。发出后显示对勾、「收到了，谢谢」、带复制图标的回执号、后续说明，以及「查看我的反馈 / 再写一条」（d0bf9e9a4）。
 - 扩展页顶部只留一个「添加…」，菜单里是「从市场安装 / 从仓库地址安装 / 从本机文件夹导入（直接弹出选文件夹）/ 接入外部服务」，当前做不了的项不出现；各分组自己的「添加」「接入服务」按钮去掉。「运行时」卡片移到已安装列表底部，变成一句说明（启用、停用、安装或更新后从下一轮生效），旁边保留「重载运行时」，用于改了扩展代码之后（62e1216f1）。
+- 扩展的插件包和外部服务每行只放三样：状态点 + 完整名字（不再截断）、下面一行说明、开关；更新、导出、移除、重连、登录收进展开后的详情；出错的行默认展开，原因和处理按钮直接可见（4807daf20）。
 
 
 ---
@@ -87,3 +88,4 @@
 - Excel and Word previews follow the board: a read-only tag and note at the top, zoom on both and fit width for Word; sheets switch from a strip at the bottom that says when rows or columns were cut. With Office preview off it names the file and offers Open in system application or Turn preview on in Settings (69e4e002a).
 - The feedback form follows the board: category cards with a line each, the body with preview and byte count and the public-if-filed note, screenshots in one row with Capture this window and Add images and the privacy note under them, nickname and contact kept, what is sent along as one line that opens to the full environment, and the security link in the footer by Send. The receipt shows a check, a thanks, the receipt number with an icon copy button, what happens next, and View my feedback / Write another (d0bf9e9a4).
 - The extensions page has one Add… menu: install from the market, from a repository, import a local folder (which opens the picker at once), or connect an external service, leaving out what this window cannot do now; the per-group Add and Connect buttons are gone. The runtime card moves to the foot of the list as one line on when changes apply, with Reload runtime beside it for edited extension code (62e1216f1).
+- Package and service rows carry three things: a status dot with the full name (never cut), one line under it, and the switch. Update, export, remove, reconnect and sign-in move into the row's body, and a row with a problem opens by itself (4807daf20).
