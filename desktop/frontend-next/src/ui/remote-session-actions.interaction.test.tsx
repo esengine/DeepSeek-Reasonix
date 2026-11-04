@@ -90,10 +90,10 @@ it("restores a remote archive without opening or closing a pane", async () => {
   expect(onOpen).not.toHaveBeenCalled();
 });
 
-it("identifies archived and legacy remote transcripts just like local rows", () => {
+it("identifies an archived remote transcript just like a local row, and draws no tag for a legacy one", () => {
   draw({ archived: true, legacy: true });
   expect(screen.getByText("已归档")).toBeTruthy();
-  expect(screen.getByTitle("由 Reasonix 1.x 创建：Studio 只读打开，继续对话会另存为新会话")).toBeTruthy();
+  expect(screen.queryByTitle("由 Reasonix 1.x 创建：Studio 只读打开，继续对话会另存为新会话")).toBeNull();
 });
 
 it("does not submit duplicate pin writes while the first is pending", async () => {

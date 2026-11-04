@@ -617,9 +617,6 @@ function WorkspacesView({ hub, tree, treeRead, answered = null, runtimes, active
                         )}
                         <PeerThreadMark path={session.path} />
                         <SessionTail run={run} at={session.lastActiveAt} unread={session.unread} />
-                        {session.legacy && (
-                          <span className="sesslegacy" title={t("由 Reasonix 1.x 创建：Studio 只读打开，继续对话会另存为新会话")} aria-label={t("由 Reasonix 1.x 创建：Studio 只读打开，继续对话会另存为新会话")}>{t("旧")}</span>
-                        )}
                         {quickActions && !selection && <SessionArchiveAction target={session.path} title={rowLabel(session)} archived={!!session.archived}
                           disabled={mutations.pending.has(session.path) || !!session.runtimeId && liveIds([session.runtimeId]).length > 0} onArchive={() => archive(session)} />}
                         {sessionMenu === session.path && (

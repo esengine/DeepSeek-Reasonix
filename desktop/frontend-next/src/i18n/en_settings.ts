@@ -1368,8 +1368,6 @@ export const EN_SETTINGS: Record<string, string> = {
   "距上次活动超过这个天数才会归档。默认 {n} 天。": "Archived only once it has been idle longer than this. Default {n} days.",
   "天": "days",
   "无法读取自动归档设置。": "Could not read the auto-archive settings.",
-  "旧": "Old",
-  "由 Reasonix 1.x 创建：Studio 只读打开，继续对话会另存为新会话": "Kept by Reasonix 1.x: Studio opens it read-only; continuing it saves a new session",
   "已归档": "Archived",
   "已置顶": "Pinned",
   "已自动归档 {n} 个会话，可在“已归档”中恢复。": "{n} conversations were archived automatically. You can restore them from Archived.",

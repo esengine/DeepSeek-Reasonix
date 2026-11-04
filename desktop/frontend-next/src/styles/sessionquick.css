@@ -34,10 +34,3 @@
   .rail .sessquick { width: 24px; margin-inline-end: 6px; opacity: 1; pointer-events: auto; }
   .rail .sesspin-action { opacity: 1; pointer-events: auto; }
 }
-.rail .sesslegacy {
-  flex: none; display: inline-flex; align-items: center; padding: 0 5px; height: 15px;
-  border: 1px solid var(--border); border-radius: var(--r-xs);
-  color: var(--ghost); cursor: default;
-  font: var(--w-reg) var(--fs-micro) var(--ui);
-}
-.rail .sessrow:has(.sessquick):is(:hover, :focus-within) > .sesslegacy { visibility: hidden; }
