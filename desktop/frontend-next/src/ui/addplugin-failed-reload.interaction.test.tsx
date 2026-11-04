@@ -20,7 +20,7 @@ const error = "plugin package already exists at /managed/demo; retry with replac
 const next = "Choose another name, remove the existing entry, or retry MCP installs with replace=true.";
 const reloadError = "cannot reload extensions while active work or background jobs are running";
 const summary = "No action succeeded. Fix the first failed action[] entry and retry install_source with apply=true.";
-const reloadWarning = "运行时未重载：{reason}。请用「重载运行时」重试。";
+const reloadWarning = "ext.the_runtime_did_not_reload";
 
 it.each(["zh", "en"].flatMap((lang) => [false, true].map((reload) => ({ lang, reload }))))(
   "keeps the failed action and recovery alongside the reload result ($lang, reload=$reload)",

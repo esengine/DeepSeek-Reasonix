@@ -4,7 +4,6 @@ import { afterEach, expect, it, vi } from "vitest";
 import { Find } from "./Find";
 import { useFind } from "./usefind";
 
-vi.mock("../i18n", () => ({ t: (text: string) => text }));
 afterEach(cleanup);
 
 function Search({ pending, failed = false }: { pending: boolean; failed?: boolean }) {

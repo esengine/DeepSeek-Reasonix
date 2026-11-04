@@ -17,7 +17,7 @@ afterEach(() => {
 });
 
 const refusal = "cannot reload extensions while active work or background jobs are running";
-const warning = "更改已保存，运行时未重载：{reason}。请用「重载运行时」重试。";
+const warning = "app.changes_saved_but_the_runtime";
 const row = () => document.querySelector('[data-extension-name="review-kit"]');
 
 function draw(port: AgentPort, onChanged = vi.fn()) {

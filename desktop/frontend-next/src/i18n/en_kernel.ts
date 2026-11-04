@@ -285,6 +285,7 @@ export const EN_KERNEL: Record<string, string> = {
   "这个场景里没有可用的主图": "This scene has no backdrop to show",
   "不支持该音频格式": "That audio format is not supported",
   "压缩阈值未能保存：{detail}": "The compaction threshold was not saved: {detail}",
+  "本次请求未包含阈值，未做任何修改": "The request carried no threshold, so nothing changed",
   "{host} 上的内核没有应答，连接可能断了": "The kernel on {host} is not answering — the connection may be down",
   "{host} 上的内核没有接受这次请求：{detail}": "The kernel on {host} did not accept this request: {detail}",
   "{host} 上的 reasonix 版本过旧，无法打开面板 —— 请先将该机器上的 reasonix 升级至与本机同一代":
@@ -298,6 +299,7 @@ export const EN_KERNEL: Record<string, string> = {
   "找不到这台手机，它可能已经被移除": "That phone was not found; it may already have been removed",
   "账号服务拒绝了这个操作，请刷新后再试": "The account service refused that; refresh and try again",
   "连不上账号服务，请检查网络后重试": "Could not reach the account service; check the network and try again",
+  "这台机器不是 SSH 主机，此表单不能修改它": "This machine is not an SSH host, so this form cannot change it",
   "这不是有效的 WSL 发行版名称": "That is not the name of a WSL distribution",
   "读不到已安装的 WSL 发行版": "Could not read which WSL distributions are installed",
   "这台机器的接入方式与表单不同（SSH 或 WSL），不能这样修改它": "This machine is reached another way than this form describes (SSH or WSL), so it cannot be changed like this",

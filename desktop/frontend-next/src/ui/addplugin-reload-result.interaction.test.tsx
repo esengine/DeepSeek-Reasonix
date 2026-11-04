@@ -19,7 +19,7 @@ const reasons = [
   "cannot reload extensions while active work or background jobs are running",
   "reload extensions: unable to secure replacement session",
 ];
-const warning = "装好了，但运行时未重载：{reason}。请用「重载运行时」重试。";
+const warning = "ext.installed_but_the_runtime_did";
 
 it.each(["zh", "en"].flatMap((lang) => [false, true].flatMap((updating) =>
   reasons.map((reloadError) => ({ lang, updating, reloadError })),
