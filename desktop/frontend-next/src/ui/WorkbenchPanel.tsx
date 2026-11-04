@@ -14,8 +14,8 @@ import { WorkbenchLauncher } from "./WorkbenchLauncher";
 import { WorkbenchStatus } from "./WorkbenchStatus";
 import { WorkbenchFileTree } from "./WorkbenchFileTree";
 import { WorkbenchChangesPage } from "./WorkbenchChangesPage";
+import { UnifiedDiff } from "./UnifiedDiff";
 import { AgentBrowserPanel, ManualBrowserPanel, UNREAD_TABS } from "./BrowserPanel";
-import { DiffView } from "./cards/DiffView";
 import { useOnBump } from "./useOnBump";
 import { StudioIcon } from "./StudioIcon";
 import { LazyMarkdown } from "./LazyMarkdown";
@@ -183,12 +183,14 @@ export function WorkbenchPanel({
   currentScope.current = scope;
   const folderRequests = useMemo(() => new Map<string, symbol>(), [scope]);
   const menuId = useRef(0);
-  const [menu, setMenu] = useState<(FileMenu & { scope: typeof scope; id: number }) | null>(null);
+  // fromBar: opened from the file's own toolbar, so what goes wrong is said beside the file.
+  const [menu, setMenu] = useState<(FileMenu & { scope: typeof scope; id: number; fromBar?: boolean }) | null>(null);
   const closeMenu = useCallback(() => setMenu(null), []);
   useEffect(closeMenu, [closeMenu, scope, shown]);
   const reveal = (path: string) => {
+    const say = menu?.fromBar ? setFailed : setListFailed;
     setMenu(null);
-    port.revealInFileManager(path).then(() => setListFailed(""), (e) => setListFailed(reason(e)));
+    port.revealInFileManager(path).then(() => say(""), (e) => say(reason(e)));
   };
   // The system menu stays wherever there is text to copy: this one is a shortcut.
   const offerMenu = (e: MouseEvent<HTMLElement>, path: string, folder: boolean) => {
@@ -631,7 +633,10 @@ export function WorkbenchPanel({
                 readOnlyIn={grantedFile?.root ?? file?.root}
                 onSave={() => void save()}
                 openWith={hub && !remote ? <OpenWithMenu hub={hub} root={workspaceRoot} onError={(e) => setFailed(reason(e))} /> : undefined}
-                onReveal={revealable && !grantedFile ? () => { setFailed(""); port.revealInFileManager(active.path).catch((e) => setFailed(reason(e))); } : undefined}
+                onMore={grantedFile ? undefined : (anchor) => {
+                  const r = anchor.getBoundingClientRect();
+                  setMenu({ path: active.path, folder: false, scope, id: ++menuId.current, anchor, x: r.right - 220, y: r.bottom + 4, fromBar: true });
+                }}
               />
               {(fileFailed || failed) && mode !== "document" && !unpreviewableText && !(mode === "preview" && previewTab) && (
                 <div className="workbench-error" role="alert">
@@ -659,7 +664,7 @@ export function WorkbenchPanel({
                 <div className="workbench-empty">{t("common.loading")}</div>
               ) : mode === "diff" ? (
                 <div className="workbench-diff" tabIndex={0}>
-                  <DiffView path={active.path} diff={diff} />
+                  <UnifiedDiff diff={diff} label={active.path} target={active.path} onLine={() => setMode("file")} />
                 </div>
               ) : mode === "read" && file && file.path === (grantedFile?.rel ?? active.path) ? (
                 <div className="workbench-read" tabIndex={0}>

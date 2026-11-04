@@ -170,3 +170,4 @@
 .gh-row .gh-meta { margin-left: auto; flex: none; color: var(--faint); }
 .workbench-explorer .commit-open { border-color: var(--text); background: var(--text); color: var(--surface); }
 .workbench-files-head { position: static; }
+.workbench-diff:has(> .wb-diff) { padding: 0; }

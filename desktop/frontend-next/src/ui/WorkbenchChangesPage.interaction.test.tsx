@@ -3,7 +3,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import "./testkit";
-import { WorkbenchChangesPage, diffLines } from "./WorkbenchChangesPage";
+import { WorkbenchChangesPage } from "./WorkbenchChangesPage";
+import { diffLines } from "./UnifiedDiff";
 import { MockPort } from "../port/mock";
 import type { WorkspaceChange } from "../port/port";
 

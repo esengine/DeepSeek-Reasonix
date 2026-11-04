@@ -118,7 +118,6 @@ export const WORKBENCH: Messages = {
   "workbench.show_in_file_manager": { zh: "在系统文件管理器中显示", en: "Show in file manager" },
   "workbench.show_n_more": { zh: "再显示 {n} 项", en: "Show {n} more" },
   "workbench.show_the_workspace_in_the": { zh: "在系统文件管理器中显示工作区", en: "Show the workspace in the system file manager" },
-  "workbench.show_this_file_in_the": { zh: "在系统文件管理器中显示此文件", en: "Show this file in the system file manager" },
   "workbench.sign_in_failed_check_the": { zh: "登录没有通过，请重试并检查用户名和密码。", en: "Sign-in failed. Check the username and password and try again." },
   "workbench.some_history_summaries_are_unavailable": { zh: "部分历史摘要暂不可用，可继续打开会话", en: "Some history summaries are unavailable. You can still open conversations." },
   "workbench.some_sites_do_not_allow": { zh: "有的网站不允许嵌入，可以用右上角在系统浏览器打开。", en: "Some sites do not allow embedding; use the toolbar button to open them in your system browser." },

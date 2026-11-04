@@ -18,7 +18,7 @@ export function WorkbenchFileBar({
   readOnlyIn,
   onSave,
   openWith,
-  onReveal,
+  onMore,
   document = false,
   source = true,
 }: {
@@ -32,8 +32,8 @@ export function WorkbenchFileBar({
   readOnlyIn?: string;
   onSave: () => void;
   openWith?: ReactNode;
-  // Present only where the kernel's own machine can show the file.
-  onReveal?: () => void;
+  // Opens the file's menu (add to the conversation, copy, reveal) under the "…" button.
+  onMore?: (anchor: HTMLElement) => void;
   document?: boolean;
   source?: boolean;
 }) {
@@ -48,11 +48,6 @@ export function WorkbenchFileBar({
         {path.split("/").slice(0, -1).map((part, i) => <Fragment key={i}><span>{part}</span><i aria-hidden="true">/</i></Fragment>)}
         <b>{path.split("/").at(-1)}</b>
       </strong>
-      {onReveal && (
-        <button className="workbench-reveal" data-action="workbench.reveal" data-target={path} aria-label={t("workbench.show_this_file_in_the")} title={t("workbench.show_this_file_in_the")} onClick={onReveal}>
-          <StudioIcon name="reveal" />
-        </button>
-      )}
       <div role="group">
         {readable && view("read", t("workbench.read"))}
         {document && view("document", t("common.preview"))}
@@ -69,6 +64,12 @@ export function WorkbenchFileBar({
           {t("common.save")}
         </button>
       ) : null}
+      {onMore && (
+        <button className="workbench-reveal" data-action="workbench.file-more" data-target={path} aria-haspopup="menu" aria-label={t("common.more")} title={t("common.more")}
+          onClick={(e) => { e.stopPropagation(); onMore(e.currentTarget); }}>
+          <StudioIcon name="more" />
+        </button>
+      )}
     </div>
   );
 }

@@ -618,13 +618,14 @@ describe("WorkbenchPanel", () => {
     expect(reveal).toHaveBeenLastCalledWith("README.md");
   });
 
-  it("shows the open file in the system file manager from the file's own toolbar", async () => {
+  it("shows the open file in the system file manager from the file's own menu", async () => {
     const user = userEvent.setup();
     const port = new MockPort();
     const reveal = vi.spyOn(port, "revealInFileManager");
     render(<WorkbenchPanel port={port} tabs={[]} manual={false} shown scheme="light" changes={[]} onCloseManual={vi.fn()} onSurfaces={vi.fn()} onExternal={vi.fn()} />);
     await user.click(await screen.findByRole("button", { name: "README.md" }));
-    await user.click(await screen.findByRole("button", { name: "在系统文件管理器中显示此文件" }));
+    await user.click(await screen.findByRole("button", { name: "更多" }));
+    await user.click(await screen.findByRole("menuitem", { name: /系统文件管理器|访达|文件资源管理器/ }));
     expect(reveal).toHaveBeenLastCalledWith("README.md");
   });
 
@@ -636,7 +637,8 @@ describe("WorkbenchPanel", () => {
     );
     render(<WorkbenchPanel port={port} tabs={[]} manual={false} shown scheme="light" changes={[]} onCloseManual={vi.fn()} onSurfaces={vi.fn()} onExternal={vi.fn()} />);
     await user.click(await screen.findByRole("button", { name: "README.md" }));
-    await user.click(await screen.findByRole("button", { name: "在系统文件管理器中显示此文件" }));
+    await user.click(await screen.findByRole("button", { name: "更多" }));
+    await user.click(await screen.findByRole("menuitem", { name: /系统文件管理器|访达|文件资源管理器/ }));
     expect((await screen.findByRole("alert")).textContent).toBe("这个内核不在本机，没法在系统文件管理器中显示它的文件。");
   });
 
@@ -646,7 +648,8 @@ describe("WorkbenchPanel", () => {
     render(<WorkbenchPanel port={port} tabs={[]} manual={false} shown scheme="light" changes={[]} remote onCloseManual={vi.fn()} onSurfaces={vi.fn()} onExternal={vi.fn()} />);
     await user.click(await screen.findByRole("button", { name: "README.md" }));
     await screen.findByRole("button", { name: "保存" });
-    expect(screen.queryByRole("button", { name: "在系统文件管理器中显示此文件" })).toBeNull();
+    await user.click(screen.getByRole("button", { name: "更多" }));
+    expect(screen.queryByRole("menuitem", { name: /系统文件管理器|访达|文件资源管理器/ })).toBeNull();
   });
 
   it("offers no way to reveal a remote workspace's paths on this machine", async () => {

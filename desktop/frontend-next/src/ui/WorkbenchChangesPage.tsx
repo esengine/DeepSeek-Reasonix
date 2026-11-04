@@ -6,6 +6,7 @@ import { stagedState } from "../state/gittree";
 import { useCommitCard } from "./CommitCard";
 import { usePushCard } from "./GitPushCard";
 import { StudioIcon } from "./StudioIcon";
+import { UnifiedDiff } from "./UnifiedDiff";
 
 interface Props {
   port: AgentPort;
@@ -15,36 +16,6 @@ interface Props {
   remote: boolean;
   onOpen: (path: string) => void;
   onChanged?: () => void;
-}
-
-/** One line of a unified diff with the line it stands on before and after; a
- *  hunk header carries neither. */
-interface DiffLine { old?: number; now?: number; mark: " " | "+" | "-" | "@"; text: string }
-
-export function diffLines(diff: string): DiffLine[] {
-  const out: DiffLine[] = [];
-  let old = 0;
-  let now = 0;
-  const lines = diff.replace(/\n$/, "").split("\n");
-  for (const line of lines) {
-    const hunk = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(line);
-    if (hunk) {
-      old = Number(hunk[1]);
-      now = Number(hunk[2]);
-      out.push({ mark: "@", text: line });
-    } else if (!out.length || line.startsWith("\\")) {
-      // File headers come before the first hunk; inside one, a removed line may
-      // itself begin with "--", so only git's "\ No newline" note is skipped.
-      continue;
-    } else if (line.startsWith("+")) {
-      out.push({ now: now++, mark: "+", text: line.slice(1) });
-    } else if (line.startsWith("-")) {
-      out.push({ old: old++, mark: "-", text: line.slice(1) });
-    } else {
-      out.push({ old: old++, now: now++, mark: " ", text: line.slice(1) });
-    }
-  }
-  return out;
 }
 
 // A new or untracked file is all additions, so it starts folded with a line
@@ -156,17 +127,7 @@ function ChangedFile({ port, change: c, shown, busy, onOpen, onStage, onDiscard 
         failed ? <p className="workbench-error" role="alert">{failed}</p>
           : !diff ? <p className="wb-change-wait">{t("common.loading")}</p>
             : (
-              <div className="wb-diff" role="table" aria-label={c.path}>
-                {diffLines(diff.text).map((l, i) => (
-                  <div key={i} className="wb-diff-line" data-mark={l.mark} role="row">
-                    <button type="button" className="wb-diff-n" data-action="workbench.change-open" data-target={c.path} tabIndex={-1} aria-hidden="true" onClick={() => onOpen(c.path)}>{l.old ?? ""}</button>
-                    <button type="button" className="wb-diff-n" data-action="workbench.change-open" data-target={c.path} tabIndex={-1} aria-hidden="true" onClick={() => onOpen(c.path)}>{l.now ?? ""}</button>
-                    <span className="wb-diff-mark">{l.mark === "@" ? "" : l.mark.trim()}</span>
-                    <span className="wb-diff-text">{l.text}</span>
-                  </div>
-                ))}
-                {diff.truncated && <p className="wb-change-wait">{t("workbench.diff_cut_short")}</p>}
-              </div>
+              <UnifiedDiff diff={diff.text} label={c.path} truncated={diff.truncated} onLine={() => onOpen(c.path)} target={c.path} />
             )
       )}
     </section>
