@@ -293,6 +293,8 @@ export interface SessionStatus {
   sessionCostQuote?: import("./wire").CostQuote;
   sessionUsage?: SessionUsage;
   jobs?: JobEntry[];
+  // This session's jobs that have finished, kept apart from the running ones.
+  endedJobs?: JobEntry[];
 }
 
 /** What a goal has used so far. work time counts active work, not pauses. */
@@ -336,6 +338,11 @@ export interface JobEntry {
   detail?: string;
   status: string;
   startedAt: number;
+  // How a job that has ended did: when, a command's exit status, and for any
+  // job the last line it wrote.
+  endedAt?: number;
+  exitCode?: number;
+  tail?: string;
 }
 
 // The end of a running job's output, for a person looking at it: how much the

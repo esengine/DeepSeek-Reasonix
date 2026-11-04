@@ -261,6 +261,10 @@ func (s *Server) status(w http.ResponseWriter, r *http.Request) {
 	if j := s.ctl().Jobs(); len(j) > 0 {
 		sess["jobs"] = j
 	}
+	// Apart from jobs, which readers take to be the running ones.
+	if j := s.ctl().EndedJobs(); len(j) > 0 {
+		sess["endedJobs"] = j
+	}
 	// Additive: present only where the vendor's own schedule bills the model's
 	// rate, so a custom price or a relay shows no window it does not charge.
 	if tariff, ok := s.ctl().Tariff(); ok {

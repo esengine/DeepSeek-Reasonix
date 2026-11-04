@@ -37,7 +37,7 @@ describe("the deck readings", () => {
     expect(draw([], [job()]).querySelector('[data-action="deck.jobs"] b')?.textContent).toBe("1");
     const settled = draw([], [job({ status: "exited" })]);
     expect(settled.querySelector('[data-action="deck.jobs"] b')?.textContent).toBe("1");
-    expect(settled.querySelector('[data-action="deck.jobs"] span')?.textContent).toBe("个后台任务已结束");
+    expect(settled.querySelector('[data-action="deck.jobs"] span')?.textContent).toBe("个后台任务 · 都结束了");
     expect(settled.querySelector('[data-action="deck.jobs"]')?.hasAttribute("data-live")).toBe(false);
   });
 
@@ -110,5 +110,38 @@ describe("the sub-agent popover", () => {
   it("offers no stop once nothing is running", () => {
     const box = render(<DeckChips tasks={[named("b", false, "security-review")]} jobs={[]} open="agents" onOpen={vi.fn()} onStopCall={vi.fn()} />).container;
     expect(box.querySelector('[data-action="agent.stop-all"]')).toBeNull();
+  });
+});
+
+describe("the background-job popover", () => {
+  const ended = (over: Partial<JobEntry> = {}): JobEntry =>
+    ({ id: "e1", kind: "bash", label: "go test ./...", description: "跑第 2 组内核测试", status: "failed", startedAt: 1_000, endedAt: 243_000, exitCode: 1, tail: "FAIL TestCompactKeepsPins (0.31s)", ...over }) as JobEntry;
+
+  it("lists running jobs above ended ones, an ended one with its time, last line and exit status", () => {
+    const box = render(<DeckChips tasks={[]} jobs={[job({ tail: "compiling module 192 … ok" }), ended()]} open="jobs" onOpen={vi.fn()} />).container;
+    const heads = [...box.querySelectorAll(".job-deck-head b")].map((b) => b.textContent);
+    expect(heads).toEqual(["在跑 · 1", "已结束 · 1"]);
+    const rows = [...box.querySelectorAll(".job-deck-row")];
+    expect(rows[0].querySelector(".job-deck-tail")?.textContent).toBe("compiling module 192 … ok");
+    expect(rows[1].querySelector(".job-deck-time")?.textContent).toBe("4 分 02 秒 · 失败");
+    expect(rows[1].querySelector(".job-deck-exit")?.textContent).toBe("退出 1");
+    expect(rows[1].querySelector(".job-deck-tail")?.textContent).toBe("FAIL TestCompactKeepsPins (0.31s)");
+  });
+
+  it("clears the ended ones through the pane", () => {
+    const onClearJobs = vi.fn();
+    const box = render(<DeckChips tasks={[]} jobs={[job(), ended(), ended({ id: "e2", status: "done", exitCode: 0 })]} open="jobs" onOpen={vi.fn()} onClearJobs={onClearJobs} />).container;
+    (box.querySelector('[data-action="job.clear"]') as HTMLButtonElement).click();
+    expect(onClearJobs).toHaveBeenCalledWith(["e1", "e2"]);
+  });
+
+  it("stays red for a failure until the list has been opened on it", () => {
+    const view = render(<DeckChips tasks={[]} jobs={[ended()]} open="" onOpen={vi.fn()} />);
+    const chip = () => view.container.querySelector('[data-action="deck.jobs"]')!;
+    expect(chip().hasAttribute("data-failed")).toBe(true);
+    view.rerender(<DeckChips tasks={[]} jobs={[ended()]} open="jobs" onOpen={vi.fn()} />);
+    view.rerender(<DeckChips tasks={[]} jobs={[ended()]} open="" onOpen={vi.fn()} />);
+    expect(chip().hasAttribute("data-failed")).toBe(false);
+    expect(chip().querySelector("span")?.textContent).toBe("个后台任务 · 都结束了");
   });
 });

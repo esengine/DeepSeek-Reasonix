@@ -6,7 +6,7 @@ export function jobElapsed(ms: number): string {
   const minutes = Math.floor(total / 60);
   if (minutes < 60) {
     const seconds = total % 60;
-    return seconds ? t("common.m_m_s_s", { m: minutes, s: seconds }) : t("panels.m_min", { m: minutes });
+    return seconds ? t("common.m_m_s_s", { m: minutes, s: String(seconds).padStart(2, "0") }) : t("panels.m_min", { m: minutes });
   }
   const hours = Math.floor(minutes / 60);
   const rest = minutes % 60;

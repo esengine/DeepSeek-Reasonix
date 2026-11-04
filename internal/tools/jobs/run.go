@@ -35,6 +35,7 @@ func (m *Manager) launchJob(ctx context.Context, j *Job, run func(context.Contex
 			j.noteArtifactErr(cleanupErr.Error())
 		}
 		j.runReturned = true
+		own := lastLine(j.tail)
 		j.mu.Unlock()
 
 		var st Status
@@ -67,6 +68,12 @@ func (m *Manager) launchJob(ctx context.Context, j *Job, run func(context.Contex
 			j.artifact.complete = false
 		}
 		j.times.finished = finishedAt
+		j.artifact.noteExit(err)
+		// What the job wrote itself, not the host's note of how it failed.
+		j.artifact.last = own
+		if own == "" {
+			j.artifact.last = lastLine(j.tail)
+		}
 		if targetDir != "" {
 			if moveErr := j.moveArtifactToDirLocked(targetDir); moveErr != nil {
 				j.noteArtifactErr("migration: " + moveErr.Error())

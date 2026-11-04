@@ -2,7 +2,7 @@ import type { Messages } from "./types";
 
 export const SUBAGENT: Messages = {
   "subagent.a_sub_agent_that_names": { zh: "没有声明 write_paths 的子代理不再占住整个工作区，只在写某个文件的那一刻占用该路径，所以可以和主会话、其他子代理并发。代价：它的 bash 和 MCP 写入不受路径围栏约束，只在事后观察；两边同时改同一个文件时，后写的一方会被拒绝。默认开启；关闭后为严格模式，没声明范围的子代理会占住整个工作区。", en: "A sub-agent that names no write_paths no longer holds the whole workspace; it holds a path only while it writes that file, so it can run beside the main conversation and other sub-agents. The cost: its bash and MCP writes are not confined by a path fence and are only observed afterwards; if two sides edit the same file at once, the later write is refused. On by default; turning it off gives strict mode, where a sub-agent with no declared scope holds the whole workspace." },
-  "subagent.background_jobs_done": { zh: "个后台任务已结束", en: "background jobs done" },
+  "subagent.background_jobs_done": { zh: "个后台任务 · 都结束了", en: "background jobs · all finished" },
   "subagent.background_jobs_failed": { zh: "个后台任务失败了", en: "background jobs failed" },
   "subagent.background_jobs_running": { zh: "个后台任务在跑", en: "background jobs running" },
   "subagent.could_not_read_the_sub": { zh: "无法读取子代理写入范围设置。", en: "Could not read the sub-agent write scope setting." },

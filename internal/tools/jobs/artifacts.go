@@ -40,6 +40,16 @@ type jobArtifact struct {
 	file     *os.File
 	complete bool
 	err      string
+	exit     *int   // the status a command that failed exited with
+	last     string // the last line the job wrote, kept past the tail it came from
+}
+
+// noteExit keeps the exit status a failed command reported.
+func (a *jobArtifact) noteExit(err error) {
+	if ex, ok := exitOf(err); ok {
+		code := ex.Code
+		a.exit = &code
+	}
 }
 
 // noteErr keeps the first failure. A later one is usually its consequence —

@@ -212,6 +212,7 @@ export const ACTIONS: UIAction[] = [
   { id: "session.open-match", kind: "navigation", target: "entity", proof: "interaction" },
   { id: "job.cancel", kind: "kernel-mutation", target: "entity", proof: "authority-effect" },
   { id: "job.cancel-all", kind: "kernel-mutation", target: "none", proof: "interaction" },
+  { id: "job.clear", kind: "view", target: "none", proof: "interaction" },
   { id: "job.tip", kind: "view", target: "entity", proof: "interaction" },
   { id: "job.view", kind: "view", target: "entity", proof: "interaction" },
   { id: "job.close", kind: "view", target: "none", proof: "interaction" },

@@ -1,11 +1,18 @@
 package serve
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
+	"reasonix/internal/base/testenv"
+	"reasonix/internal/contract/config"
+	"reasonix/internal/contract/event"
 	"reasonix/internal/session/control"
 	"reasonix/internal/tools/jobs"
 )
@@ -78,5 +85,42 @@ func TestCancelJobSaysSoWhenTheStopIsAlreadyUnderWay(t *testing.T) {
 	_ = json.Unmarshal(rec.Body.Bytes(), &reason)
 	if reason.Code != "job.not_running" {
 		t.Fatalf("once it left the list: code %q, want job.not_running", reason.Code)
+	}
+}
+
+// /status lists the session's finished jobs apart from the running ones, with
+// how each ended, so a window can say what became of a job after it stopped.
+func TestStatusListsEndedJobsApartFromRunningOnes(t *testing.T) {
+	t.Setenv("REASONIX_HOME", testenv.TempDir(t))
+	m := jobs.NewManager(event.Discard)
+	t.Cleanup(m.Close)
+	bc := NewBroadcaster()
+	ctrl := control.New(control.Options{Runner: fakeRunner{}, Sink: bc, Jobs: m})
+	t.Cleanup(ctrl.Close)
+	srv := httptest.NewServer(operatorHandler(New(ctrl, bc, config.ServeConfig{})))
+	t.Cleanup(srv.Close)
+	j := m.Start("bash", "go test ./...", func(_ context.Context, w io.Writer) (string, error) {
+		_, _ = io.WriteString(w, "FAIL TestX\n")
+		return "", &jobs.ExitError{Code: 2, Err: errors.New("exit status 2")}
+	})
+	_, _ = m.Wait(context.Background(), []string{j.ID}, jobs.WaitOptions{Timeout: 5 * time.Second})
+
+	res, err := http.Get(srv.URL + "/status")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	var body struct {
+		Jobs      []jobs.View `json:"jobs"`
+		EndedJobs []jobs.View `json:"endedJobs"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	if len(body.Jobs) != 0 {
+		t.Fatalf("running jobs = %+v, want none", body.Jobs)
+	}
+	if len(body.EndedJobs) != 1 || body.EndedJobs[0].Status != string(jobs.Failed) || body.EndedJobs[0].ExitCode == nil || *body.EndedJobs[0].ExitCode != 2 || body.EndedJobs[0].Tail != "FAIL TestX" {
+		t.Fatalf("ended jobs = %+v, want the failed one with its exit status and last line", body.EndedJobs)
 	}
 }

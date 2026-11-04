@@ -13,6 +13,11 @@ type View struct {
 	Detail      string `json:"detail,omitempty"`
 	Status      string `json:"status"`
 	StartedAt   int64  `json:"startedAt"` // unix milliseconds
+	// How a job that has ended did: when, the exit status of a command (none for
+	// a task), and for any job the last line it wrote.
+	EndedAt  int64  `json:"endedAt,omitempty"`
+	ExitCode *int   `json:"exitCode,omitempty"`
+	Tail     string `json:"tail,omitempty"`
 }
 
 // Running returns a snapshot of the still-running jobs (for the status bar).
@@ -40,10 +45,52 @@ func (m *Manager) RunningForSession(parentSession string) []View {
 		// A requested stop keeps the job on the running surface until its done
 		// channel closes, so a rebuild or workspace lease cannot see an idle runtime
 		// while the process tree is still unwinding.
-		out = append(out, View{ID: j.ID, Kind: j.Kind, Label: j.Label, Description: j.Present.Description, Detail: j.Present.Detail, Status: string(Running), StartedAt: j.times.started})
+		out = append(out, View{ID: j.ID, Kind: j.Kind, Label: j.Label, Description: j.Present.Description, Detail: j.Present.Detail, Status: string(Running), StartedAt: j.times.started, Tail: lastLine(j.tail)})
 		j.mu.Unlock()
 	}
 	return out
+}
+
+// EndedForSession returns the jobs of parentSession that have finished, oldest
+// first. They stay until the session is purged, so a person can still see how
+// each one ended after it left the running surface.
+func (m *Manager) EndedForSession(parentSession string) []View {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var out []View
+	for _, key := range m.order {
+		j := m.jobs[key]
+		if !sessionMatches(parentSession, j.SessionID) {
+			continue
+		}
+		select {
+		case <-j.done:
+		default:
+			continue
+		}
+		j.mu.Lock()
+		v := View{ID: j.ID, Kind: j.Kind, Label: j.Label, Description: j.Present.Description, Detail: j.Present.Detail,
+			Status: string(j.status), StartedAt: j.times.started, EndedAt: j.times.finished, ExitCode: j.artifact.exit, Tail: j.artifact.last}
+		if v.ExitCode == nil && j.Kind == "bash" && j.status == Done {
+			zero := 0
+			v.ExitCode = &zero
+		}
+		j.mu.Unlock()
+		out = append(out, v)
+	}
+	return out
+}
+
+const maxTailRunes = 200
+
+// lastLine is the last non-blank line a job wrote, cut to a row's width.
+func lastLine(tail []byte) string {
+	lines := strings.Split(strings.TrimRight(strings.ToValidUTF8(string(tail), ""), " \t\r\n"), "\n")
+	line := strings.TrimSpace(lines[len(lines)-1])
+	if r := []rune(line); len(r) > maxTailRunes {
+		return string(r[:maxTailRunes]) + "…"
+	}
+	return line
 }
 
 // Presentation is what a job is called, and what it runs in full, for a person.

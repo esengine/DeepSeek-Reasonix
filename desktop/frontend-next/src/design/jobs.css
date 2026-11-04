@@ -1,0 +1,29 @@
+.studio-deck-anchor:has(.job-deck) { --deck-w: min(360px, calc(100vw - 32px)); }
+.studio-deck-pop:has(> .job-deck) { padding: 6px; border-radius: var(--r-md); }
+.job-deck > section + section { margin-top: 4px; padding-top: 4px; border-top: 1px solid var(--hair); }
+.job-deck-head { display: flex; align-items: center; gap: 8px; min-height: 28px; padding: 4px 8px; }
+.job-deck-head > b { flex: 1; color: var(--muted); font: var(--w-med) var(--fs-meta)/1.3 var(--ui); }
+.job-deck-row { display: flex; flex-direction: column; gap: 3px; padding: 8px; border-radius: var(--r-sm); }
+.job-deck-row:hover { background: var(--float-hi); }
+.job-deck-line { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.job-deck-line > :first-child { flex: 1; min-width: 0; overflow: hidden; }
+.job-deck-name { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); font: var(--w-med) var(--fs-ui)/1.4 var(--ui); }
+.job-deck-time { flex: none; color: var(--faint); font: var(--w-reg) var(--fs-meta)/1.4 var(--ui); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.job-deck-row[data-status="running"] .job-deck-time { color: var(--net-ink); }
+.job-deck-row[data-status="failed"] .job-deck-time { color: var(--err-ink); }
+.job-deck-cmd { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font: var(--w-reg) var(--fs-meta)/1.5 var(--mono); }
+.job-deck-tail { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--faint); font: var(--w-reg) var(--fs-micro)/1.5 var(--mono); }
+.job-deck-row[data-status="failed"] .job-deck-tail { color: var(--err-ink); }
+.job-deck-acts { display: flex; align-items: center; justify-content: flex-end; gap: 4px; margin-top: 2px; }
+.job-deck-exit { margin-right: auto; color: var(--err-ink); font: var(--w-reg) var(--fs-micro)/1 var(--mono); }
+.job-deck-exit[data-ok] { color: var(--faint); }
+.job-deck-confirm { display: inline-flex; align-items: center; gap: 6px; color: var(--err-ink); font: var(--w-reg) var(--fs-meta)/1 var(--ui); animation: job-confirm-in 180ms var(--ease-out) both; }
+.job-deck-sure {
+  height: 24px; padding: 0 10px; border: 0; border-radius: var(--r-pill); background: var(--err); color: var(--err-fg);
+  font: var(--w-med) var(--fs-meta)/1 var(--ui); cursor: pointer;
+}
+.job-deck-sure:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+@keyframes job-confirm-in { from { opacity: 0; transform: translateX(6px); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { .job-deck-confirm { animation: none; } }
+:root[data-effects="reduced"] .job-deck-confirm { animation: none; }
+.job-deck-note { margin: 4px 8px 2px; color: var(--faint); font: var(--w-reg) var(--fs-micro)/1.5 var(--ui); }

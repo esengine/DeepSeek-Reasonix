@@ -396,6 +396,7 @@ type Status interface {
 	Balance(ctx context.Context) billing.Reading
 	Tariff() (pricing.Tariff, bool)
 	Jobs() []jobs.View
+	EndedJobs() []jobs.View
 	Todos() []evidence.TodoItem
 	BrowserTabs() []browser.TabInfo
 	// One browser, one list of tabs: what the window opens the agent can drive,

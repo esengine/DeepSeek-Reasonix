@@ -169,6 +169,15 @@ func (c *Controller) Jobs() []jobs.View {
 	return c.jobs.RunningForSession(c.parentSessionID())
 }
 
+// EndedJobs returns this session's background jobs that have finished, with
+// how each ended, for as long as the session keeps them.
+func (c *Controller) EndedJobs() []jobs.View {
+	if c.jobs == nil {
+		return nil
+	}
+	return c.jobs.EndedForSession(c.parentSessionID())
+}
+
 // KillJob cancels a running background job by ID.
 func (c *Controller) KillJob(id string) bool {
 	if c.jobs == nil {

@@ -324,7 +324,11 @@ function PaneView({ port, hub, rt, title, active, visible, sideHost, side, onFoc
   const paired = useMemo(() => pairCheckpoints(s.items, checkpoints), [s.revision, checkpoints]);
   const rail = useMemo(() => railOf(s.items, s.executions, s.subagentPhase), [s.revision, s.executions, s.subagentPhase]);
 
-  const jobs = status?.jobs ?? NO_JOBS;
+  const [clearedJobs, setClearedJobs] = useState<ReadonlySet<string>>(() => new Set());
+  const jobs = useMemo(() => {
+    const all = [...(status?.jobs ?? NO_JOBS), ...(status?.endedJobs ?? NO_JOBS)];
+    return clearedJobs.size ? all.filter((j) => !clearedJobs.has(j.id)) : all.length ? all : NO_JOBS;
+  }, [status?.jobs, status?.endedJobs, clearedJobs]);
   const counts = useMemo(() => {
     let steps = 0;
     let wrote = 0;
@@ -657,6 +661,7 @@ function PaneView({ port, hub, rt, title, active, visible, sideHost, side, onFoc
           onCancelJob={(id) => cancelJob(port, id, notify, refreshStatus).then(() => {})}
           onReadJob={readJob}
           onOpenRun={openRun} onStopCall={(id) => void port.stopToolCall(id).catch(notify)}
+          onClearJobs={(ids) => setClearedJobs((was) => new Set([...was, ...ids]))}
           usage={status?.sessionUsage} quote={status?.sessionCostQuote} tariff={status?.tariff} onTariffFlip={refreshStatus}
         />
         {reloadFailure && <ReloadNotice failure={reloadFailure} onReload={onReloadSession} />}
@@ -681,7 +686,7 @@ function PaneView({ port, hub, rt, title, active, visible, sideHost, side, onFoc
             tasks={rail.tasks}
             changes={rail.changes}
             stats={rail.stats}
-            jobs={status?.jobs ?? NO_JOBS}
+            jobs={jobs}
             mcp={mcp}
             rate={tps}
             done={!running}
