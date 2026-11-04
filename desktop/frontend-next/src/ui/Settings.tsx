@@ -492,7 +492,7 @@ export function Settings({ hub, onError, port, networkPort, localWorkspacePort, 
             </>
           )}
 
-          {at === "persona" && <AgentPresets port={port} focusPersona={landed === "persona"} />}
+          {at === "session" && <AgentPresets port={port} focusPersona={landed === "persona"} />}
 
           {at === "model" && (
             <>
@@ -591,7 +591,7 @@ export function Settings({ hub, onError, port, networkPort, localWorkspacePort, 
             </>
           )}
 
-          {at === "peers" && <PeersSection port={port} hub={hub} />}
+          {at === "session" && <PeersSection port={port} hub={hub} />}
 
           {at === "hooks" && (
             <>

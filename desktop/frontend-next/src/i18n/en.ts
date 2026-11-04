@@ -865,6 +865,9 @@ export const EN: Record<string, string> = {
   "端点自己执行的搜索，不占本地工具。": "The endpoint runs the search itself; it costs no local tool.",
   "模型 · 已启用 {on}/{all}": "Models · {on} of {all} enabled",
   "模型": "Models",
+  "数据": "Data",
+  "账号与关于": "Account and About",
+  "Agent 行为": "Agent behaviour",
   "已启用 {on}/{all}": "{on} of {all} enabled",
   "搜索或输入完整模型 ID…": "Search or enter an exact model ID…",
   "目录只用于发现，不是白名单。未列出的模型会按原始 ID 保存；「测试已启用模型」会给每个已勾选的模型各发送一次小请求，可能产生少量 Token 费用。":
