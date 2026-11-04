@@ -21,6 +21,12 @@ function hosts(item: Item): boolean {
 
 const restatesPlan = (item: Item) => item.t === "tool" && item.tool.name === "todo_write" && !item.tool.parentId && !item.tool.err;
 
+/** eachCall spreads a merged run of reads back into its calls: inside the
+ *  execution group every call is its own row, as the boards draw them. */
+export function eachCall(item: Item): Item[] {
+  return item.t === "reads" ? item.tools.map((tool, i) => ({ t: "tool", id: `${item.id}:${i}`, tool, running: false, children: [] })) : [item];
+}
+
 /** repeatedSpeakers names the sentences that continue one the same model just
  *  said: the speaker is already on screen, so only a change of model is worth a
  *  header. A user message starts the speaker over. */

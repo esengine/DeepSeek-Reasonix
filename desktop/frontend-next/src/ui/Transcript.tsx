@@ -28,7 +28,7 @@ import { ExtensionCard } from "./cards/ExtensionCard";
 import { toolChangedFile, toolFailed } from "./cards/outcome";
 import { foldEarlier } from "./activityEarlier";
 import { NewAnswerLine, useNewAnswerAnchor } from "./NewAnswerLine";
-import { drawn, foldStats, repeatedSpeakers, sameMembers, transcriptRows, type Shown } from "./turnrows";
+import { drawn, eachCall, foldStats, repeatedSpeakers, sameMembers, transcriptRows, type Shown } from "./turnrows";
 import { BroughtResults } from "./BroughtResults";
 import { ReceiptSlot } from "./ReceiptSlot";
 import { WorkFold } from "./WorkFold";
@@ -678,7 +678,7 @@ const ActivityGroup = memo(function ActivityGroup({
             <StudioIcon name="down" />
           </button>
         )}
-        {(showEarlier ? items : fold.recent).map((item) => <Row key={item.id} it={item} activity {...rowProps} cp={checkpoints.get(item.id)} />)}
+        {(showEarlier ? items : fold.recent).flatMap(eachCall).map((item) => <Row key={item.id} it={item} activity {...rowProps} cp={checkpoints.get(item.id)} />)}
       </div>
     </details>
   );
