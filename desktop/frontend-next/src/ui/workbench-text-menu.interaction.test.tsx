@@ -72,7 +72,7 @@ function select(read: HTMLElement, text: string) {
   return node.parentElement!;
 }
 
-const names = () => within(screen.getByRole("menu")).getAllByRole("menuitem").map((el) => el.textContent);
+const names = () => within(screen.getByRole("menu")).getAllByRole("menuitem").map((el) => [...el.childNodes].filter((n) => n.nodeName !== "KBD").map((n) => n.textContent).join(""));
 
 it("integrates editing actions and quotes the exact CodeMirror selection, including whitespace and newlines", async () => {
   const user = userEvent.setup();
@@ -81,7 +81,7 @@ it("integrates editing actions and quotes the exact CodeMirror selection, includ
   mark(view);
   expect(point(view)).toBe(false);
   await screen.findByRole("menuitem", { name: "加入对话" });
-  expect(names()).toEqual(["撤销编辑", "重做", "剪切", "复制", "粘贴", "全选", "加入对话"]);
+  expect(names()).toEqual(["加入对话", "剪切", "复制", "粘贴", "全选", "撤销编辑", "重做"]);
   await user.click(screen.getByRole("menuitem", { name: "加入对话" }));
   expect(onQuoteSelection).toHaveBeenCalledExactlyOnceWith("  alpha\nbeta  ", "notes.txt");
   expect(document.activeElement).toBe(view.contentDOM);
@@ -105,7 +105,7 @@ it("keeps ordinary editing available without a selection and disables cut/copy w
   mark(view, 3, 3);
   point(view);
   await screen.findByRole("menuitem", { name: "全选" });
-  expect(names()).toEqual(["撤销编辑", "重做", "剪切", "复制", "粘贴", "全选"]);
+  expect(names()).toEqual(["剪切", "复制", "粘贴", "全选", "撤销编辑", "重做"]);
   expect((screen.getByRole("menuitem", { name: "剪切" }) as HTMLButtonElement).disabled).toBe(true);
   expect((screen.getByRole("menuitem", { name: "复制" }) as HTMLButtonElement).disabled).toBe(true);
   expect((screen.getByRole("menuitem", { name: "撤销编辑" }) as HTMLButtonElement).disabled).toBe(true);
@@ -172,7 +172,7 @@ it("offers reader copy/select-all/quote only, preserving exact selected text and
   const read = await reading();
   fireEvent.contextMenu(select(read, " installer, then "), { clientX: 20, clientY: 20 });
   await screen.findByRole("menuitem", { name: "复制" });
-  expect(names()).toEqual(["复制", "全选", "加入对话"]);
+  expect(names()).toEqual(["加入对话", "复制", "全选"]);
   await user.click(screen.getByRole("menuitem", { name: "复制" }));
   expect(writeText).toHaveBeenCalledWith(" installer, then ");
   expect(document.getSelection()!.toString()).toBe(" installer, then ");
@@ -204,7 +204,7 @@ it("uses the actual read-only CodeMirror state and leaves empty readers alone", 
   mark(view, 2, 7);
   point(view);
   await screen.findByRole("menuitem", { name: "复制" });
-  expect(names()).toEqual(["复制", "全选", "加入对话"]);
+  expect(names()).toEqual(["加入对话", "复制", "全选"]);
 });
 
 it("requires both reader selection endpoints inside the surface and ignores controls/search", async () => {
@@ -257,10 +257,10 @@ it("supports reader keyboard invocation, navigation and dismissal without submit
   read.focus();
   select(read, "restart");
   expect(fireEvent.keyDown(read, { key: "F10", shiftKey: true })).toBe(false);
-  const copy = await screen.findByRole("menuitem", { name: "复制" });
-  await waitFor(() => expect(document.activeElement).toBe(copy));
+  const quote = await screen.findByRole("menuitem", { name: "加入对话" });
+  await waitFor(() => expect(document.activeElement).toBe(quote));
   await user.keyboard("{End}");
-  expect(document.activeElement).toBe(screen.getByRole("menuitem", { name: "加入对话" }));
+  expect(document.activeElement).toBe(screen.getByRole("menuitem", { name: "全选" }));
   await user.keyboard("{Escape}");
   expect(document.activeElement).toBe(read);
   expect(document.getSelection()!.toString()).toBe("restart");

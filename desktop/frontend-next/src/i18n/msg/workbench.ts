@@ -192,4 +192,5 @@ export const WORKBENCH: Messages = {
   "workbench.root_folder": { zh: "根目录", en: "Project root" },
   "workbench.copied_text": { zh: "已复制 {text}", en: "Copied {text}" },
   "workbench.browser_tab_named": { zh: "浏览器标签 · {name}", en: "Browser tab · {name}" },
+  "workbench.lines_a_b": { zh: "第 {a}–{b} 行", en: "Lines {a}–{b}" },
 };

@@ -705,6 +705,7 @@ export function WorkbenchPanel({
                     readOnly={!!grantedFile || !!file.readOnly}
                     onTextContextMenu={textMenu.offer}
                     onLine={(n) => setCursor([active.path, n])}
+                    onQuote={onQuoteSelection ? (text) => onQuoteSelection(text, active.path) : undefined}
                   />
                   <WorkbenchStatus path={active.path} line={cursor[0] === active.path ? cursor[1] : 1} dirty={draft !== file.content} />
                 </Suspense>

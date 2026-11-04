@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import { t } from "../i18n";
+import { chord } from "./keys";
 import { pinToViewport } from "./place";
 import type { TextContextMenuRequest } from "../port/host";
 import type { TextMenuAction } from "./workbench_text_menu";
@@ -43,15 +44,19 @@ export function WorkbenchSelectionMenu({ menu, onAction, onClose }: {
         buttons[e.key === "Home" ? 0 : e.key === "End" ? buttons.length - 1 : (at + (e.key === "ArrowDown" ? 1 : -1) + buttons.length) % buttons.length]?.focus();
       }}
     >
-      {menu.editable && <>
-        <button role="menuitem" disabled={!menu.canUndo} data-action="workbench.text-undo" onClick={() => void onAction("undo")}>{t("workbench.undo")}</button>
-        <button role="menuitem" disabled={!menu.canRedo} data-action="workbench.text-redo" onClick={() => void onAction("redo")}>{t("workbench.redo")}</button>
-        <button role="menuitem" disabled={!menu.selected} data-action="workbench.text-cut" onClick={() => void onAction("cut")}>{t("workbench.cut")}</button>
+      {menu.quote && menu.selected && <>
+        <button role="menuitem" data-action="workbench.quote-selection" onClick={() => void onAction("quote")}>{t("workbench.add_to_conversation")}</button>
+        <hr />
       </>}
-      <button role="menuitem" disabled={!menu.selected} data-action="workbench.text-copy" onClick={() => void onAction("copy")}>{t("common.copy")}</button>
-      {menu.editable && <button role="menuitem" data-action="workbench.text-paste" onClick={() => void onAction("paste")}>{t("workbench.paste")}</button>}
-      <button role="menuitem" data-action="workbench.text-select-all" onClick={() => void onAction("selectAll")}>{t("workbench.select_all")}</button>
-      {menu.quote && menu.selected && <button role="menuitem" data-action="workbench.quote-selection" onClick={() => void onAction("quote")}>{t("workbench.add_to_conversation")}</button>}
+      {menu.editable && <button role="menuitem" disabled={!menu.selected} data-action="workbench.text-cut" onClick={() => void onAction("cut")}>{t("workbench.cut")}<kbd aria-hidden="true">{chord("X")}</kbd></button>}
+      <button role="menuitem" disabled={!menu.selected} data-action="workbench.text-copy" onClick={() => void onAction("copy")}>{t("common.copy")}<kbd aria-hidden="true">{chord("C")}</kbd></button>
+      {menu.editable && <button role="menuitem" data-action="workbench.text-paste" onClick={() => void onAction("paste")}>{t("workbench.paste")}<kbd aria-hidden="true">{chord("V")}</kbd></button>}
+      <button role="menuitem" data-action="workbench.text-select-all" onClick={() => void onAction("selectAll")}>{t("workbench.select_all")}<kbd aria-hidden="true">{chord("A")}</kbd></button>
+      {menu.editable && <>
+        <hr />
+        <button role="menuitem" disabled={!menu.canUndo} data-action="workbench.text-undo" onClick={() => void onAction("undo")}>{t("workbench.undo")}<kbd aria-hidden="true">{chord("Z")}</kbd></button>
+        <button role="menuitem" disabled={!menu.canRedo} data-action="workbench.text-redo" onClick={() => void onAction("redo")}>{t("workbench.redo")}<kbd aria-hidden="true">{chord("⇧Z")}</kbd></button>
+      </>}
     </div>, document.body,
   );
 }

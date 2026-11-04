@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Compartment, EditorState, type Extension } from "@codemirror/state";
 import {
   drawSelection,
@@ -22,6 +22,7 @@ import { tags } from "@lezer/highlight";
 import { t } from "../i18n";
 import { editorTextSession } from "./workbench_editor_menu";
 import { textMenuKey, type OfferTextMenu } from "./workbench_text_menu";
+import { EditorSelectionTools, type SelectionTools } from "./EditorSelectionTools";
 
 // Loaded per file, so opening a Go file does not pay for every other grammar.
 const LANGUAGE: Record<string, () => Promise<Extension>> = {
@@ -126,15 +127,20 @@ interface Props {
   onTextContextMenu?: OfferTextMenu;
   // The line the cursor is on, one-based, whenever it moves.
   onLine?: (line: number) => void;
+  // Hands a selected passage to the conversation from the bar under the selection.
+  onQuote?: (text: string) => void;
 }
 
 /** A file, read and edited in one place: highlighted as it is typed, with the
  *  editor's own find (Ctrl+F), go to line (Ctrl+G) and save (Ctrl+S). */
-export default function CodeEditor({ path, value, dark, onChange, onSave, readOnly = false, onTextContextMenu, onLine }: Props) {
+export default function CodeEditor({ path, value, dark, onChange, onSave, readOnly = false, onTextContextMenu, onLine, onQuote }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const view = useRef<EditorView | null>(null);
-  const handlers = useRef({ onChange, onSave, onTextContextMenu, onLine });
-  handlers.current = { onChange, onSave, onTextContextMenu, onLine };
+  const handlers = useRef({ onChange, onSave, onTextContextMenu, onLine, onQuote });
+  handlers.current = { onChange, onSave, onTextContextMenu, onLine, onQuote };
+  const [tools, setTools] = useState<SelectionTools | null>(null);
+  const toolTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  useEffect(() => () => clearTimeout(toolTimer.current), []);
   const language = useRef(new Compartment());
   const look = useRef(new Compartment());
   const editability = useRef(new Compartment());
@@ -154,7 +160,8 @@ export default function CodeEditor({ path, value, dark, onChange, onSave, readOn
         doc: value,
         extensions: [
           EditorView.domEventHandlers({
-            contextmenu: offer,
+            contextmenu: (event, editor) => { setTools(null); return offer(event, editor); },
+            scroll: () => { setTools(null); return false; },
             keydown: (event, editor) => textMenuKey(event) && offer(event, editor),
           }),
           lineNumbers(),
@@ -181,6 +188,23 @@ export default function CodeEditor({ path, value, dark, onChange, onSave, readOn
           EditorView.updateListener.of((update) => {
             if (update.docChanged) handlers.current.onChange(update.state.doc.toString());
             if (update.docChanged || update.selectionSet) handlers.current.onLine?.(update.state.doc.lineAt(update.state.selection.main.head).number);
+            if (!update.docChanged && !update.selectionSet) return;
+            clearTimeout(toolTimer.current);
+            const sel = update.state.selection.main;
+            if (sel.empty || !handlers.current.onQuote) { setTools(null); return; }
+            // Once the selection settles: a drag moves it every frame.
+            toolTimer.current = setTimeout(() => {
+              try {
+                const at = update.view.coordsAtPos(sel.to);
+                if (!at) return;
+                const doc = update.state.doc;
+                // A selection ending at a line's first column covers none of that line.
+                const last = doc.lineAt(sel.to).from === sel.to ? sel.to - 1 : sel.to;
+                setTools({ x: at.left, y: at.bottom + 6, from: doc.lineAt(sel.from).number, to: doc.lineAt(last).number, text: update.state.sliceDoc(sel.from, sel.to) });
+              } catch {
+                setTools(null);
+              }
+            }, 120);
           }),
           language.current.of([]),
           look.current.of(theme(dark)),
@@ -224,5 +248,10 @@ export default function CodeEditor({ path, value, dark, onChange, onSave, readOn
     editor.dispatch({ changes: { from: 0, to: editor.state.doc.length, insert: value } });
   }, [value]);
 
-  return <div className="workbench-editor" ref={host} aria-label={t("workbench.file_contents")} />;
+  return (
+    <>
+      <div className="workbench-editor" ref={host} aria-label={t("workbench.file_contents")} />
+      {tools && onQuote && <EditorSelectionTools tools={tools} onQuote={onQuote} onDone={() => setTools(null)} />}
+    </>
+  );
 }
