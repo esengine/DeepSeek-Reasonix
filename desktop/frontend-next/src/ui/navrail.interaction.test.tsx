@@ -61,8 +61,7 @@ const toggleSidebar = () => userEvent.click(document.querySelector<HTMLElement>(
 
 async function openAppearance() {
   await userEvent.click(document.querySelector<HTMLElement>('[data-action="chrome.settings"]')!);
-  await userEvent.click(await screen.findByRole("tab", { name: /^外观/ }));
-  await userEvent.click(await screen.findByRole("tab", { name: /导航与侧栏/ }));
+  await userEvent.click(await screen.findByRole("tab", { name: /^操作与性能/ }));
   await screen.findByRole("group", { name: "图标栏" });
 }
 const choice = (name: string) => screen.getByRole("button", { name });

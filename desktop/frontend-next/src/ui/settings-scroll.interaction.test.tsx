@@ -80,7 +80,7 @@ it("keeps a search result's anchor after switching away from a scrolled category
 it("opens an initial anchor inside its disclosure", async () => {
   const scroll = anchorScrolling();
   draw("appearance:contrast");
-  await screen.findByRole("tab", { name: "外观与主题", selected: true });
+  await screen.findByRole("tab", { name: /^外观/, selected: true });
   const target = document.querySelector<HTMLElement>('[data-setting="contrast"]')!;
   expect(target.closest<HTMLDetailsElement>("details")?.open).toBe(true);
   expect(scroll.mock.contexts).toContain(target);

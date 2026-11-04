@@ -20,7 +20,7 @@ describe("the pages of a long settings section", () => {
   it("answers which page an anchor is on, and the first page of a section", () => {
     expect(pageOf("tools", "sandbox")).toBe("sandbox");
     expect(pageOf("tools", "approval")).toBe(firstPage("tools"));
-    expect(pageOf("appearance", "graphics")).toBe("window");
+    expect(pageOf("appearance", "graphics")).toBeUndefined();
     expect(pageOf("session", "preset")).toBeUndefined();
     expect(firstPage("session")).toBeUndefined();
   });

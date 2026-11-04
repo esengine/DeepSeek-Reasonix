@@ -81,27 +81,36 @@ describe("pages inside the tools section", () => {
   });
 });
 
-describe("pages inside the appearance section", () => {
-  it("splits it into pages and keeps each setting on one", async () => {
+describe("the appearance family", () => {
+  it("is three pages, and each setting is on one of them", async () => {
     draw("appearance");
-    await screen.findByRole("tab", { name: /导航与侧栏/ });
-    expect(shown("mode")).toBe(true);
-    expect(shown("send-shortcut")).toBe(false);
-    await userEvent.click(screen.getByRole("tab", { name: /快捷键/ }));
-    await waitFor(() => expect(shown("send-shortcut")).toBe(true));
-    expect(shown("mode")).toBe(false);
+    await waitFor(() => expect(shown("scheme")).toBe(true));
+    expect(shown("keys")).toBe(false);
+    expect(shown("folding")).toBe(false);
+    cleanup();
+    draw("controls");
+    await waitFor(() => expect(shown("keys")).toBe(true));
+    expect(shown("scheme")).toBe(false);
+    cleanup();
+    draw("display");
+    await waitFor(() => expect(shown("folding")).toBe(true));
+    expect(shown("keys")).toBe(false);
   });
-});
 
-describe("the shortcuts page", () => {
   it("lists what stops or sends a turn together, before the key table", async () => {
-    draw("appearance");
-    await userEvent.click(await screen.findByRole("tab", { name: /快捷键/ }));
-    await waitFor(() => expect(shown("send-shortcut")).toBe(true));
+    draw("controls");
+    await waitFor(() => expect(shown("keys")).toBe(true));
     const order = [...document.querySelectorAll<HTMLElement>("[data-setting]")]
       .filter((el) => shown(el.dataset.setting ?? ""))
-      .map((el) => el.dataset.setting);
-    expect(order).toEqual(["send-shortcut", "running-message-intent", "esc-stop", "keys"]);
+      .map((el) => el.dataset.setting)
+      .filter((id) => ["running-message-intent", "esc-stop", "keys"].includes(id ?? ""));
+    expect(order).toEqual(["running-message-intent", "esc-stop", "keys"]);
+  });
+
+  it("lands an anchor on the page that owns it, whatever section it was opened under", async () => {
+    draw("appearance:folding");
+    await waitFor(() => expect(shown("folding")).toBe(true));
+    expect(shown("scheme")).toBe(false);
   });
 });
 

@@ -12,7 +12,7 @@ import { useSettingsSearch } from "./useSettingsSearch";
 import { useSettingLanding } from "./useSettingLanding";
 import { bytes, tokens as fmtTokens } from "../i18n/format";
 import { STORAGE_TALLY_DELAY, cachedStorageTotal, storageTotal } from "./storageTally";
-import { SECTION_NAME, pageHome } from "./prefsnav";
+import { LOOK_FAMILY, SECTION_NAME, SETTING_AT, pageHome } from "./prefsnav";
 import { SettingsNav, SettingsTitle } from "./SettingsNav";
 import { SettingsPageStyle } from "./SettingsPageStyle";
 import { firstPage, pageOf } from "./settingPages";
@@ -88,6 +88,11 @@ const ELSEWHERE: string[] = [];
 // label. A failed server keeps its error on the row that names it.
 const NET_MODE: Record<string, string> = { auto: "跟随系统", env: "环境变量", custom: "手动", off: "直连" };
 
+const homeFor = (section: Section, anchor: string): Section => {
+  const entry = SETTING_AT(anchor);
+  return entry && LOOK_FAMILY.includes(entry.section) && LOOK_FAMILY.includes(pageHome(section)) ? entry.section : pageHome(section);
+};
+
 export function Settings({ hub, onError, port, networkPort, localWorkspacePort, networkHost, status, theme, onTheme, contrast, onContrast, weight, onWeight, look, onLook, onClose, onChanged, onSessionsRecovered, reloadThemes, at: opened, account: acct, accountUnread, reloadAccount, workspaceRoot }: Props) {
   const navigation = useSettingsLeave();
   const close = useCallback(() => navigation.leave(onClose), [navigation.leave, onClose]);
@@ -95,9 +100,9 @@ export function Settings({ hub, onError, port, networkPort, localWorkspacePort, 
   const homePort = networkPort ?? port;
   const localPort = localWorkspacePort ?? homePort;
   const [openedSection, openedAnchor = ""] = (opened ?? "").split(":", 2);
-  const [at, setAt] = useState<Section>(pageHome((openedSection as Section) || "session"));
+  const [at, setAt] = useState<Section>(homeFor((openedSection as Section) || "session", openedAnchor));
   const [pages, setPages] = useState<Partial<Record<Section, string>>>(() => {
-    const home = pageHome((openedSection as Section) || "session");
+    const home = homeFor((openedSection as Section) || "session", openedAnchor);
     const first = pageOf(home, openedAnchor);
     return first ? { [home]: first } : {};
   });
@@ -294,6 +299,8 @@ export function Settings({ hub, onError, port, networkPort, localWorkspacePort, 
   // each section rides on its own row, so the risky one is legible from here.
   const nav: Record<Section, string> = {
     common: "",
+    display: "",
+    controls: "",
     session: status?.plan ? t("计划模式") : preset,
     persona: "",
     model: status?.modelRef?.split("/").pop() ?? "—",
@@ -329,7 +336,7 @@ export function Settings({ hub, onError, port, networkPort, localWorkspacePort, 
     return home === section ? page : `${page} › ${t(SECTION_NAME[section] ?? section)}`;
   };
   const go = (requested: Section, anchor: string) => {
-    const section = pageHome(requested);
+    const section = homeFor(requested, anchor);
     navigation.leave(() => {
       setAt(section);
       const target = pageOf(section, anchor);
@@ -760,7 +767,7 @@ export function Settings({ hub, onError, port, networkPort, localWorkspacePort, 
 
           {at === "common" && <CommonSettings port={port} homePort={homePort} theme={theme} onTheme={onTheme} look={look} onLook={onLook} />}
 
-          {at === "appearance" && (
+          {LOOK_FAMILY.includes(at) && (
             <Appearance port={homePort} theme={theme} onTheme={onTheme} contrast={contrast} onContrast={onContrast} weight={weight} onWeight={onWeight} reloadThemes={reloadThemes} look={look} onLook={onLook} />
           )}
 
