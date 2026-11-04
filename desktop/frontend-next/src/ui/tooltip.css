@@ -5,7 +5,7 @@
   align-items: center;
   gap: 8px;
   max-width: min(340px, calc(100vw / var(--zoom, 1) - 12px));
-  padding: 6px 9px;
+  padding: 5px 8px;
   border: 1px solid var(--border);
   border-radius: var(--r-sm);
   background: var(--float);
@@ -16,7 +16,8 @@
   pointer-events: none;
 }
 .icon-tooltip kbd {
-  color: var(--muted);
+  color: var(--faint);
   font: inherit;
+  font-weight: var(--w-reg);
   white-space: nowrap;
 }
