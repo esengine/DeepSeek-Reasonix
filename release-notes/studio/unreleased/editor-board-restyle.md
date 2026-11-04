@@ -23,6 +23,7 @@
 - 回复里的「思考」按设计稿统一：思考中标题写「思考中 · 3.2 秒」并有一道扫光；展开时推理长到 6 行后往上滚，最新一行带光标；想完后标题淡入换成「思考 6.2 秒 · 214 字」，自动展开的会自动收起；停下或出错时标题变橙，写「思考到一半停下了 · 3.1 秒」，并说明已经想到的内容可以展开看（d33758664）。
 - 手动展开或收起的「思考」会按会话记住，刷新后保持原样；回答流式输出时光标贴在最后一个字后面，每秒硬切闪一次（85f2679a2）。
 - 「执行过程」按设计稿补齐动效：收起时标题写正在做的那一步和秒数，带转圈和淡扫光；操作数变化时往上滚；做完后标题写「✓ 4 项操作 · 38 秒」并收起。每一行右侧写结果（48 行、2 处、+12 −3、退出 1）；运行中转圈，完成时同一位置弹出勾；失败时抖一下，原因放在行下的红框里，可点「看完整输出」；跑了一会儿还没输出时显示「还没有输出 · 停止这一条」；新步骤依次淡入上浮（37981d0ff）。
+- 思考结束时，旧标题淡出、新标题在同一位置淡入；执行过程里运行中的那一行从命令真正开始的时间计秒，重新打开也不会从零算起（caa509712）。
 
 ---
 <!-- lang:en -->
@@ -52,3 +53,4 @@
 - Thinking in a reply follows the board: while live the title reads "Thinking · 3.2s" with a light sweeping across it; opened, the reasoning grows to six lines and then scrolls with the caret on the newest line; when done the title fades to "Thought 6.2s · 214 chars" and a block that opened on its own folds again; a turn stopped or failed mid-thought turns the title amber, "Stopped while thinking · 3.1s", and says what was thought is inside (d33758664).
 - A thought you opened or closed stays that way after a reload, per conversation; while an answer streams its caret sits right after the last word and blinks once a second (85f2679a2).
 - The activity group moves as the board draws it: folded while running, the title names the step under way and its seconds, with a spinner and a faint sweep; the action count rolls up as it grows; when done it reads "✓ 4 actions · 38s" and folds. Each row says what it came to on the right (48 lines, 2 matches, +12 −3, exit 1); a running step spins where its tick then pops; a failure shakes once and shows its reason in a red box with "See full output"; a step with no output for a while offers "Stop this one"; new rows fade up one after another (37981d0ff).
+- When a thought finishes, its running title fades out as the settled one fades in; a running step counts its seconds from when it really started, so reopening does not restart the clock (caa509712).
