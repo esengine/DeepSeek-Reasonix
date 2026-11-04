@@ -1798,6 +1798,7 @@ export const EN: Record<string, string> = {
   "搜索会话、工具、设置…": "Search conversations, tools, settings…",
   "没有匹配的会话、设置或操作": "Nothing matches",
   "最佳匹配": "Best match",
+  "最近用过": "Recently used",
   "↑↓ 选择 · Enter 打开 · Tab 切换范围 · > 操作 · # 会话 · , 设置": "↑↓ to move · Enter to open · Tab to switch scope · > actions · # sessions · , settings",
   "搜索文件": "Search files",
   "清除搜索": "Clear search",

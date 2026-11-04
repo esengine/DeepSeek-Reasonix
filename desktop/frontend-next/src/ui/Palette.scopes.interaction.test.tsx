@@ -5,7 +5,7 @@ import userEvent from "@testing-library/user-event";
 import "./testkit";
 import { Palette, type Command, type PaletteSetting } from "./Palette";
 
-afterEach(cleanup);
+afterEach(() => { cleanup(); localStorage.clear(); });
 
 const commands: Command[] = [
   { id: "new", label: "新建会话", icon: "plus", keywords: "new", keys: "Alt N", run: vi.fn() },

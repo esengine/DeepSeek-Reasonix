@@ -53,6 +53,23 @@ interface Hit {
 }
 
 const LIMIT = 5;
+const RECENT_KEY = "palette.recent";
+const RECENT_KEPT = 3;
+
+function readRecent(): string[] {
+  try {
+    const raw = JSON.parse(localStorage.getItem(RECENT_KEY) ?? "[]");
+    return Array.isArray(raw) ? raw.filter((x): x is string => typeof x === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+function remember(key: string) {
+  try {
+    localStorage.setItem(RECENT_KEY, JSON.stringify([key, ...readRecent().filter((x) => x !== key)].slice(0, RECENT_KEPT)));
+  } catch {}
+}
 
 export function Palette({ open, onClose, commands, tree, onOpenSession, settings = [], onOpenSetting }: Props) {
   const [query, setQuery] = useState("");
@@ -101,6 +118,19 @@ export function Palette({ open, onClose, commands, tree, onOpenSession, settings
       ? settings.filter((x) => !q || `${x.label} ${x.keywords} ${x.path}`.toLowerCase().includes(q)).slice(0, LIMIT)
         .map((x) => ({ key: `g:${x.id}`, label: x.label, icon: "settings" as StudioIconName, note: x.path, run: () => onOpenSetting?.(x.id) }))
       : [];
+    if (!q && scope === "") {
+      const used = readRecent();
+      const pool = [...actions, ...sessions];
+      const recent = used.map((key) => pool.find((h) => h.key === key)).filter((h): h is Hit => !!h);
+      if (recent.length > 0) {
+        const taken = new Set(recent.map((h) => h.key));
+        return [
+          { label: t("最近用过"), hits: recent },
+          { label: t("快捷操作"), hits: actions.filter((h) => !taken.has(h.key)) },
+          { label: t("会话"), hits: sessions.filter((h) => !taken.has(h.key)) },
+        ].filter((g) => g.hits.length > 0);
+      }
+    }
     const ordered = q || scope !== ""
       ? [{ label: t("会话"), hits: sessions }, { label: t("设置"), hits: found }, { label: t("快捷操作"), hits: actions }]
       : [{ label: t("快捷操作"), hits: actions }, { label: t("会话"), hits: sessions }];
@@ -122,6 +152,7 @@ export function Palette({ open, onClose, commands, tree, onOpenSession, settings
   const pick = useCallback(
     (hit: Hit | undefined) => {
       if (!hit) return;
+      remember(hit.key);
       onClose();
       hit.run();
     },
