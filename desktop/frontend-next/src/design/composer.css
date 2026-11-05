@@ -90,3 +90,6 @@
 @container conversation (max-width: 420px) {
   .compose .studio-effort-reading, .compose .studio-model-sep { display: none; }
 }
+.compose .studio-model-group { flex: none; }
+.compose .model-picker .nm { flex: none; max-width: none; }
+.compose .studio-model-control { flex: none; min-width: 0; }
