@@ -9,6 +9,8 @@ import { reason } from "../i18n/kernel";
 import { CopyButton } from "./CopyButton";
 import { SkillUpdate } from "./SkillUpdate";
 import { SkillRemove } from "./SkillRemove";
+import { useDismiss } from "./dismiss";
+import { StudioIcon } from "./StudioIcon";
 
 // One skill, and the two things a reader wants from it: whether the model can
 // reach it at all, and which of the layers it was switched at.
@@ -115,8 +117,9 @@ export function SkillRow({
         <span className="ds" title={sk.description || undefined}>{sk.description || t("ext.no_description_written")}</span>
       </span>
       <span className="face">
-        {updatable && !updating && <button className="act sm" data-action="skills.update-open" data-target={sk.name} onClick={() => setUpdating(true)}>{t("ext.update_from_source_folder")}</button>}
-        {removable && !removing && <button className="act sm" data-action="skills.remove-open" data-target={sk.name} onClick={() => setRemoving(true)}>{t("ext.remove_2")}</button>}
+        {((updatable && !updating) || (removable && !removing)) && (
+          <SkillMore name={sk.name} onUpdate={updatable && !updating ? () => setUpdating(true) : undefined} onRemove={removable && !removing ? () => setRemoving(true) : undefined} />
+        )}
       </span>
       <span className="sc" title={sk.path}>
         {sk.plugin || t(SCOPE[sk.scope ?? ""] ?? "") || sk.scope}
@@ -129,5 +132,26 @@ export function SkillRow({
     {updating && <SkillUpdate port={port} name={sk.name} onClose={() => setUpdating(false)} onDone={() => { setUpdating(false); onDone(); }} />}
     {removing && <SkillRemove port={port} sk={sk} onClose={() => setRemoving(false)} onDone={() => { setRemoving(false); onDone(); }} />}
     </>
+  );
+}
+
+function SkillMore({ name, onUpdate, onRemove }: { name: string; onUpdate?: () => void; onRemove?: () => void }) {
+  const [open, setOpen] = useState(false);
+  const box = useRef<HTMLSpanElement>(null);
+  useDismiss(open, box, () => setOpen(false));
+  const pick = (fn: () => void) => () => { setOpen(false); fn(); };
+  return (
+    <span className="sk-more" ref={box}>
+      <button type="button" className="sk-more-btn" data-action="skills.more" data-target={name} aria-haspopup="menu" aria-expanded={open}
+        aria-label={t("ext.more_for_name", { name })} title={t("common.more")} onClick={() => setOpen((v) => !v)}>
+        <StudioIcon name="more" />
+      </button>
+      {open && (
+        <span className="sk-more-menu" role="menu" aria-label={name}>
+          {onUpdate && <button type="button" role="menuitem" data-action="skills.update-open" data-target={name} onClick={pick(onUpdate)}>{t("ext.update_from_source_folder")}</button>}
+          {onRemove && <button type="button" role="menuitem" data-tone="danger" data-action="skills.remove-open" data-target={name} onClick={pick(onRemove)}>{t("ext.remove_2")}</button>}
+        </span>
+      )}
+    </span>
   );
 }

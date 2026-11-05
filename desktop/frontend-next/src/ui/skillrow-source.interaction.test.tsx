@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import "./testkit";
 import { SkillRow } from "./SkillRow";
 import { boot, STORAGE } from "../i18n";
@@ -48,5 +48,7 @@ it.each([
   ["source_changed", "link", false],
 ] as const)("offers the update for a %s %s install: %s", (state, mode, offered) => {
   draw(sk({ path: "/p", mode, state }));
-  expect(screen.queryByRole("button", { name: "从源文件夹更新…" }) !== null).toBe(offered);
+  const more = screen.queryByRole("button", { name: /^更多/ });
+  if (more) fireEvent.click(more);
+  expect(screen.queryByRole("menuitem", { name: "从源文件夹更新…" }) !== null).toBe(offered);
 });

@@ -425,6 +425,7 @@ export const EXT: Messages = {
   "ext.written_into_the_repository_so": { zh: "写入仓库，clone 仓库的人也会获得", en: "Written into the repository, so whoever clones it gets it too" },
   "ext.you_cannot_vote_on_a": { zh: "不能评价自己发布的包", en: "You cannot vote on a package you published" },
   "ext.you_chose_to_trust_this": { zh: "你选择了信任这个发布者", en: "You chose to trust this publisher" },
+  "ext.more_for_name": { zh: "更多：{name}", en: "More for {name}" },
   "ext.add_menu": { zh: "添加…", en: "Add…" },
   "ext.add_from_market": { zh: "从市场安装", en: "Install from the market" },
   "ext.add_from_market_hint": { zh: "浏览别人分享的插件", en: "Browse what others share" },

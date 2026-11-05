@@ -675,6 +675,7 @@ export const ACTIONS: UIAction[] = [
   { id: "update.mode", kind: "kernel-mutation", target: "none", proof: "interaction" },
   { id: "update.restart", kind: "kernel-mutation", target: "none", proof: "interaction" },
   { id: "update.later", kind: "view", target: "none", proof: "interaction" },
+  { id: "skills.more", kind: "view", target: "entity", proof: "interaction" },
   { id: "skills.update-open", kind: "view", target: "entity", proof: "interaction" },
   { id: "skills.update-close", kind: "view", target: "none", proof: "interaction" },
   { id: "skills.update-overwrite", kind: "view", target: "none", proof: "interaction" },

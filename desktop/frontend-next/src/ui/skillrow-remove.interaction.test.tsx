@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import "./testkit";
 import { SkillRow } from "./SkillRow";
@@ -24,7 +24,11 @@ function draw(sk: Partial<SkillEntry> = {}, root = "", removeSkill = vi.fn().moc
   return { removeSkill, onDone, onFailed, user: userEvent.setup() };
 }
 
-const open = () => screen.queryByRole("button", { name: "卸载…" });
+const open = () => {
+  const more = screen.queryByRole("button", { name: /^更多/ });
+  if (more && !screen.queryByRole("menu")) fireEvent.click(more);
+  return screen.queryByRole("menuitem", { name: "卸载…" });
+};
 
 it("offers removal for a skill of the person's own and for none of the others", () => {
   draw();
