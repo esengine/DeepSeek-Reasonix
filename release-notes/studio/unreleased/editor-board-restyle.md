@@ -50,6 +50,7 @@
 - 设备访问卡片改为「在手机上用 Studio」，写明手机能做什么（看会话、发消息、批准操作）；已连接的手机放在最前，合成「n 台手机已连接」，每台写明是哪种方式连的；下面「手机怎么连过来」分成两块：「同一个 Wi-Fi」（写明地址、自带开关、二维码和网络选择）在前，「在外面也能连」（需要登录账号）在后。两种方式仍各自独立，打开一个不会顺带打开另一个（99fb58d0f）。
 - 首次引导改为分步：先是欢迎页（一句话说清能做什么，约 1 分钟）；然后顶部显示步骤、右上角随时「稍后再说」：① 连接模型——服务做成卡片（各写一句是什么），只有「中转站 / 自建」要自己填地址，其他服务写明已填好的地址；② 从这个 key 能用的模型里选默认模型；只有自填地址且两种接口都能用时才问「接入方式」，常用服务从不问。步骤之间按前进 / 后退方向平移（面板时长），减少动态时不动。打开项目仍是设置完成后的应用页面（91ebf8222）。
 - 设置里属于「列表或编辑器」的项改为点进去的二级页：在分区里只显示一行（标题、说明、当前状态、›），点开后整列只显示这一项，顶部有面包屑「分区 / 项名」可以返回；内容点开时才加载。搜索或链接直达这类项时会直接打开它的页面，换分区时自动收起。第一批：按用途选择模型、明确的规则、模型可用的工具、会话间消息（5309e264c）。
+- 第二批二级页：扩展里的「自动化」「定时运行」、连接里的「网络」、数据里的「存储」「导出与导入配置」、账号与关于里的「版本与更新」，在分区里各显示一行，点进去带面包屑（8609e3881）。
 
 
 ---
@@ -107,3 +108,4 @@
 - The device-access card is titled Use Studio on your phone and says what a paired phone can do. Connected phones come first under one count, each saying how it came in; then How the phone gets here offers Same Wi-Fi (address, its own switch, QR and network picker) and From anywhere (needs sign-in) as separate blocks. Switching one route on never opens the other (99fb58d0f).
 - First-run setup goes in steps: a welcome that says what it does and that it takes about a minute, then connect a model service from cards (only a relay or self-hosted entry asks for an address; listed services say what they filled), then pick a default model from what the key reaches. Only a typed address that answers both ways asks how it is spoken to. Steps slide in the direction they go, with Not now on each (91ebf8222).
 - Settings blocks that are lists or editors now open as pages: on the section they show as one row (title, hint, current state, chevron), and opening one gives the column to it under a breadcrumb back to the section; contents load only when opened. Search and links that land on one open its page. First batch: models by use, explicit rules, the model's tools, messages between sessions (5309e264c).
+- Second batch of settings pages: automation and scheduled runs under Extensions, the network under Connections, storage and export/import under Data, and versions and updates under Account and About each show as one row and open under a breadcrumb (8609e3881).
