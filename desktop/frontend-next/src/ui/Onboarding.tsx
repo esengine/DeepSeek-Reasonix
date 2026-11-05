@@ -214,6 +214,7 @@ export function Onboarding({ port, setup, onDone, onSkip }: Props) {
 
           {step === "welcome" && (
             <div className="onb-welcome">
+              <img className="onb-welcome-mark" src={logoWordmark} alt="" aria-hidden="true" draggable={false} />
               <h1 className="onb-t">{t("onboarding.hand_it_a_task")}</h1>
               <p className="onb-s">{t("onboarding.what_it_does_and_shows")}</p>
               <div className="onb-acts">

@@ -13,7 +13,11 @@
 .onb-steps li[data-state="current"] i { border-color: var(--text); background: var(--text); color: var(--surface); }
 .onb-steps li[data-state="done"] i { border-color: transparent; background: color-mix(in srgb, var(--ok) 14%, transparent); color: var(--ok-ink); }
 
-.onb-welcome { display: flex; flex-direction: column; gap: 14px; padding: 18px 0 6px; }
+.onb-welcome { display: flex; flex-direction: column; align-items: center; gap: 14px; padding: 28px 0 10px; text-align: center; }
+.onb-welcome .onb-s { max-width: 440px; }
+.onb-welcome-mark { width: 168px; height: auto; margin-bottom: 14px; }
+.onb-flow .onb-welcome .onb-acts { flex-direction: column; align-items: center; gap: 10px; margin-top: 6px; }
+.onb-flow .onb-welcome .onb-acts .onb-go { min-width: 240px; }
 .onb-welcome .onb-t { font-size: var(--fs-display); }
 
 .onb-services { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 8px; }
