@@ -261,10 +261,16 @@
 .prefs-sheet[data-solo] .prefs-col { max-width: none; }
 .ext-md { display: grid; grid-template-columns: minmax(300px, 400px) minmax(0, 1fr); gap: 16px; align-items: start; }
 .ext-md-list { min-width: 0; }
-.ext-md-list .grp { padding: 10px 6px; }
+.ext-md-list .grp { margin: 0; padding: 0 0 8px; border: 0; border-radius: 0; background: none; box-shadow: none; }
+.ext-md-list .grp-hd { margin: 10px 0 2px; padding: 0 10px; }
+.ext-md-list .grp-hd h3 { color: var(--muted); font: var(--w-semi) var(--fs-meta) var(--ui); }
+.ext-md-list .grp-hd .now { padding: 0; background: none; color: var(--faint); }
 .ext-md-list .srv > :not(summary):not(.srv-hd) { display: none; }
 .ext-md-list .srv > summary, .ext-md-list .srv > .srv-hd, .ext-md-list .skrow { cursor: pointer; border-radius: var(--r-md); }
-.ext-md-list .srv { border-top: 0; padding: 2px 0; }
+.ext-md-list .srv { border: 0; padding: 2px 0; }
+.ext-md-list .skrow { border: 0; }
+.ext-md-list .grp, .ext-md-list .grp:hover, .ext-md-list .grp-hd, .ext-md-list .grp-items { background: none; box-shadow: none; }
+.ext-md-list .scopebar { border: 0; border-bottom: 1px solid var(--hair); border-radius: 0; background: none; }
 .ext-md-list .srv > summary, .ext-md-list .srv > .srv-hd { padding: 8px 10px; }
 .ext-md-list .srv > summary:hover, .ext-md-list .srv > .srv-hd:hover, .ext-md-list .skrow:hover { background: var(--overlay); }
 .ext-md-list .srv[data-picked] > summary, .ext-md-list .srv[data-picked] > .srv-hd, .ext-md-list .skrow[data-picked] { background: var(--accent-wash); }
@@ -272,8 +278,8 @@
 .ext-md-list .skrow .sk-more, .ext-md-list .skrow .face .act { display: none; }
 .ext-md-list .grp .hint, .ext-md-list .grp .apply { display: none; }
 .ext-detail-pane {
-  position: sticky; top: 0; display: flex; flex-direction: column; gap: 12px; min-width: 0; padding: 16px 18px;
-  border: 1px solid var(--border); border-radius: var(--r-md); background: var(--raised);
+  position: sticky; top: 0; display: flex; flex-direction: column; gap: 12px; min-width: 0; padding: 4px 6px;
+  border: 0; background: none;
 }
 .ext-detail-pane .ext-detail { display: flex; flex-direction: column; gap: 10px; padding: 0; border: 0; }
 .ext-detail-hd { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
