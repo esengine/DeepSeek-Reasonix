@@ -81,6 +81,7 @@ export function MarketVote({ port, pkg, onSignIn }: { port: AgentPort; pkg: Mark
 
   return (
     <div className="mkt-vote" data-mine={mine} aria-busy={busy}>
+      {rate != null && <span className="mkt-vote-bar" aria-hidden="true"><i style={{ width: `${Math.round(rate * 100)}%` }} /></span>}
       <span className="mkt-vote-rate">{approvalLabel({ approvalRate: rate ?? null, upCount: up, downCount: down })}</span>
       <div className="mkt-vote-btns" role="group" aria-label={t("ext.vote")} ref={buttons} tabIndex={-1}>
         <button

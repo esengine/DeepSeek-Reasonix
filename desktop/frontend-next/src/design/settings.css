@@ -309,3 +309,6 @@
   background: var(--raised); color: var(--text); font: var(--w-med) var(--fs-ui) var(--ui); cursor: pointer;
 }
 .mkt-get:hover { background: var(--overlay); }
+.mkt-vote { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.mkt-vote-bar { flex: 0 1 160px; height: 6px; overflow: hidden; border-radius: var(--r-pill); background: color-mix(in srgb, var(--err) 18%, var(--overlay)); }
+.mkt-vote-bar > i { display: block; height: 100%; border-radius: inherit; background: var(--ok); }
