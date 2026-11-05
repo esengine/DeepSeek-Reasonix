@@ -312,6 +312,9 @@
 .mkt-vote { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
 .mkt-vote-bar { flex: 0 1 160px; height: 6px; overflow: hidden; border-radius: var(--r-pill); background: color-mix(in srgb, var(--err) 18%, var(--overlay)); }
 .mkt-vote-bar > i { display: block; height: 100%; border-radius: inherit; background: var(--ok); }
+.usage { --chart-hit: #3555C4; --chart-miss: #C8742A; }
+:root[data-theme="dark"] .usage { --chart-hit: #6B87F0; --chart-miss: #C27A38; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .usage { --chart-hit: #6B87F0; --chart-miss: #C27A38; } }
 .ustack .useg[data-s="hit"] { fill: var(--chart-hit); }
 .ustack .useg[data-s="miss"] { fill: var(--chart-miss); }
 .ustack g[data-on] .useg { opacity: .82; }
