@@ -239,6 +239,7 @@ export const EXT: Messages = {
   "ext.prompts": { zh: "提示词贡献", en: "Prompts" },
   "ext.provides_capabilities_equivalent_to_the": { zh: "为 agent 提供的能力与内置工具等同", en: "Provides capabilities equivalent to the agent's built-in tools" },
   "ext.public": { zh: "已公开", en: "Public" },
+  "ext.publish_to_the_market": { zh: "发布到社区市场", en: "Publish to the community market" },
   "ext.publish": { zh: "发布", en: "Publish" },
   "ext.publish_another": { zh: "再发布一个", en: "Publish another" },
   "ext.publish_new_version": { zh: "发布新版本", en: "Publish new version" },

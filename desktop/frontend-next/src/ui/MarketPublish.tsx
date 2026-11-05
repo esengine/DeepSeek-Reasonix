@@ -121,6 +121,7 @@ function PublishDraft({ port, handle, onMine, onApplying, initial }: PublishProp
       onKeyDown={(event) => {
         if (event.key === "Enter" && !event.nativeEvent.isComposing && event.target instanceof HTMLInputElement && event.target.dataset.value !== "name" && event.target.dataset.value !== "source") event.preventDefault();
       }} onSubmit={(event) => { event.preventDefault(); if (ready) void submit(); }}>
+      <h3 className="mkt-pub-title">{t("ext.publish_to_the_market")}</h3>
       {d.origin && <p className="mkt-sum">{t("ext.reuse_details_from_slug_enter", { slug: d.origin })}</p>}
       <p className="mkt-sum">{t(d.private
         ? "ext.saved_as_handle_visible_only"
@@ -134,6 +135,11 @@ function PublishDraft({ port, handle, onMine, onApplying, initial }: PublishProp
       </div>
       {d.kind === "theme" && <p className="mkt-tip">{t("ext.a_theme_is_published_as")}</p>}
       <div className="mkt-fields">
+        <label className="full">
+          <span>{t("ext.source_address")}</span>
+          <input className="mono" value={d.source} disabled={busy} autoFocus={!!d.origin} data-action="market.draft" data-value="source" spellCheck={false} onChange={set("source")} />
+          <em className="mkt-tip">{t(SOURCE_TIP[d.kind])}</em>
+        </label>
         <label>
           <span>{t("common.name")}</span>
           <input value={d.name} disabled={busy} data-action="market.draft" data-value="name" placeholder="my-package" spellCheck={false} onChange={set("name")} />
@@ -144,11 +150,6 @@ function PublishDraft({ port, handle, onMine, onApplying, initial }: PublishProp
           <span>{t("common.version")}</span>
           <input value={d.version} disabled={busy} data-action="market.draft" data-value="version" placeholder="0.1.0" spellCheck={false} onChange={set("version")} />
           <em className="mkt-tip">{t("ext.blank_starts_a_new_package")}</em>
-        </label>
-        <label className="full">
-          <span>{t("ext.source_address")}</span>
-          <input className="mono" value={d.source} disabled={busy} autoFocus={!!d.origin} data-action="market.draft" data-value="source" spellCheck={false} onChange={set("source")} />
-          <em className="mkt-tip">{t(SOURCE_TIP[d.kind])}</em>
         </label>
         <label className="full">
           <span>{t("ext.summary")}</span>
@@ -171,7 +172,7 @@ function PublishDraft({ port, handle, onMine, onApplying, initial }: PublishProp
           <input value={d.tagInput} disabled={busy} data-action="market.draft" data-value="tags" placeholder={t("ext.comma_separated_up_to_8")} onChange={set("tagInput")} />
         </label>
       </div>
-      <label className="mkt-seen">
+      <label className="mkt-seen mkt-private">
         <input type="checkbox" data-action="market.draft" data-value="visibility" disabled={busy} checked={d.private} onChange={(e) => setD({ ...d, private: e.target.checked })} />
         {t("ext.only_me_skip_review_in")}
       </label>
@@ -281,7 +282,7 @@ function PackageList({ port, onInstalled, onViewInstalled, onApplying, onPublish
               <span className="mkt-hd">
                 <span className="nm">{p.name}</span>
                 <span className="mkt-kind">{t(KINDS.find(([k]) => k === p.kind)?.[1] ?? p.kind)}</span>
-                <span className="mkt-badge" data-tone={tone}>{t(label)}</span>
+                <span className="mkt-badge mkt-state" data-tone={tone} data-status={p.status}>{t(label)}</span>
                 {p.installed && <span className="mkt-badge">{current ? t("ext.installed") : t("ext.update_available")}</span>}
               </span>
               {p.summary && <span className="mkt-sum">{p.summary}</span>}

@@ -32,7 +32,7 @@ it.each(["zh", "en"])("leaves the selected kind in one Tab stop and returns to i
   draw(lang);
   await userEvent.click(radio("插件"));
   await userEvent.tab();
-  expect(document.activeElement).toBe(nameField());
+  expect(document.activeElement).toBe(sourceField());
   await userEvent.tab({ shift: true });
   expect(document.activeElement).toBe(radio("插件"));
 });
@@ -44,14 +44,13 @@ it("publishes the kind chosen entirely with the keyboard", async () => {
   await userEvent.keyboard("{ArrowRight}{ArrowRight}{ArrowRight}");
   expect(document.activeElement).toBe(radio("主题"));
   await userEvent.tab();
-  expect(document.activeElement).toBe(nameField());
-  await userEvent.keyboard("notes-kit");
-  await userEvent.tab();
-  await userEvent.tab();
   expect(document.activeElement).toBe(sourceField());
   const source = "https://github.com/demo/notes-kit/tree/" + "a".repeat(40) + "/theme";
   await userEvent.keyboard(source);
-  for (let i = 0; i < 6; i++) await userEvent.tab();
+  await userEvent.tab();
+  expect(document.activeElement).toBe(nameField());
+  await userEvent.keyboard("notes-kit");
+  for (let i = 0; i < 7; i++) await userEvent.tab();
   expect(document.activeElement).toBe(screen.getByRole("button", { name: t("ext.submit_for_review") }));
   await userEvent.keyboard("{Enter}");
   expect(publish).toHaveBeenCalledExactlyOnceWith({
