@@ -133,7 +133,7 @@ api_key_env = "` + setupKeyEnv + `"
 	if err := c.Submit(ctx, "hello"); err != nil {
 		t.Fatalf("submit after the key was saved: %v", err)
 	}
-	for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(20 * time.Millisecond) {
+	for deadline := time.Now().Add(testenv.Budget(t)); ; time.Sleep(20 * time.Millisecond) {
 		model.mu.Lock()
 		sent = model.calls
 		model.mu.Unlock()
