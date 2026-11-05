@@ -58,6 +58,7 @@
 - 「发现」改为卡片网格：类型图标、名字（管理员标记可信时带对勾）、发布者和版本、两行摘要，底部是类型、是否固定、安装量和好评。已安装的在右上角写明；已固定且未安装的右上角直接有「安装」，点了直接进入安装确认。未固定的包不给捷径，信任发布者仍要在包详情里决定（3eafaaf33）。
 - 市场包详情的评价行在「好评 n%（m 票）」前加一条好评占比条；还没有人评价时不画（1e9200361）。
 - 「用量」改为独立页面：侧栏、命令面板、计量条直接打开，只显示用量相关的块（显示币种、用量与成本、上传量）。每日图改为按「输入 · 命中缓存 / 未命中」分层的柱状图，带图例，悬停时另外写出服务商报告的合计。数字卡改为：输入（含缓存命中率）、服务商报告的合计、请求（含对话轮数）、活跃天数（含日均请求）；输出没有单独画，因为内核只报告合计。新增「导出 CSV」，按天一行，每种币种一列（2365cdb81）。
+- 开关按规范改为 34×20 描边轨道、12px 圆点：关时灰色，开时强调色描边 + 浅色底、圆点为强调色；公共按钮的文字改为规范的中等字重（467f15411）。
 
 
 ---
@@ -123,3 +124,4 @@
 - Discover lays packages out as cards: kind icon, name with a trust check, publisher and version, two lines of summary, and kind, pinning, installs and approval along the foot. Installed packages say so in the corner; a pinned one not yet installed has Install there, which opens straight onto what it would install. Unpinned packages get no shortcut (3eafaaf33).
 - A market package's vote row draws the approval rate as a bar before the words; no votes, no bar (1e9200361).
 - Usage opens as its own page from the rail, the palette and the meter, holding only the usage blocks. The daily chart stacks input into cache hits and misses with a legend, the tooltip adding the provider's total; tiles read input with cache rate, provider total, requests and active days. Output is not drawn: the kernel reports only the total. Export CSV writes one row a day and one money column per currency (2365cdb81).
+- The shared switch follows the spec: a 34×20 outlined track with a 12px knob, grey when off and accent outline, wash and knob when on; kit buttons use the spec's medium label weight (467f15411).
