@@ -196,3 +196,26 @@
 .skupd .rgrp[data-lvl="high"] { padding-inline-start: 0; box-shadow: none; }
 .skupd > .acts { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; margin: 4px -16px -14px; padding: 10px 16px; border-top: 1px solid var(--hair); }
 .skupd > .acts .note { flex: 1; min-width: 0; color: var(--faint); font: var(--w-med) var(--fs-meta) var(--ui); }
+.rmtbook { display: flex; flex-direction: column; gap: 8px; }
+.rmtbook > .rmtrow { padding: 12px 14px; border: 1px solid var(--border); border-radius: var(--r-md); background: var(--raised); }
+.rmtrow > .hd { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; }
+.rmtrow > .hd > b { color: var(--text); font: var(--w-semi) var(--fs-ui) var(--ui); }
+.rmtrow > .hd > .tg { color: var(--faint); font: var(--w-med) var(--fs-meta) var(--mono); }
+.rmtrow > .hd > .st { flex: none; min-width: 0; padding: 0 7px; border-radius: var(--r-pill); background: var(--overlay); color: var(--muted); font: var(--w-med) var(--fs-micro)/1.8 var(--ui); }
+.rmtrow[data-state="connected"] > .hd > .st { background: color-mix(in srgb, var(--ok) 12%, transparent); color: var(--ok-ink); }
+.rmtrow[data-state="stopped"] > .hd > .st { background: color-mix(in srgb, var(--err) 10%, transparent); color: var(--err-ink); }
+.rmtfill { flex: 1; }
+.rmtnext { height: 28px; padding: 0 12px; border: 1px solid var(--border); border-radius: var(--r-sm); background: var(--surface); color: var(--text); font: var(--w-med) var(--fs-meta) var(--ui); cursor: pointer; }
+.rmtnext:disabled { opacity: .5; cursor: default; }
+.rmtrow > .sub { margin-top: 4px; color: var(--faint); font: var(--w-med) var(--fs-meta) var(--ui); }
+.rmthost-more { position: relative; display: inline-flex; }
+.rmthost-btn { display: inline-grid; place-items: center; width: 28px; height: 28px; padding: 0; border: 0; border-radius: var(--r-sm); background: transparent; color: var(--muted); cursor: pointer; }
+.rmthost-btn:hover, .rmthost-btn[aria-expanded="true"] { background: var(--overlay); color: var(--text); }
+.rmthost-btn .studio-icon { width: 14px; height: 14px; }
+.rmthost-menu {
+  position: absolute; inset-inline-end: 0; top: calc(100% + 4px); z-index: 40; display: flex; flex-direction: column; min-width: 180px; padding: 4px;
+  border: 1px solid var(--border); border-radius: var(--r-md); background: var(--float); box-shadow: var(--shadow-float);
+}
+.rmthost-menu > button { min-height: 30px; padding: 4px 10px; border: 0; border-radius: var(--r-sm); background: transparent; color: var(--text); font: var(--w-med) var(--fs-ui) var(--ui); text-align: start; white-space: nowrap; cursor: pointer; }
+.rmthost-menu > button:hover:not(:disabled) { background: var(--overlay); }
+.rmthost-menu > button[data-danger] { color: var(--err-ink); }

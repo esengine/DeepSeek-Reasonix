@@ -440,6 +440,10 @@ export const ACTIONS: UIAction[] = [
   // asking twice is the point when the first answer was "not yet".
   { id: "remote.probe", kind: "repeatable", target: "entity", proof: "authority-effect" },
   { id: "remote.hide", kind: "view", target: "entity", proof: "interaction" },
+  { id: "remote.more", kind: "view", target: "entity", proof: "interaction" },
+  { id: "remote.edit", kind: "view", target: "entity", proof: "interaction" },
+  { id: "remote.remove-ask", kind: "view", target: "entity", proof: "interaction" },
+  { id: "remotes.add-all", kind: "kernel-mutation", target: "none", proof: "interaction" },
   { id: "remote.enable", kind: "view", target: "entity", proof: "interaction" },
   { id: "remote.read", kind: "repeatable", target: "entity", proof: "authority-effect" },
   { id: "workspace.add", kind: "kernel-mutation", target: "none", proof: "authority-effect" },

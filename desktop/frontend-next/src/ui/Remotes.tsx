@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { t } from "../i18n";
 import type { HubPort } from "../port/hub";
 import type { RemoteHost, RemoteHostEdit, RemoteProbe, WSLDistros } from "../port/remote";
@@ -6,6 +6,8 @@ import { say } from "../i18n/kernel";
 import { toggleHiddenHost, useHiddenHosts } from "../state/remotehide";
 import { RemoteDirs } from "./RemoteDirs";
 import { Switch } from "./Switch";
+import { useDismiss } from "./dismiss";
+import { StudioIcon } from "./StudioIcon";
 
 interface Props {
   hub: HubPort;
@@ -141,6 +143,15 @@ export function Remotes({ hub, onError }: Props) {
     </label>
   );
 
+  const probe = (name: string) => {
+    setProbing(name);
+    hub
+      .probeRemote(name)
+      .then((rep) => setProbes((p) => ({ ...p, [name]: rep })))
+      .catch(onError)
+      .finally(() => setProbing(""));
+  };
+
   return (
     <div className="rmtbook">
       {hosts.map((host) => (
@@ -150,35 +161,13 @@ export function Remotes({ hub, onError }: Props) {
             <b>{host.name}</b>
             <span className="tg">{host.target}</span>
             <span className="st">{t(STATUS_LABEL[host.status] ?? host.status)}</span>
-            <button
-              className="rmtlnk"
-              data-action="remote.probe"
-              data-target={host.name}
-              disabled={probing === host.name}
-              onClick={() => {
-                setProbing(host.name);
-                hub
-                  .probeRemote(host.name)
-                  .then((rep) => setProbes((p) => ({ ...p, [host.name]: rep })))
-                  .catch(onError)
-                  .finally(() => setProbing(""));
-              }}
-            >
-              {t(probing === host.name ? "remote.asking" : "common.test_it")}
-            </button>
-            <button
-              className="rmtlnk"
-              onClick={() => {
-                setEditing(host.name);
-                setDraft(draftOf(host));
-              }}
-            >
-              {t("common.edit")}
-            </button>
-            <button className="rmtlnk" data-action="remote.hide" data-target={host.name} onClick={() => toggleHiddenHost(host.name)}>
-              {t(hidden.includes(host.name) ? "remote.show_in_the_rail" : "remote.hide_from_the_rail")}
-            </button>
             {host.disabled ? <span className="st">{t("common.suspended")}</span> : null}
+            <span className="rmtfill" />
+            {host.status !== "connected" && !host.disabled && (
+              <button className="rmtnext" data-action="remote.probe" data-target={host.name} disabled={probing === host.name} onClick={() => probe(host.name)}>
+                {t(probing === host.name ? "remote.asking" : "common.test_it")}
+              </button>
+            )}
             <Switch
               data-action="remote.enable"
               data-target={host.name}
@@ -187,9 +176,24 @@ export function Remotes({ hub, onError }: Props) {
               label={t(host.disabled ? "remote.turn_this_machine_on" : "remote.turn_this_machine_off")}
               onClick={() => void save({ ...draftOf(host), disabled: !host.disabled })}
             />
-            <button className="rmtlnk" data-danger="" disabled={!!busy} onClick={() => setConfirm(host.name)}>
-              {t("common.remove")}
-            </button>
+            <RemoteMore name={host.name}>
+              {(close) => <>
+                <button role="menuitem" data-action="remote.edit" data-target={host.name} onClick={() => { close(); setEditing(host.name); setDraft(draftOf(host)); }}>
+                  {t("common.edit")}
+                </button>
+                {host.status === "connected" && (
+                  <button role="menuitem" data-action="remote.probe" data-target={host.name} disabled={probing === host.name} onClick={() => { close(); probe(host.name); }}>
+                    {t(probing === host.name ? "remote.asking" : "common.test_it")}
+                  </button>
+                )}
+                <button role="menuitem" data-action="remote.hide" data-target={host.name} onClick={() => { close(); toggleHiddenHost(host.name); }}>
+                  {t(hidden.includes(host.name) ? "remote.show_in_the_rail" : "remote.hide_from_the_rail")}
+                </button>
+                <button role="menuitem" data-danger="" data-action="remote.remove-ask" data-target={host.name} disabled={!!busy} onClick={() => { close(); setConfirm(host.name); }}>
+                  {t("common.remove")}
+                </button>
+              </>}
+            </RemoteMore>
           </div>
           <div className="sub">
             {host.workspace ? <span dir="ltr">{host.workspace}</span> : <span className="dim">{t("remote.no_default_workspace")}</span>}
@@ -233,6 +237,12 @@ export function Remotes({ hub, onError }: Props) {
               + {alias}
             </button>
           ))}
+          {candidates.length > 1 && (
+            <button data-action="remotes.add-all" className="rmtcand" data-all="" disabled={!!busy}
+              onClick={() => void (async () => { for (const alias of candidates) await save({ name: alias, useSSHConfig: true }); })()}>
+              {t("remote.add_them_all")}
+            </button>
+          )}
         </div>
       )}
 
@@ -463,5 +473,21 @@ function ProbeCard({ probe, host }: { probe: RemoteProbe; host: string }) {
         {probe.ready ? t("remote.ready_there_is_a_kernel") : t("remote.not_ready_clearing_any_one")}
       </div>
     </div>
+  );
+}
+
+function RemoteMore({ name, children }: { name: string; children: (close: () => void) => ReactNode }) {
+  const [open, setOpen] = useState(false);
+  const box = useRef<HTMLSpanElement>(null);
+  const close = () => setOpen(false);
+  useDismiss(open, box, close);
+  return (
+    <span className="rmthost-more" ref={box}>
+      <button className="rmthost-btn" data-action="remote.more" data-target={name} aria-haspopup="menu" aria-expanded={open}
+        aria-label={t("remote.more_for_name", { name })} title={t("common.more")} onClick={() => setOpen((v) => !v)}>
+        <StudioIcon name="more" />
+      </button>
+      {open && <span className="rmthost-menu" role="menu" aria-label={name}>{children(close)}</span>}
+    </span>
   );
 }

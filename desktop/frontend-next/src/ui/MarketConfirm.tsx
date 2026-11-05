@@ -41,7 +41,7 @@ export function PlanConfirm({ slug, plan, busy, error, onCancel, onInstall, own 
     <div className="mkt addpkg mkc" data-stage="confirm" aria-busy={busy}>
       <div className="mkc-head">
         <b>{t("ext.name_version_will_install_the", { name: slug, version: plan.version })}</b>
-        <button type="button" className="mkc-x" data-action="market.cancel" aria-label={t("common.close")} title={t("common.close")} disabled={busy} onClick={onCancel}>
+        <button type="button" className="mkc-x" data-action="market.cancel" aria-label={t("ext.close_install_confirmation")} title={t("ext.close_install_confirmation")} disabled={busy} onClick={onCancel}>
           <StudioIcon name="close" />
         </button>
       </div>

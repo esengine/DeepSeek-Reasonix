@@ -83,7 +83,8 @@ describe("a saved WSL machine", () => {
     const { hub } = draw({}, [dev]);
     expect(await screen.findByText("wsl:Ubuntu-24.04")).toBeTruthy();
     expect(screen.getByText("WSL 发行版")).toBeTruthy();
-    await userEvent.click(screen.getByRole("button", { name: "编辑" }));
+    await userEvent.click(screen.getByRole("button", { name: /^更多：/ }));
+    await userEvent.click(screen.getByRole("menuitem", { name: "编辑" }));
     expect(screen.queryByRole("radiogroup", { name: "连接类型" })).toBeNull();
     expect((screen.getByLabelText("发行版") as HTMLSelectElement).disabled).toBe(true);
     expect(screen.queryByText("地址")).toBeNull();

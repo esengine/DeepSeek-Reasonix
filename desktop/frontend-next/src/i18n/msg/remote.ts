@@ -236,4 +236,6 @@ export const REMOTE: Messages = {
   "remote.write_what_to_tell_the": { zh: "写下要告诉另一个会话的话。对方的用户批准后，它才会交给那边的模型。", en: "Write what to tell the other session. It reaches that session’s model only after its user approves." },
   "remote.wsl_distribution": { zh: "WSL 发行版", en: "WSL distribution" },
   "remote.youre_offline": { zh: "网络已断开", en: "You're offline" },
+  "remote.add_them_all": { zh: "全部添加", en: "Add them all" },
+  "remote.more_for_name": { zh: "更多：编辑、测试连接、在侧栏隐藏、移除 {name}", en: "More for {name}: edit, test, hide from the rail, remove" },
 };

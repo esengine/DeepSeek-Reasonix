@@ -79,10 +79,12 @@ describe("market author navigation keys", () => {
     await screen.findByText("ship-notes");
     expect(mine).toHaveBeenCalledTimes(1);
     await userEvent.keyboard("{ArrowRight}");
-    for (let i = 0; i < 5 && document.activeElement !== nameInput(); i++) await userEvent.tab();
+    const sourceInput = () => screen.getByRole("textbox", { name: /^来源地址/ });
+    for (let i = 0; i < 5 && document.activeElement !== sourceInput(); i++) await userEvent.tab();
+    expect(document.activeElement).toBe(sourceInput());
+    await userEvent.keyboard("https://example.com/SKILL.md"); await userEvent.tab();
     expect(document.activeElement).toBe(nameInput());
     await userEvent.keyboard("key-kit"); await userEvent.tab(); await userEvent.keyboard("1.2.3");
-    await userEvent.tab(); await userEvent.keyboard("https://example.com/SKILL.md");
     for (let i = 0; i < 6; i++) await userEvent.tab();
     expect(document.activeElement).toBe(screen.getByRole("button", { name: "提交审核" }));
     await userEvent.keyboard("{Enter}");
