@@ -59,6 +59,7 @@
 - 市场包详情的评价行在「好评 n%（m 票）」前加一条好评占比条；还没有人评价时不画（1e9200361）。
 - 「用量」改为独立页面：侧栏、命令面板、计量条直接打开，只显示用量相关的块（显示币种、用量与成本、上传量）。每日图改为按「输入 · 命中缓存 / 未命中」分层的柱状图，带图例，悬停时另外写出服务商报告的合计。数字卡改为：输入（含缓存命中率）、服务商报告的合计、请求（含对话轮数）、活跃天数（含日均请求）；输出没有单独画，因为内核只报告合计。新增「导出 CSV」，按天一行，每种币种一列（2365cdb81）。
 - 开关按规范改为 34×20 描边轨道、12px 圆点：关时灰色，开时强调色描边 + 浅色底、圆点为强调色；公共按钮的文字改为规范的中等字重（467f15411）。
+- 设置窗口按设计稿铺满主窗口（四周留 24px），不再是居中的小窗；内容栏保持 760px。「常用」页标题补上「这里是常用项的快捷入口，每项的完整位置在各自分类里」（1ceac1746）。
 
 
 ---
@@ -125,3 +126,4 @@
 - A market package's vote row draws the approval rate as a bar before the words; no votes, no bar (1e9200361).
 - Usage opens as its own page from the rail, the palette and the meter, holding only the usage blocks. The daily chart stacks input into cache hits and misses with a legend, the tooltip adding the provider's total; tiles read input with cache rate, provider total, requests and active days. Output is not drawn: the kernel reports only the total. Export CSV writes one row a day and one money column per currency (2365cdb81).
 - The shared switch follows the spec: a 34×20 outlined track with a 12px knob, grey when off and accent outline, wash and knob when on; kit buttons use the spec's medium label weight (467f15411).
+- Settings fills the window inside a 24px margin as the board draws it, rather than a smaller centred box; the Common page header adds the board's note that it is a shortcut (1ceac1746).
