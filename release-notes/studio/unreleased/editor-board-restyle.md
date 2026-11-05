@@ -48,6 +48,7 @@
 - 技能的「从源文件夹更新…」和「卸载…」收进行尾的「···」菜单（卸载为红色）；更新和卸载确认改为卡片：问题作标题，提醒用底色块而不是左侧色条，按钮在底部（f7a19ccc3）。
 - 远程机器改为卡片：一行是状态点、名字、地址和状态标签，下一行是默认文件夹和数量；没连上的机器卡片上直接给「测试连接」；编辑、测试连接、在侧栏隐藏、移除收进「···」，开关保留在外；~/.ssh/config 里找到的多台机器可以「全部添加」。市场安装卡片的关闭按钮改名为「关掉安装确认」，避免和设置窗口的「关闭」混淆（afbb2ba7c）。
 - 设备访问卡片改为「在手机上用 Studio」，写明手机能做什么（看会话、发消息、批准操作）；已连接的手机放在最前，合成「n 台手机已连接」，每台写明是哪种方式连的；下面「手机怎么连过来」分成两块：「同一个 Wi-Fi」（写明地址、自带开关、二维码和网络选择）在前，「在外面也能连」（需要登录账号）在后。两种方式仍各自独立，打开一个不会顺带打开另一个（99fb58d0f）。
+- 首次引导改为分步：先是欢迎页（一句话说清能做什么，约 1 分钟）；然后顶部显示步骤、右上角随时「稍后再说」：① 连接模型——服务做成卡片（各写一句是什么），只有「中转站 / 自建」要自己填地址，其他服务写明已填好的地址；② 从这个 key 能用的模型里选默认模型；只有自填地址且两种接口都能用时才问「接入方式」，常用服务从不问。步骤之间按前进 / 后退方向平移（面板时长），减少动态时不动。打开项目仍是设置完成后的应用页面（91ebf8222）。
 
 
 ---
@@ -103,3 +104,4 @@
 - Update from source folder and Uninstall move into a More menu on the skill row (uninstall in the danger colour); the update and uninstall confirmations become cards with the question as the title, tinted warnings instead of edge bars, and the buttons at the foot (f7a19ccc3).
 - Remote machines are cards: dot, name, address and state on one line, folder and counts under it; a machine that is not connected offers Test it on the card, edit/test/hide/remove move into a More menu, and the switch stays in view. Machines found in ~/.ssh/config can be added all at once. The market install card's close button now names what it dismisses (afbb2ba7c).
 - The device-access card is titled Use Studio on your phone and says what a paired phone can do. Connected phones come first under one count, each saying how it came in; then How the phone gets here offers Same Wi-Fi (address, its own switch, QR and network picker) and From anywhere (needs sign-in) as separate blocks. Switching one route on never opens the other (99fb58d0f).
+- First-run setup goes in steps: a welcome that says what it does and that it takes about a minute, then connect a model service from cards (only a relay or self-hosted entry asks for an address; listed services say what they filled), then pick a default model from what the key reaches. Only a typed address that answers both ways asks how it is spoken to. Steps slide in the direction they go, with Not now on each (91ebf8222).
