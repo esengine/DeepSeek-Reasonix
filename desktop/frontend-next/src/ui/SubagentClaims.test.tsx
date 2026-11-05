@@ -9,7 +9,8 @@ import type { AgentPort } from "../port/port";
 
 afterEach(cleanup);
 
-const toggle = () => screen.findByRole("switch", { name: "乐观模式（效率优先）" });
+const perTask = () => screen.findByRole("radio", { name: "按任务" });
+const whole = () => screen.findByRole("radio", { name: "整个工作区" });
 
 describe("the sub-agent claims switch", () => {
   it("starts on, says what the optimistic mode costs, and saves the opposite of what it shows", async () => {
@@ -17,12 +18,11 @@ describe("the sub-agent claims switch", () => {
     const save = vi.spyOn(p, "saveSubagentClaims");
     const changed = vi.fn();
     render(<SubagentClaims port={p} onChanged={changed} />);
-    const sw = await toggle();
-    expect(sw.getAttribute("aria-checked")).toBe("true");
-    expect(screen.getByText(/不受路径围栏约束，只在事后观察/)).toBeTruthy();
-    await userEvent.click(sw);
+    expect((await perTask()).getAttribute("aria-checked")).toBe("true");
+    expect(screen.getByText("子代理同时改文件时各自能写的范围").getAttribute("title") ?? "").toMatch(/不受路径围栏约束，只在事后观察/);
+    await userEvent.click(await whole());
     expect(save).toHaveBeenCalledWith(false);
-    await waitFor(() => expect(sw.getAttribute("aria-checked")).toBe("false"));
+    await waitFor(() => expect(screen.getByRole("radio", { name: "整个工作区" }).getAttribute("aria-checked")).toBe("true"));
     expect(changed).toHaveBeenCalledTimes(1);
   });
 
@@ -33,10 +33,9 @@ describe("the sub-agent claims switch", () => {
     };
     const changed = vi.fn();
     render(<SubagentClaims port={p} onChanged={changed} />);
-    const sw = await toggle();
-    await userEvent.click(sw);
+    await userEvent.click(await whole());
     await screen.findByText(/disk full/);
-    expect(sw.getAttribute("aria-checked")).toBe("true");
+    expect((await perTask()).getAttribute("aria-checked")).toBe("true");
     expect(changed).not.toHaveBeenCalled();
   });
 

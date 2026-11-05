@@ -3,7 +3,7 @@ import { t } from "../i18n";
 import { reason } from "../i18n/kernel";
 import type { AgentPort } from "../port/port";
 import type { AskTimeoutSettings } from "../port/boundary";
-import { Group } from "./Group";
+import { SettingRow } from "./SettingRow";
 import { Switch } from "./Switch";
 
 // An unanswered ask question can be skipped after a wait the user chooses. It
@@ -46,45 +46,25 @@ export function AskTimeout({ port }: { port: AgentPort }) {
   };
 
   const on = !!state && state.seconds > 0;
-  const body = !state ? (
-    <div className="empty">{t("safety.the_question_wait_setting_could")}</div>
-  ) : (
-    <div className="box">
-      <div className="lrow">
-        <span className="tx">
-          <span className="lb">{t("safety.skip_a_question_nobody_answers")}</span>
-          <span className="ds">{t("safety.off_by_default_a_question")}</span>
-        </span>
-        <Switch
-          data-action="ask-timeout.enabled"
-          on={on}
-          busy={busy}
-          label={t("safety.skip_a_question_nobody_answers")}
-          onClick={() => void save(on ? 0 : state.defaultSeconds)}
-        />
-      </div>
-      {on && (
-        <div className="lrow threshold-row">
-          <span className="tx">
-            <span className="lb">{t("safety.wait_time")}</span>
-            <span className="ds">{t("safety.counted_from_when_the_kernel", { n: state.defaultSeconds })}</span>
+  if (!state) return <div className="empty">{t("safety.the_question_wait_setting_could")}</div>;
+  return (
+    <>
+      <SettingRow id="ask-timeout" title={t("safety.question_wait_time")} desc={t("settings.skip_after_no_answer")}>
+        {on && (
+          <span className="unit-field">
+            <input type="text" inputMode="numeric" aria-label={t("safety.wait_time")} data-action-keydown="ask-timeout.seconds" data-action-change="ask-timeout.seconds"
+              value={draft} disabled={busy}
+              onChange={(e) => setDraft(e.target.value.replace(/\D/g, ""))}
+              onBlur={commit}
+              onKeyDown={(e: KeyboardEvent<HTMLInputElement>) => { if (e.key === "Enter") e.currentTarget.blur(); }} />
+            <i>{t("common.s")}</i>
           </span>
-          <div className="threshold-control">
-            <span className="unit-field">
-              <input type="text" inputMode="numeric" aria-label={t("safety.wait_time")} data-action-keydown="ask-timeout.seconds" data-action-change="ask-timeout.seconds"
-                value={draft} disabled={busy}
-                onChange={(e) => setDraft(e.target.value.replace(/\D/g, ""))}
-                onBlur={commit}
-                onKeyDown={(e: KeyboardEvent<HTMLInputElement>) => { if (e.key === "Enter") e.currentTarget.blur(); }} />
-              <i>{t("common.s")}</i>
-            </span>
-          </div>
-        </div>
-      )}
+        )}
+        <Switch data-action="ask-timeout.enabled" on={on} busy={busy} label={t("safety.skip_a_question_nobody_answers")}
+          onClick={() => void save(on ? 0 : state.defaultSeconds)} />
+      </SettingRow>
       {state.invalid && <div className="why">{t("safety.the_question_wait_in_the", { min: state.minSeconds, max: state.maxSeconds, path: state.path })}</div>}
       {error && <div className="why">{error}</div>}
-    </div>
+    </>
   );
-
-  return <Group id="ask-timeout" title={t("safety.question_wait_time")} hint={t("safety.a_long_task_need_not")}>{body}</Group>;
 }

@@ -11,19 +11,17 @@ import { usePeersSettings } from "./usePeersSettings";
 export function PeersSection({ port, hub }: { port: AgentPort; hub: Pick<HubPort, "tree"> }) {
   const settings = usePeersSettings(port);
   return (
-    <>
-      <Group id="peers"
-        title={t("remote.messages_between_sessions_experimental")}
-        hint={t("remote.sessions_on_one_machine_send")}
-      >
-        <PeerMessages port={port} settings={settings} />
-      </Group>
+    <Group id="peers" pill={t("safety.details")}
+      title={t("remote.messages_between_sessions_experimental")}
+      hint={t("settings.sessions_send_each_other")}
+    >
+      <PeerMessages port={port} settings={settings} />
       <Group id="peer-projects"
         title={t("remote.projects_allowed_through")}
         hint={t("remote.sessions_in_these_projects_take")}
       >
         <PeerProjects port={port} hub={hub} settings={settings} />
       </Group>
-    </>
+    </Group>
   );
 }

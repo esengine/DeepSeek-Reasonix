@@ -3,7 +3,7 @@ import { t } from "../i18n";
 import { reason } from "../i18n/kernel";
 import type { AgentPort } from "../port/port";
 import type { ProgressWatchSettings } from "../port/boundary";
-import { Group } from "./Group";
+import { SettingRow } from "./SettingRow";
 import { Switch } from "./Switch";
 
 type Draft = { rounds: string; tokenMultiple: string };
@@ -46,23 +46,14 @@ export function ProgressWatch({ port }: { port: AgentPort }) {
     }
   };
 
-  const body = !state ? (
-    <div className="empty">{t("panels.could_not_read_the_progress")}</div>
-  ) : (
-    <div className="box">
-      <div className="lrow">
-        <span className="tx">
-          <span className="lb">{t("panels.pause_a_task_that_stops")}</span>
-          <span className="ds">{t("panels.off_by_default_a_notice")}</span>
-        </span>
-        <Switch
-          data-action="progress-watch.pause"
-          on={state.pause}
-          busy={busy}
-          label={t("panels.pause_a_task_that_stops")}
-          onClick={() => void save({ ...pick(state), pause: !state.pause })}
-        />
-      </div>
+  if (!state) return <div className="empty">{t("panels.could_not_read_the_progress")}</div>;
+  return (
+    <>
+      <SettingRow id="progress-watch" title={t("panels.long_stretches_without_progress")} desc={t("settings.pause_when_stuck")}>
+        <Switch data-action="progress-watch.pause" on={state.pause} busy={busy} label={t("panels.pause_a_task_that_stops")}
+          onClick={() => void save({ ...pick(state), pause: !state.pause })} />
+      </SettingRow>
+      <div className="srow-more">
       <div className="lrow threshold-row">
         <span className="tx">
           <span className="lb">{t("panels.rounds_without_progress")}</span>
@@ -95,15 +86,9 @@ export function ProgressWatch({ port }: { port: AgentPort }) {
           </span>
         </div>
       </div>
+      </div>
       {error && <div className="why">{error}</div>}
-    </div>
-  );
-
-  return (
-    <Group id="progress-watch" title={t("panels.long_stretches_without_progress")}
-      hint={t("panels.judged_only_from_effects_the")}>
-      {body}
-    </Group>
+    </>
   );
 }
 

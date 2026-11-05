@@ -3,7 +3,7 @@ import { t } from "../i18n";
 import { reason } from "../i18n/kernel";
 import type { AgentPort } from "../port/port";
 import type { SessionRefSettings } from "../port/boundary";
-import { Group } from "./Group";
+import { SettingRow } from "./SettingRow";
 
 // A referenced past conversation is quoted into the message as read-only data,
 // up to this many tokens; past it only the newest messages stay, and the quote
@@ -44,30 +44,21 @@ export function SessionRef({ port }: { port: AgentPort }) {
     if (n !== state.tokens) void save(n);
   };
 
-  const body = !state ? (
-    <div className="empty">{t("composer.the_reference_settings_could_not")}</div>
-  ) : (
-    <div className="box">
-      <div className="lrow threshold-row">
-        <span className="tx">
-          <span className="lb">{t("composer.largest_quote")}</span>
-          <span className="ds">{t("composer.a_referenced_conversation_goes_into", { n: state.defaultTokens })}</span>
+  if (!state) return <div className="empty">{t("composer.the_reference_settings_could_not")}</div>;
+  return (
+    <>
+      <SettingRow id="session-ref" title={t("composer.size_of_a_referenced_conversation")} desc={t("settings.most_a_quote_may_carry")}>
+        <span className="unit-field">
+          <input type="text" inputMode="numeric" aria-label={t("composer.largest_quote")} data-action-keydown="session-ref.tokens" data-action-change="session-ref.tokens"
+            value={draft} disabled={busy}
+            onChange={(e) => setDraft(e.target.value.replace(/\D/g, ""))}
+            onBlur={commit}
+            onKeyDown={(e: KeyboardEvent<HTMLInputElement>) => { if (e.key === "Enter") e.currentTarget.blur(); }} />
+          <i>{t("settings.token_unit")}</i>
         </span>
-        <div className="threshold-control">
-          <span className="unit-field">
-            <input type="text" inputMode="numeric" aria-label={t("composer.largest_quote")} data-action-keydown="session-ref.tokens" data-action-change="session-ref.tokens"
-              value={draft} disabled={busy}
-              onChange={(e) => setDraft(e.target.value.replace(/\D/g, ""))}
-              onBlur={commit}
-              onKeyDown={(e: KeyboardEvent<HTMLInputElement>) => { if (e.key === "Enter") e.currentTarget.blur(); }} />
-            <i>token</i>
-          </span>
-          <button type="button" className="btn" data-action="session-ref.reset" disabled={busy || state.tokens === state.defaultTokens} onClick={() => void save(0)}>{t("composer.restore_default")}</button>
-        </div>
-      </div>
+        <button type="button" className="spill" data-action="session-ref.reset" disabled={busy || state.tokens === state.defaultTokens} onClick={() => void save(0)}>{t("composer.restore_default")}</button>
+      </SettingRow>
       {error && <div className="why">{error}</div>}
-    </div>
+    </>
   );
-
-  return <Group id="session-ref" title={t("composer.size_of_a_referenced_conversation")} hint={t("composer.how_much_a_referenced_past")}>{body}</Group>;
 }

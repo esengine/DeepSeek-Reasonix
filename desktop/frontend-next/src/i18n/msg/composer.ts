@@ -2,7 +2,6 @@ import type { Messages } from "./types";
 
 export const COMPOSER: Messages = {
   "composer.a_file_outside_the_workspace": { zh: "工作区外的文件引用不到 · 这里放不下", en: "A file outside the workspace cannot be referenced — this drop has nowhere to go" },
-  "composer.a_referenced_conversation_goes_into": { zh: "引用的历史会话会作为只读资料放进这条消息；超过上限时只保留最近的消息，并写明保留了多少。默认 {n} token。", en: "A referenced conversation goes into the message as read-only reference material. Past the limit only the newest messages stay, and the quote says how many. Default {n} tokens." },
   "composer.a_task_branch_will_be": { zh: "任务分支自动创建", en: "A task branch will be created automatically" },
   "composer.about_n_the_context_window": { zh: "自上次有进展以来已用约 {n} 倍上下文的输入 token", en: "About {n}× the context window in input tokens since the last progress" },
   "composer.add_an_attachment": { zh: "添加附件", en: "Add an attachment" },
@@ -109,7 +108,6 @@ export const COMPOSER: Messages = {
   "composer.hit_hit_miss_miss": { zh: "命中 {hit} · 未命中 {miss}", en: "Hit {hit} · Miss {miss}" },
   "composer.hold": { zh: "暂停派发", en: "Hold" },
   "composer.how_long_this_step_has": { zh: "这一步已经跑了多久", en: "How long this step has been running" },
-  "composer.how_much_a_referenced_past": { zh: "在输入框里引用一段历史会话时，最多给这条消息添加多少内容。", en: "How much a referenced past conversation may add to a message." },
   "composer.image": { zh: "图片", en: "image" },
   "composer.image_capability_is_unverified_click": { zh: "图片能力未确认；点击后按手动声明启用", en: "Image capability is unverified; click to enable it as a manual declaration" },
   "composer.image_input_enabled": { zh: "已启用图片输入", en: "Image input enabled" },

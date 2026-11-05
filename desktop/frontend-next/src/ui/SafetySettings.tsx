@@ -11,7 +11,6 @@ import { SectionCard } from "./SectionCard";
 import { SegChoice, SettingRow } from "./SettingRow";
 import { SettingDeep } from "./SettingDeep";
 import { Shell } from "./Shell";
-import { SubagentClaims } from "./SubagentClaims";
 import { ToolList } from "./ToolList";
 import { WebAccess } from "./WebAccess";
 import { WriteLease } from "./WriteLease";
@@ -61,9 +60,6 @@ export function SafetySettings({ port, mode, busy, onMode, onChanged }: Props) {
         </SettingDeep>
         <SettingDeep id="write-lease" title={t("session.several_sessions_writing_one_project")} hint={t("safety.when_two_sessions_edit_one")} act={details}>
           {page(<WriteLease port={port} />)}
-        </SettingDeep>
-        <SettingDeep id="subagent-claims" title={t("session.sub_agent_write_scope")} hint={t("session.each_sub_agents_write_scope")} act={details}>
-          {page(<SubagentClaims port={port} onChanged={onChanged} />)}
         </SettingDeep>
       </SectionCard>
       <SectionCard title={t("safety.web")}>

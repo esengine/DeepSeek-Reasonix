@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { t } from "../i18n";
 import { reason } from "../i18n/kernel";
 import type { AgentPort, SubagentClaimsSettings } from "../port/port";
-import { Switch } from "./Switch";
+import { SegChoice, SettingRow } from "./SettingRow";
 
 // One switch over how a sub-agent that named no write_paths holds its claim.
 // On is the default and trades the fence for concurrency; off is strict, the
@@ -35,21 +35,12 @@ export function SubagentClaims({ port, onChanged }: { port: AgentPort; onChanged
   };
 
   return (
-    <div className="box">
-      <div className="lrow">
-        <span className="tx">
-          <span className="lb">{t("subagent.optimistic_mode_efficiency_first")}</span>
-          <span className="ds">{t("subagent.a_sub_agent_that_names")}</span>
-        </span>
-        <Switch
-          data-action="subagent-claims.optimistic"
-          on={state.optimistic}
-          busy={busy}
-          label={t("subagent.optimistic_mode_efficiency_first")}
-          onClick={() => void flip()}
-        />
-      </div>
+    <>
+      <SettingRow id="subagent-claims" title={t("session.sub_agent_write_scope")} desc={t("session.each_sub_agents_write_scope")} more={t("subagent.a_sub_agent_that_names")}>
+        <SegChoice label={t("session.sub_agent_write_scope")} value={state.optimistic ? "task" : "all"} action="subagent-claims.optimistic" disabled={busy}
+          onPick={() => void flip()} options={[["task", t("settings.per_task")], ["all", t("settings.whole_workspace")]]} />
+      </SettingRow>
       {error && <div className="why">{error}</div>}
-    </div>
+    </>
   );
 }

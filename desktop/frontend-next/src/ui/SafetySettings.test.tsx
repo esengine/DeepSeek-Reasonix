@@ -23,7 +23,7 @@ function draw(mode: "ask" | "yolo" = "ask") {
 it("is three cards, every block one row with its scope and when it takes effect", async () => {
   draw();
   expect([...document.querySelectorAll(".prefs-card > header h3")].map((h) => h.textContent)).toEqual(["批准", "沙箱与执行", "联网"]);
-  for (const id of ["approval", "rules", "external-origin", "tool-list", "sandbox", "shell", "write-lease", "subagent-claims", "web-access", "browser-tools"]) {
+  for (const id of ["approval", "rules", "external-origin", "tool-list", "sandbox", "shell", "write-lease", "web-access", "browser-tools"]) {
     await waitFor(() => expect(document.querySelector(`.prefs-card > [data-setting="${id}"], .prefs-card [data-setting="${id}"]`), id).toBeTruthy());
   }
   expect(document.querySelector('[data-setting="approval"] .apply')?.textContent).toContain("本机");

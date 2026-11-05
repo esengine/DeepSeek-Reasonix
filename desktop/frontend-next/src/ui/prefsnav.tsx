@@ -182,18 +182,17 @@ export const SETTINGS: SettingEntry[] = [
   // people to predict the amount of verification before writing the task made
   // an internal policy look like a required work mode.
   { section: "session", anchor: "preset", title: "settings.completion_standard", scope: "session", apply: "immediate", keywords: ["自动", "验证", "复核", "完成判定"] },
-  { section: "session", anchor: "plan-mode", title: "settings.plan_mode", scope: "session", apply: "immediate", keywords: ["只读", "先规划"] },
   { section: "common", anchor: "default-mode", title: "safety.how_new_conversations_start", scope: "machine", apply: "on-open", keywords: ["plan", "默认模式", "协作方式", "default_mode", "新会话"] },
-  { section: "session", anchor: "receipt", title: "settings.delivery_receipt_card", scope: "machine", apply: "immediate", keywords: ["回执", "验收", "验证", "未验证", "receipt"] },
+  { section: "display", anchor: "receipt", title: "settings.delivery_receipt_card", scope: "machine", apply: "immediate", keywords: ["回执", "验收", "验证", "未验证", "receipt"] },
   // Written to the user file only, and read by the running turn at its next round.
   { section: "session", anchor: "ask-timeout", title: "safety.question_wait_time", scope: "machine", apply: "immediate", keywords: ["ask", "跳过", "无人回答", "长任务", "超时", "自动继续"] },
   { section: "session", anchor: "session-ref", title: "composer.size_of_a_referenced_conversation", scope: "machine", apply: "immediate", keywords: ["引用", "历史会话", "过往会话", "上下文", "长度", "token", "session"] },
   { section: "ext", anchor: "mods", title: "Claude Code mod", scope: "machine", apply: "on-open", hidden: !MODS_SHOWN, keywords: ["mod", "钩子", "hook", "Claude Code", "完全信任", "插件", "扩展"] },
   { section: "session", anchor: "progress-watch", title: "panels.long_stretches_without_progress", scope: "machine", apply: "immediate", keywords: ["暂停", "无进展", "空转", "卡住", "循环", "轮次", "token"] },
-  { section: "session", anchor: "changed-files", title: "settings.file_changes", scope: "machine", apply: "immediate", keywords: ["改动", "变更", "文件", "已更改", "药丸", "输入框"] },
-  { section: "session", anchor: "feedback-level-notices", title: "feedback.level_notices", scope: "machine", apply: "immediate", keywords: ["等级", "晋级", "升级", "反馈", "提示"] },
+  { section: "display", anchor: "changed-files", title: "settings.file_changes", scope: "machine", apply: "immediate", keywords: ["改动", "变更", "文件", "已更改", "药丸", "输入框"] },
+  { section: "display", anchor: "feedback-level-notices", title: "feedback.level_notices", scope: "machine", apply: "immediate", keywords: ["等级", "晋级", "升级", "反馈", "提示"] },
   { section: "session", anchor: "turn-narration", title: "settings.narration_between_tool_calls", scope: "machine", apply: "immediate", keywords: ["叙述", "总结", "小轮", "工具之间", "详细", "简短", "思路", "监控", "narration"] },
-  { section: "session", anchor: "fold-work", title: "settings.fold_the_work_in_between", scope: "machine", apply: "immediate", keywords: ["折叠", "中间过程", "工具调用", "思考", "最后一句", "收起", "摘要"] },
+  { section: "display", anchor: "fold-work", title: "settings.fold_the_work_in_between", scope: "machine", apply: "immediate", keywords: ["折叠", "中间过程", "工具调用", "思考", "最后一句", "收起", "摘要"] },
   // Written to the user file only; the kernel's background sweep reads it on each pass.
   { section: "storage", anchor: "auto-archive", title: "data.auto_archive_inactive_conversations", scope: "machine", apply: "immediate", keywords: ["归档", "过期", "清理", "闲置", "天数"] },
   { section: "persona", anchor: "composition-picker", within: "agent-presets", title: "persona.show_mode_picker", scope: "machine", apply: "immediate", keywords: ["预设", "模式", "picker", "Agent"] },
@@ -230,9 +229,9 @@ export const SETTINGS: SettingEntry[] = [
   // The lease is built with the session and a rebuild adopts the one it holds, so
   // the save reaches only sessions opened afterwards; the handler rebuilds nothing.
   { section: "peers", anchor: "peers", page: true, title: "remote.messages_between_sessions_experimental", scope: "machine", apply: "next-turn", keywords: ["peer", "会话间", "消息", "发送", "批准", "挂起", "另一个会话"] },
-  { section: "peers", anchor: "peer-projects", title: "remote.projects_allowed_through", scope: "machine", apply: "next-turn", keywords: ["放行", "项目", "不再询问", "长期", "撤销", "peer", "release", "会话间"] },
+  { section: "peers", anchor: "peer-projects", within: "peers", title: "remote.projects_allowed_through", scope: "machine", apply: "next-turn", keywords: ["放行", "项目", "不再询问", "长期", "撤销", "peer", "release", "会话间"] },
   { section: "tools", anchor: "write-lease", page: true, title: "session.several_sessions_writing_one_project", scope: "machine", apply: "on-open", keywords: ["lease", "写锁", "并行", "多会话", "乐观", "optimistic", "write_lease", "等待"] },
-  { section: "tools", anchor: "subagent-claims", page: true, title: "session.sub_agent_write_scope", scope: "machine", apply: "runtime-rebuild", keywords: ["subagent", "子代理", "并发", "write_paths", "乐观", "optimistic", "写锁"] },
+  { section: "session", anchor: "subagent-claims", title: "session.sub_agent_write_scope", scope: "machine", apply: "runtime-rebuild", keywords: ["subagent", "子代理", "并发", "write_paths", "乐观", "optimistic", "写锁"] },
   { section: "account", anchor: "trace-export", title: "data.trace_export", scope: "machine", apply: "on-open", keywords: ["追踪", "opentelemetry", "otlp", "观测", "遥测", "trace", "collector", "收集器"] },
   { section: "tools", anchor: "web-access", page: true, title: "models.web_search_and_fetch", scope: "machine", apply: "on-open", keywords: ["搜索", "searxng", "deepseek", "抓取", "计费", "付费", "web search", "fetch"] },
   { section: "tools", anchor: "browser-tools", title: "common.built_in_browser", scope: "machine", apply: "runtime-rebuild", keywords: ["browser", "网页", "chrome", "浏览器工具"] },

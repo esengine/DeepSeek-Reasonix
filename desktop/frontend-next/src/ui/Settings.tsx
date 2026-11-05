@@ -17,9 +17,8 @@ import { SettingsNav, SettingsTitle } from "./SettingsNav";
 import { SettingsPageStyle, SoloStyle } from "./SettingsPageStyle";
 import { firstPage, pageOf } from "./settingPages";
 import { Group, SCOPE_SAID } from "./Group";
-import { PlanApproval } from "./PlanApproval";
 import { CommonSettings } from "./CommonSettings";
-import { PeersSection } from "./PeersSection";
+import { AgentSettings } from "./AgentSettings";
 import { SafetySettings } from "./SafetySettings";
 import type { Section } from "./prefsnav";
 import { AddServer } from "./AddServer";
@@ -36,7 +35,6 @@ import { ExtDetail, ExtSplit, firstPick } from "./ExtDetail";
 import type { ExtPicked } from "./extpick";
 import { ExtTabs, MarketGroup } from "./Market";
 import { InstalledLocation } from "./InstalledLocation";
-import { Switch } from "./Switch";
 import { ModelSettings } from "./ModelSettings";
 import { ServerRow } from "./ServerRow";
 import { SkillGroups } from "./SkillRow";
@@ -45,16 +43,11 @@ import { ScheduledRuns } from "./ScheduledRuns";
 import { Network } from "./Network";
 import { ConfigTrouble } from "./ConfigTrouble";
 import { PresentFiles } from "./PresentFiles";
-import { AskTimeout } from "./AskTimeout";
-import { SessionRef } from "./SessionRef";
 import { TraceExport } from "./TraceExport";
 import { ModHost } from "./ModHost";
-import { ProgressWatch } from "./ProgressWatch";
 import { DisplaySettings } from "./DisplaySettings";
-import { SectionCard } from "./SectionCard";
 import { DataSettings } from "./DataSettings";
-import { AgentPresets } from "./AgentPresets";
-import { SettingDeep, SettingDeepContext } from "./SettingDeep";
+import { SettingDeepContext } from "./SettingDeep";
 import { Account } from "./Account";
 import { activeKind, groupVendors } from "./Models";
 import { useModelCatalog } from "./useModelCatalog";
@@ -457,51 +450,7 @@ export function Settings({ hub, onError, port, networkPort, localWorkspacePort, 
               <span className="why">{note.text}</span>
             </div>
           )}
-          {at === "session" && (
-            <>
-              <SettingDeep id="agent-presets" title={t("persona.agent_presets")} hint={t("persona.presets_decide_what_new_tasks")}>
-                <AgentPresets port={port} focusPersona={landed === "persona"} />
-              </SettingDeep>
-              <SectionCard title={t("settings.plans_and_questions")} hint={t("settings.how_plans_are_approved_how")}>
-              {/* An on/off that reverses by clicking again is a switch, not two
-                  options — the same control the recipes and the sandbox's
-                  network egress use. */}
-              <Group id="plan-mode" title={t("settings.plan_mode")} hint={t("settings.while_this_is_on_the")}>
-                <div className="lrow">
-                  <span className="tx">
-                    <span className="lb">{t("settings.drafts_a_plan_read_only")}</span>
-                    <span className="ds">
-                      {t(status?.plan ? "settings.reads_and_drafts_a_plan" : "settings.normal_execution_approved_writes_are")}
-                    </span>
-                  </span>
-                  <Switch
-                    data-action="plan.mode"
-                    on={status?.plan === true}
-                    busy={busy === "plan"}
-                    label={t("settings.plan_mode")}
-                    onClick={() => run("plan", () => port.setPlanMode(!status?.plan))}
-                  />
-                </div>
-              </Group>
-              <Group id="plan-approval"
-                title={t("settings.plan_approval")}
-                hint={t("settings.after_plan_mode_submits_a")}
-              >
-                <PlanApproval port={port} />
-              </Group>
-                <DisplaySettings port={port} />
-                <AskTimeout port={port} />
-              <Group id="preset" title={t("settings.completion_standard")} now={preset} hint={t("settings.reasonix_chooses_the_needed_verification")}>
-                <p className="note">{t("settings.everyday_questions_stay_lightweight_file")}</p>
-              </Group>
-                <ProgressWatch port={port} />
-              </SectionCard>
-              <SectionCard title={t("settings.collaboration")} hint={t("settings.quoting_past_sessions_and_messages")}>
-                <SessionRef port={port} />
-                <PeersSection port={port} hub={hub} />
-              </SectionCard>
-            </>
-          )}
+          {at === "session" && <AgentSettings port={port} hub={hub} persona={landed === "persona"} preset={preset} onChanged={onChanged} />}
 
           {at === "model" && (
             <ModelSettings port={port} onChanged={onChanged} onFailed={setFailed}
@@ -529,6 +478,7 @@ export function Settings({ hub, onError, port, networkPort, localWorkspacePort, 
 
           {at === "display" && (
             <>
+              <DisplaySettings port={port} />
               <Group id="present-files"
                 title={t("settings.ai_file_delivery_cards")}
                 hint={t("settings.file_previews_remain_available_from")}

@@ -1,12 +1,10 @@
 import type { Messages } from "./types";
 
 export const PLAN: Messages = {
-  "plan.a_submitted_plan_starts_without": { zh: "计划提交后不再等你点批准，直接开始执行，对话里会留下一条说明。只放行这一次点击：工具批准、沙箱和拒绝规则照常生效。默认关闭，只写在你自己的用户配置里，项目配置不能替你打开。", en: "A submitted plan starts without waiting for your click, and the transcript notes it. Only that click is released: tool approvals, the sandbox and deny rules still apply. Off by default, written only to your own user config; a project config cannot turn it on for you." },
   "plan.action.exit": { zh: "暂不执行", en: "Not now" },
   "plan.action.revise": { zh: "修改计划", en: "Revise the plan" },
   "plan.action.start": { zh: "开始执行", en: "Start execution" },
   "plan.all_done": { zh: "{n} 步全部完成", en: "All {n} steps done" },
-  "plan.approve_plans_automatically": { zh: "自动批准计划", en: "Approve plans automatically" },
   "plan.badge.done": { zh: "做完了", en: "Done" },
   "plan.badge.pending": { zh: "待确认", en: "Awaiting you" },
   "plan.badge.step": { zh: "第 {n} / {total} 步", en: "Step {n} of {total}" },
@@ -44,4 +42,5 @@ export const PLAN: Messages = {
   "plan.turns_turns_requests_requests_tokens": { zh: "{turns} 轮 · {requests} 次请求 · {tokens} tokens · 用时 {time}", en: "{turns} turns · {requests} requests · {tokens} tokens · {time} of work" },
   "plan.waiting_for_your_answer": { zh: "在等你回答", en: "waiting for your answer" },
   "plan.you_stopped_it": { zh: "你手动停止", en: "you stopped it" },
+  "plan.a_submitted_plan_starts_without": { zh: "计划提交后不再等你点批准，直接开始执行，对话里会留下一条说明。只放行这一次点击：工具批准、沙箱和拒绝规则照常生效。默认关闭，只写在你自己的用户配置里，项目配置不能替你打开。", en: "A submitted plan starts without waiting for your click, and the transcript notes it. Only that click is released: tool approvals, the sandbox and deny rules still apply. Off by default, written only to your own user config; a project config cannot turn it on for you." },
 };

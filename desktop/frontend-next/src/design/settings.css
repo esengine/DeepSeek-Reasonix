@@ -327,3 +327,4 @@
 .ustack .utip .r b { color: var(--text); font-weight: var(--w-semi); }
 .prefs { padding: 24px; }
 .prefs-sheet:not([data-wide]) { width: 100%; height: 100%; }
+.srow-ctl .unit-field input { width: 72px; }

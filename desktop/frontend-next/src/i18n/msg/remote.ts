@@ -140,7 +140,6 @@ export const REMOTE: Messages = {
   "remote.sending": { zh: "发送中…", en: "Sending…" },
   "remote.sent_to_title_project_waiting": { zh: "已发给「{title}」（{project}），等对方的用户批准", en: "Sent to \"{title}\" ({project}); waiting for their user to approve" },
   "remote.sessions_in_these_projects_take": { zh: "这些项目里的会话收到你其他会话的消息时不再询问，直接交给模型。只写在你自己的用户配置里，项目配置改不了；随时可以撤销。", en: "Sessions in these projects take a message from your other sessions without asking and hand it to the model. It is written only in your own user config, which a project's config cannot change, and you can take it back at any time." },
-  "remote.sessions_on_one_machine_send": { zh: "同一台机器上的会话互相发文字。收到的文字先挂起，只有你批准才会交给模型；发出去的文字也要对方的用户批准。没有给模型用的工具，默认关闭。", en: "Sessions on one machine send each other text. What you receive is held until you approve it; what you send needs the other user’s approval too. There is no tool for the model, and it is off by default." },
   "remote.sessions_on_this_machine_send": { zh: "同一台机器上的会话互相发文字。收到的文字先挂起，等你批准才会交给模型。", en: "Sessions on this machine send each other text. Incoming text is held until you approve it; only then does the model see it." },
   "remote.show_a_pairing_code": { zh: "显示配对二维码", en: "Show a pairing code" },
   "remote.show_in_the_rail": { zh: "在侧栏显示", en: "Show in the rail" },

@@ -8,12 +8,12 @@ import { SettingDeep } from "./SettingDeep";
 // fails the gate. So "which setting is this, and when does changing it take
 // effect" has no default and no way to be left unanswered.
 export function Group({
-  id, title, hint, now, action, children,
+  id, title, hint, now, action, pill, children,
 }: {
-  id: string; title: string; hint?: string; now?: string; action?: ReactNode; children?: ReactNode;
+  id: string; title: string; hint?: string; now?: string; action?: ReactNode; pill?: string; children?: ReactNode;
 }) {
   return (
-    <SettingDeep id={id} title={title} now={now} hint={hint}>
+    <SettingDeep id={id} title={title} now={now} hint={hint} act={pill}>
     <section className="grp" id={`set-${id}`} data-setting={id}>
       <div className="grp-hd">
         <h3>{title}</h3>

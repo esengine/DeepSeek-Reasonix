@@ -1,7 +1,6 @@
 import type { Messages } from "./types";
 
 export const SAFETY: Messages = {
-  "safety.a_long_task_need_not": { zh: "长任务中途遇到提问时，不必一直停在那里等人。", en: "A long task need not stop at a question and wait for someone." },
   "safety.a_match_is_final_it": { zh: "命中即终止：全部放行下同样拦截，不显示审批框", en: "A match is final: it holds under full access, and no approval box appears" },
   "safety.a_match_stops_asking": { zh: "命中后不再请求确认", en: "A match stops asking" },
   "safety.a_match_stops_for_you": { zh: "命中即暂停并请求确认，即使已开启自动批准", en: "A match stops for you, even with auto-approval on" },
@@ -32,7 +31,6 @@ export const SAFETY: Messages = {
   "safety.could_not_read_remembered_permission": { zh: "已记住的权限规则无法读取", en: "Could not read remembered permission rules" },
   "safety.could_not_read_the_multi": { zh: "无法读取多会话写入设置。", en: "Could not read the multi-session write setting." },
   "safety.could_not_read_the_setting": { zh: "无法读取新对话的起始模式设置。", en: "Could not read the setting for how new conversations start." },
-  "safety.counted_from_when_the_kernel": { zh: "从内核发出问题时开始计时。默认 {n} 秒。", en: "Counted from when the kernel asks the question. Default {n} seconds." },
   "safety.delete_rule": { zh: "删除 {rule}", en: "Delete {rule}" },
   "safety.delivery": { zh: "交付", en: "Delivery" },
   "safety.do_not_ask": { zh: "不询问", en: "Do not ask" },
@@ -78,7 +76,6 @@ export const SAFETY: Messages = {
   "safety.no_rule_matches_that": { zh: "没有匹配的规则。", en: "No rule matches that." },
   "safety.no_rules_of_your_own": { zh: "尚无额外规则", en: "No rules of your own yet" },
   "safety.no_tool_is_named_tool": { zh: "没有名为 {tool} 的工具，这条规则不会生效", en: "No tool is named {tool}, so this rule never takes effect" },
-  "safety.off_by_default_a_question": { zh: "默认关闭：提问一直等你回答。开启后，超过下面的时间没有回答，这个问题会被跳过，任务继续；模型会被告知这是超时而不是你的回答，并按自己的假设往下做（全自动或目标模式下尤其如此）。模型把任务清单交还给你、等你输入时，同样等这么久，之后宿主让它按自己的判断继续并写明假设。终端界面读同一项设置，用 /ask-timeout 修改。", en: "Off by default: a question waits for you. When on, a question left unanswered for the time below is skipped and the task goes on; the model is told it was a timeout, not your answer, and carries on under its own assumption (especially in full-auto or goal runs). When the model hands its task list back and waits for you, it waits this long too, then the host has it continue on its own judgement and state its assumptions. The terminal reads the same setting; change it there with /ask-timeout." },
   "safety.ok": { zh: "好", en: "OK" },
   "safety.on_windows_once_on_commands": { zh: "在 Windows 上启用后，命令无法在清单之外创建或改写文件、写注册表；但删除或重命名清单之外的文件、读取文件、联网，以及 ssh-agent、docker 管道和任务计划程序等系统服务不受限制，Everyone 本来就能写的位置和被授权的工具链缓存命令也能写。需要交互式桌面会话，并会在清单里的文件夹上加一条权限项（可用 reasonix sandbox revoke 收回）。", en: "On Windows, once on, commands cannot create or overwrite files outside the list or write the registry; deleting or renaming files outside the list, reading files, the network, and system services such as the ssh-agent and docker pipes or the task scheduler are not restricted, and neither are places Everyone can already write or the toolchain caches that are granted. It needs an interactive desktop session and adds a permission entry on the folders in the list (take it back with reasonix sandbox revoke)." },
   "safety.open_one_more_writable_directory": { zh: "添加可写目录，例如 /tmp/scratch", en: "Open one more writable directory, e.g. /tmp/scratch" },
