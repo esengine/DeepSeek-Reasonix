@@ -270,37 +270,17 @@ body { background: var(--page); }
   font-variation-settings: "wght" 650, "opsz" 12;
 }
 .onb-shell {
-  width: min(920px, calc(100% - 48px));
+  width: min(640px, calc(100% - 48px));
   margin: auto;
   flex: none;
   display: grid;
-  grid-template-columns: 230px minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
   overflow: clip;
   border: 1px solid var(--border);
   border-radius: var(--r-lg);
   background: var(--surface);
   box-shadow: 0 24px 70px -48px rgb(0 0 0 / .52);
 }
-.onb-progress { padding: 34px 26px; background: color-mix(in srgb, var(--page) 88%, var(--surface)); border-right: 1px solid var(--hair); }
-.onb-progress-kicker { color: var(--ghost); font: var(--w-med) var(--fs-micro)/1 var(--ui); letter-spacing: .08em; }
-.onb-progress ol { margin: 26px 0 0; padding: 0; list-style: none; display: grid; gap: 24px; }
-.onb-progress li { display: flex; gap: 11px; color: var(--ghost); }
-.onb-progress li i {
-  width: 24px;
-  height: 24px;
-  display: grid;
-  place-items: center;
-  flex: none;
-  border: 1px solid var(--border);
-  border-radius: 50%;
-  font: normal 600 var(--fs-micro)/1 var(--mono);
-}
-.onb-progress li span { display: grid; gap: 4px; }
-.onb-progress li b { color: var(--faint); font: var(--w-med) var(--fs-meta)/1.35 var(--ui); }
-.onb-progress li small { font: var(--w-reg) var(--fs-micro)/1.45 var(--ui); }
-.onb-progress li[data-active] i { border-color: var(--text); background: var(--text); color: var(--surface); }
-.onb-progress li[data-active] b { color: var(--text); }
-.onb-progress p { margin: 32px 0 0; color: var(--ghost); font: var(--w-reg) var(--fs-micro)/1.65 var(--ui); }
 .onb {
   position: relative;
   width: auto;
@@ -1503,11 +1483,6 @@ body { background: var(--page) !important; }
 
 @container onboarding (max-width: 760px) {
   .onb-shell { width: min(560px, calc(100% - 24px)); grid-template-columns: 1fr; }
-  .onb-progress { padding: 18px 20px; border-right: 0; border-bottom: 1px solid var(--hair); }
-  .onb-progress ol { margin-top: 14px; display: flex; gap: 10px; }
-  .onb-progress li { flex: 1; }
-  .onb-progress li span small,
-  .onb-progress p { display: none; }
   .onb { padding: 26px 22px 24px; }
 }
 
@@ -1620,9 +1595,6 @@ body { background: var(--page) !important; }
   backdrop-filter: blur(24px) saturate(1.08);
 }
 
-.onb-progress {
-  background: color-mix(in srgb, var(--page) 78%, transparent);
-}
 
 /* The empty-state atmosphere belongs to the conversation surface, not only
    its scroll region. Painting it on the pane keeps the grid and soft light

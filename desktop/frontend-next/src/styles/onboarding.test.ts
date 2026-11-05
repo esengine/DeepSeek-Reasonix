@@ -12,7 +12,6 @@ describe("onboarding folds in the room left after interface zoom", () => {
   it("moves the complete card to one column through a container query", () => {
     const fold = css.match(/@container onboarding \(max-width: 760px\)\s*\{([\s\S]*?)\n\}/)?.[1] ?? "";
     expect(fold).toMatch(/\.onb-shell\s*\{[^}]*grid-template-columns:\s*1fr/);
-    expect(fold).toContain(".onb-progress");
     expect(fold).toContain(".onb { padding: 26px 22px 24px; }");
     const media = css.match(/@media \(max-width: 760px\)\s*\{([\s\S]*?)\n\}/)?.[1] ?? "";
     expect(media).not.toContain(".onb");

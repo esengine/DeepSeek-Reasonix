@@ -417,6 +417,10 @@ export const ACTIONS: UIAction[] = [
   { id: "transcript.scroll", kind: "view", target: "none", proof: "interaction" },
   { id: "onboarding.protocol", kind: "view", target: "none", proof: "interaction" },
   { id: "onboarding.skip", kind: "view", target: "none", proof: "interaction" },
+  { id: "onboarding.begin", kind: "navigation", target: "none", proof: "interaction" },
+  { id: "onboarding.back", kind: "navigation", target: "none", proof: "interaction" },
+  { id: "onboarding.service", kind: "view", target: "none", proof: "interaction" },
+  { id: "onboarding.model", kind: "view", target: "none", proof: "interaction" },
   { id: "onboarding.reopen", kind: "view", target: "none", proof: "interaction" },
   // Handing the reader to a browser. The vendor's console during setup and a
   // link in the transcript are the same thing to do, and neither moves any
