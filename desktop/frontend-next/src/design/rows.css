@@ -22,6 +22,9 @@
 .ds-proj[data-hover] { background: color-mix(in srgb, var(--overlay) 60%, transparent); }
 .ds-chev { display: flex; color: var(--faint); }
 .ds-folder { display: flex; color: var(--muted); }
+.project-state { flex: none; font: var(--w-reg) var(--fs-micro) var(--ds-ui); color: var(--warn-ink); }
+.project-state[data-state="stopped"] { color: var(--err-ink); }
+.rmtws-node:is([data-state="connecting"], [data-state="reconnecting"]) .kids { opacity: .55; }
 .ds-host { font: var(--w-reg) var(--fs-micro) var(--ds-mono); color: var(--faint); }
 .ds-status { font: var(--w-reg) var(--fs-micro) var(--ds-ui); color: var(--faint); }
 .ds-status[data-kind="connecting"] { color: var(--warn-ink); }
@@ -67,10 +70,8 @@
 .ds-proj .wsmeta, .ds-proj .project-source { flex: none; font: var(--w-reg) var(--fs-micro) var(--ds-ui); color: var(--faint); }
 .ds-proj .wsacts { flex: none; display: flex; align-items: center; margin-left: auto; }
 .ds-proj .rowswap { display: flex; align-items: center; }
-.ds-proj .rowcount { font: var(--w-reg) var(--fs-micro) var(--ds-ui); color: var(--faint); font-variant-numeric: tabular-nums; }
 .ds-proj .rowbtns { display: none; align-items: center; }
 .ds-proj:is(:hover, :focus-within) .rowbtns, .ds-proj:has([aria-expanded="true"]) .rowbtns { display: flex; }
-.ds-proj:is(:hover, :focus-within) .rowcount, .ds-proj:has([aria-expanded="true"]) .rowcount { display: none; }
 .ds-proj :is(.wsadd, .wsmore) { width: 28px; height: 28px; padding: 0; border: 0; border-radius: var(--r-sm); background: transparent; color: var(--muted); display: grid; place-items: center; flex: none; cursor: pointer; }
 .ds-proj :is(.wsadd, .wsmore):hover { background: var(--overlay); color: var(--text); }
 .ds-proj :is(.wsadd, .wsmore) .studio-icon { width: 16px; height: 16px; }

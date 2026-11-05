@@ -11,9 +11,9 @@ import { remoteProjectKey, remoteProjects, type RemoteWorkspace } from "./remote
 import { workspacesOf } from "./Remotes";
 export { remoteProjectKey, remoteWorkspaces } from "./remoteProjects";
 import { StudioIcon } from "./StudioIcon";
+import { WsMark } from "./WsMark";
 import { Confirm } from "./WorkspaceConfirm";
 import { UnreadCount } from "./UnreadMark";
-import { RowCount } from "./RowCount";
 import { clearDraftForSession } from "./drafts";
 import { RemoteSessionRow } from "./RemoteSessionRow";
 import { captureSessionFocus, useSessionMutation } from "./useSessionMutation";
@@ -174,6 +174,8 @@ function RemoteHostsView({ hub, hosts, runtimes, active, onOpen, onFocus, reload
         const spaces = remoteProjects(host, tree, panes, scope, needle, listedIds, hideLegacy);
         const working = host.status === "connecting" || host.status === "reconnecting";
         const hint = note(host);
+        const state = working ? t("remote.connecting_short") : host.status === "stopped" ? t("remote.offline") : host.status === "idle" ? t("common.not_connected") : "";
+        const detail = working && host.step ? t(REMOTE_STEP_LABEL[host.step] ?? host.step) : host.status === "connecting" ? "" : hint;
         return spaces.map(({ workspace: ws, loose, older }) => {
           const key = remoteProjectKey(host.name, ws.root);
           const hasChildren = ws.sessions.length > 0 || (ws.total ?? 0) > 0 || (!tree && !working) || panes.some((rt) => workspaceContains(ws, rt.root));
@@ -187,14 +189,13 @@ function RemoteHostsView({ hub, hosts, runtimes, active, onOpen, onFocus, reload
               data-current={current ? "" : undefined}>
               <div className="wsrow rmtwsrow ds-proj" role="treeitem" aria-level={1} aria-expanded={hasChildren ? !folded : undefined}
                 data-action-click="tree.navigate" data-target={key} onClick={() => { if (hasChildren) { if (onFold) onFold(key, !folded); else fold(key); } }}>
-                <StudioIcon name="folder" className="wsfolder ds-folder" />
+                <WsMark open={hasChildren ? !folded : undefined} />
                 <span className="wsname ds-title" title={host.name + " · " + ws.root} dir="ltr">{ws.name}</span>
                 <span className="project-source ds-host" title={host.target}>{host.name}</span>
+                {state && <span className="project-state" data-state={host.status}>{state}</span>}
                 {currentPane && <span className="bound-workspace" title={currentPane.root} dir="ltr">{t("remote.connected_directory_path", { path: currentPane.root })}</span>}
                 <span className="wsacts">
                   {folded && <UnreadCount n={ws.sessions.filter((session) => session.unread).length} />}
-                  {tree && ws.sessions.length > 0 && <RowCount c={scope === "all" && older > 0
-                    ? { shown: ws.sessions.length, of: ws.sessions.length + older } : { shown: ws.sessions.length }} />}
                   <span className="rowbtns">
                     <button className="wsadd" data-action="session.new" data-target={key}
                       data-busy={busy === host.name + ws.root ? "" : undefined} disabled={!!busy}
@@ -209,9 +210,9 @@ function RemoteHostsView({ hub, hosts, runtimes, active, onOpen, onFocus, reload
                   </span>
                 </span>
               </div>
-              {host.status !== "connected" && <div className="project-connection" role="status">
+              {detail && <div className="project-connection" role="status">
                 <StudioIcon name={working ? "refresh" : "warning"} />
-                <span>{working ? [t("remote.connecting"), host.step ? t(REMOTE_STEP_LABEL[host.step] ?? host.step) : ""].filter(Boolean).join(" · ") : hint || t("common.not_connected")}</span>
+                <span>{detail}</span>
               </div>}
               {!folded && hasChildren && <div className="kids">
                 {visible.map((session) => {

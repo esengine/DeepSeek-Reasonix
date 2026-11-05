@@ -86,8 +86,8 @@ export class MockHub implements HubPort {
         root: "/srv/training",
         name: "training",
         sessions: [
-          { path: "/srv/sessions/pipeline.jsonl", name: "pipeline", title: "数据管线", turns: 7 },
-          { path: "/srv/sessions/eval.jsonl", name: "eval", title: "跑一遍评测", turns: 2 },
+          { path: "/srv/sessions/pipeline.jsonl", name: "pipeline", title: "数据管线", turns: 7, lastActiveAt: Date.now() - 2 * 3_600_000 },
+          { path: "/srv/sessions/eval.jsonl", name: "eval", title: "跑一遍评测", turns: 2, lastActiveAt: Date.now() - 7 * 86_400_000 },
         ],
       },
       { root: "/srv/scratch", name: "scratch", sessions: [] },
@@ -206,9 +206,9 @@ export class MockHub implements HubPort {
           i === 0
             ? this.seeded.length ? this.seeded.map((session) => ({ ...session, runtimeId: open.get(session.path) })) : [
                 { path: "/sessions/mock.jsonl", name: "mock", title: "并行会话演示", turns: 3, runtimeId: open.get("/sessions/mock.jsonl") },
-                { path: "/sessions/older.jsonl", name: "older", title: "上一次的会话", turns: 12, runtimeId: open.get("/sessions/older.jsonl"), legacy: true },
+                { path: "/sessions/older.jsonl", name: "older", title: "上一次的会话", turns: 12, runtimeId: open.get("/sessions/older.jsonl"), legacy: true, lastActiveAt: Date.now() - 86_400_000 },
               ]
-            : [{ path: "/sessions/site.jsonl", name: "site", title: "站点改版", turns: 5, runtimeId: open.get("/sessions/site.jsonl") }]),
+            : [{ path: "/sessions/site.jsonl", name: "site", title: "站点改版", turns: 5, runtimeId: open.get("/sessions/site.jsonl"), lastActiveAt: Date.now() - 2 * 3_600_000 }]),
       }))), window),
     );
   }

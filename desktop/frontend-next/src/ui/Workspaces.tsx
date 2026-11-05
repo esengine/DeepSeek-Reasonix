@@ -11,7 +11,6 @@ import { pinToViewport } from "./place";
 import { useRailQuery } from "./railsearch";
 import { StudioIcon } from "./StudioIcon";
 import { TreeEmpty, TreeReading } from "./TreeReading";
-import { RowCount } from "./RowCount";
 import { ListingProgress } from "./ListingProgress";
 import { Cross } from "./glyphs";
 import { copyText } from "./CopyButton";
@@ -28,9 +27,9 @@ import { useSessionMove } from "./useSessionMove";
 import { useSessionMoveTo } from "./useSessionMoveTo";
 import { pinnedFirst } from "./pinorder"; import { Hit } from "./Hit"; import { WsMark } from "./WsMark"; import { ProjectMenuExtras } from "./ProjectMenuExtras";
 import { Confirm, removeHint, sessionDeleteHint } from "./WorkspaceConfirm";
-import { UnreadCount } from "./UnreadMark";
+import { LeadDot, UnreadCount } from "./UnreadMark";
 import { PeerThreadMark } from "./peerthreads";
-import { NO_PAGING, atCap, sessionCount, answers, unloaded, type TreePaging, type TreeView } from "./treewindow";
+import { NO_PAGING, atCap, answers, unloaded, type TreePaging, type TreeView } from "./treewindow";
 import { SessionBatch, useSelectedRows } from "./SessionBatch";
 import { ProjectsHeader } from "./ProjectsHeader";
 import { useWorkspaceDrag } from "./useWorkspaceDrag";
@@ -432,8 +431,7 @@ function WorkspacesView({ hub, tree, treeRead, answered = null, runtimes, active
                     <span className="wsname ds-title" title={ws.root}>
                       {ws.name}
                     </span>
-                    {/* A tag is this project's identity, so it takes a second line and
-                        the name keeps the row; the count and the actions share one slot. */}
+                    {/* A tag is this project's identity, so it takes a second line and the name keeps the row. */}
                     {(ws.isolated || twice.has(ws.name)) && (
                       <span className="wsmeta">
                         <em className="wstag">{ws.isolated ? t("common.isolated") : parentOf(ws.root)}</em>
@@ -442,7 +440,6 @@ function WorkspacesView({ hub, tree, treeRead, answered = null, runtimes, active
                     <span className="wsacts">
                       {shut && <UnreadCount n={ws.sessions.filter((x) => x.unread).length} />}
                       <span className="rowswap">
-                      {ws.countsComplete !== false && <RowCount c={pagedScope ? sessionCount(ws, ws.sessions.length) : { shown: ws.sessions.length }} />}
                       <span className="rowbtns">
                       <button
                         data-action="session.new"
@@ -584,7 +581,7 @@ function WorkspacesView({ hub, tree, treeRead, answered = null, runtimes, active
                         {selection && <input type="checkbox" className="session-select" tabIndex={-1} aria-label={t("session.select_session_name", { name: rowLabel(session) })}
                           data-action-click="session.selection" data-action-change="session.selection" data-target={session.path} checked={selection.has(session.path)}
                           onClick={(ev) => ev.stopPropagation()} onChange={() => toggleSelection(session.path)} />}
-                        <span className="ds-lead"><i className="pip ds-dot" /></span>
+                        <LeadDot unread={session.unread && run !== "running" && run !== "halt"} />
                         {editing === session.path ? (
                           <input className="sessedit" aria-label={t("common.rename_this_session")} placeholder={t("common.chat_title")} autoFocus
                             defaultValue={session.title || session.name}

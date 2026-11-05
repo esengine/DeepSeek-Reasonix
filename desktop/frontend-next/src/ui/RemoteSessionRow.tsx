@@ -6,6 +6,7 @@ import { onSessionQuickActionsChange, showsSessionQuickActions } from "../state/
 import { useDismiss } from "./dismiss";
 import { pinToViewport } from "./place";
 import { SessionAge } from "./SessionAge";
+import { LeadDot } from "./UnreadMark";
 import { SessionArchiveAction, SessionMoreAction, SessionPinAction } from "./SessionRowActions";
 import { StudioIcon } from "./StudioIcon";
 import { workspaceMenuKeys } from "./WorkspaceOrder";
@@ -57,7 +58,7 @@ export function RemoteSessionRow({ host, target, session, held, active, busy, pe
       }
       if (asksDelete(event)) { event.preventDefault(); onDelete(row.current); }
     }}>
-    <span className="ds-lead"><i className="pip ds-dot" /></span>
+    <LeadDot unread={session.unread} />
     <span className="sesstitle ds-title" title={title}><span>{title}</span>{session.isolated && <em className="sessarch" title={session.workspaceRoot}>{t("common.isolated")}</em>}{session.archived && <em className="sessarch">{t("common.archived")}</em>}</span>
     <SessionPinAction target={target} title={title} pinned={!!session.pinned} enabled={quick} disabled={!!pending || busy} onPin={() => write("pin")} />
     <SessionAge at={session.lastActiveAt} unread={session.unread} dot={false} />

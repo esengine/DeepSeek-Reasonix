@@ -2,7 +2,7 @@
 import { describe, expect, it } from "vitest";
 import { renderHook } from "@testing-library/react";
 import { treeQuery } from "../port/hub";
-import { atCap, sessionCount, TREE_MAX, TREE_PAGE, unloaded, useTreeWindow } from "./treewindow";
+import { atCap, TREE_MAX, TREE_PAGE, unloaded, useTreeWindow } from "./treewindow";
 
 describe("the tree window", () => {
   it("asks for one page of every folder until one is opened up", async () => {
@@ -50,12 +50,9 @@ describe("what a folder has left to load", () => {
   const ws = (over: object) => ({ root: "/w", name: "w", sessions: [], ...over });
   it("takes the kernel's own remainder for the view", () => {
     expect(unloaded(ws({ remaining: 7, total: 100 }), 40)).toBe(7);
-    expect(sessionCount(ws({ remaining: 7 }), 40)).toEqual({ shown: 40, of: 47 });
   });
-  it("falls back to the total on a kernel that predates the view, and claims no denominator without one", () => {
+  it("falls back to the total on a kernel that predates the view", () => {
     expect(unloaded(ws({ total: 100 }), 40)).toBe(60);
     expect(unloaded(ws({}), 40)).toBe(0);
-    expect(sessionCount(ws({}), 40)).toEqual({ shown: 40 });
-    expect(sessionCount(ws({ remaining: 0 }), 40)).toEqual({ shown: 40 });
   });
 });

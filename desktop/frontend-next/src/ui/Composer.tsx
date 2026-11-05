@@ -739,7 +739,7 @@ export function Composer({ port, status, running, queued = false, quote, restore
                 }}
               />
             ) : undefined}
-            label={<>{hasVendorMark(currentMark) && <VendorMark slug={currentMark} size={14} />}<span className="nm">{modelLb}</span>{status && <><i className="studio-model-sep" aria-hidden="true" /><span className="studio-effort-reading">{declared ? effortShort(status.effort, status.modes) : t("common.not_declared")}</span></>}<StudioIcon name="down" /></>}
+            label={<>{hasVendorMark(currentMark) && <VendorMark slug={currentMark} size={14} />}<span className="nm">{modelLb}</span>{status && <><i className="studio-model-sep" aria-hidden="true" /><span className="studio-effort-reading"><StudioIcon name="brain" />{declared ? effortShort(status.effort, status.modes) : t("common.not_declared")}</span></>}<StudioIcon name="down" /></>}
           />
         </div>
         </div>

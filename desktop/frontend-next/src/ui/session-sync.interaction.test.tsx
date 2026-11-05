@@ -47,10 +47,13 @@ it("converges two App trees and counts after another client's changes and page r
     return hub;
   });
   const views = clients.map((hub) => render(<App hub={hub} />));
-  const count = (i: number) => views[i].container.querySelector(".wsnode > .wsrow .rowcount")?.textContent;
+  const count = (i: number) => {
+    const rows = views[i].container.querySelectorAll('[data-action-click="session.open"]').length;
+    return rows ? String(rows) : undefined;
+  };
   const ids = (i: number) => Array.from(views[i].container.querySelectorAll<HTMLElement>('[data-action-click="session.open"]'), (row) => row.dataset.target).sort();
   const notify = () => listeners.forEach((fn) => fn());
-  await waitFor(() => clients.forEach((_, i) => expect(count(i)).toBe("2")));
+  await waitFor(() => views.forEach((view) => expect(view.container.querySelector(".wsrow")).toBeTruthy()));
   views.forEach((view) => {
     const row = view.container.querySelector('.wsrow')!;
     if (row.getAttribute("aria-expanded") === "false") fireEvent.click(row);

@@ -50,10 +50,15 @@ it("starts directly with projects instead of a local machine parent", () => {
   const project = document.querySelector<HTMLElement>(".wsrow")!;
   expect(project.getAttribute("aria-level")).toBe("1");
   expect(project.querySelector(".studio-icon")).toBeTruthy();
-  const count = project.querySelector(".rowcount")!;
-  expect(count.textContent).toBe("2");
-  expect(count.getAttribute("data-pill")).not.toBeNull();
+  expect(project.querySelector(".rowcount")).toBeNull();
   expect(document.querySelector('.sessrow')?.getAttribute("aria-level")).toBe("2");
+});
+
+it("draws no session count on a project row, folded or open", async () => {
+  draw();
+  await userEvent.click(screen.getByRole("button", { name: "收起所有项目" }));
+  expect(document.querySelector(".wsrow .rowcount")).toBeNull();
+  await userEvent.click(screen.getByRole("button", { name: "展开所有项目" }));
 });
 
 it("collapses and expands local and SSH projects together from one heading control", async () => {

@@ -135,7 +135,7 @@ it("does not steal focus back after the reader moves to another control during a
 it("marks a remote conversation read from its menu on that host, only while it is unread", async () => {
   const { markSessionRead, onOpen } = draw({ unread: true, lastActiveAt: 1_700_000_000_000 });
   const row = screen.getByRole("treeitem", { name: "Remote task" });
-  expect(row.querySelector("time")).toBeNull();
+  expect(row.querySelector("time")).toBeTruthy();
   expect(within(row).getAllByRole("img", { name: "未读" })).toHaveLength(1);
   row.focus();
   await userEvent.keyboard("{Shift>}{F10}{/Shift}");

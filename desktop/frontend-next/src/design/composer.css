@@ -61,6 +61,7 @@
 .compose .model-picker .nm { min-width: 0; max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); font-weight: var(--w-med); line-height: 1.5; }
 .compose .studio-model-sep { width: 1px; height: 12px; margin: 0; background: var(--hair); }
 .compose .studio-effort-reading { display: inline-flex; align-items: center; gap: 3px; color: var(--muted); }
+.compose .studio-effort-reading .studio-icon { width: 12px; height: 12px; }
 
 .compose .btn.send, .compose .btn.stop {
   width: 32px; height: 32px; padding: 0; flex: none; display: grid; place-items: center;

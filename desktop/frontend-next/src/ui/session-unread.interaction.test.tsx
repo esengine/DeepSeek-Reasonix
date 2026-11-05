@@ -132,9 +132,9 @@ describe("an unread session is marked on its row", () => {
     const unread = await row(/Release notes/);
     await waitFor(() => expect(dotIn(unread)).toBeTruthy());
     expect(unread.hasAttribute("data-unread")).toBe(true);
-    expect(unread.querySelector("time")).toBeNull();
-    expect(unread.querySelectorAll(".unread-dot")).toHaveLength(1);
-    expect(dotIn(unread)!.compareDocumentPosition(unread.querySelector(".sesstitle")!) & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy();
+    expect(unread.querySelector("time")?.dateTime).toBe(new Date(1_700_000_000_000).toISOString());
+    expect(unread.querySelectorAll('[role="img"]')).toHaveLength(1);
+    expect(dotIn(unread)!.compareDocumentPosition(unread.querySelector(".sesstitle")!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     const read = await row(/Docs sweep/);
     expect(dotIn(read)).toBeNull();
     expect(read.hasAttribute("data-unread")).toBe(false);
@@ -191,7 +191,7 @@ describe("opening a session clears its mark", () => {
 
     await waitFor(() => expect(k.port(RELEASE)?.markSessionViewed).toHaveBeenCalled());
     await waitFor(() => expect(dotIn(screen.getByRole("treeitem", { name: /Release notes/ }))).toBeTruthy());
-    expect(screen.getByRole("treeitem", { name: /Release notes/ }).querySelector("time")).toBeNull();
+    expect(screen.getByRole("treeitem", { name: /Release notes/ }).querySelector("time")).not.toBeNull();
     expect(document.querySelector('[role="alert"]')).toBeNull();
     await waitFor(() => expect(badge).toHaveBeenLastCalledWith(true));
   });

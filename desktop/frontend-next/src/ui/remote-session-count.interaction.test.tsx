@@ -25,15 +25,15 @@ function Rail({ book }: { book: TreeWorkspace[] }) {
 
 const sessions = (n: number) => Array.from({ length: n }, (_, i) => ({ path: `/home/ada/training/s${i}.jsonl`, name: `s${i}`, title: `run ${i}` }));
 
-it("draws every row the far kernel sent, with its true total and a pointer to the rest", async () => {
+it("draws every row the far kernel sent, with a pointer to the rest and no count on the project", async () => {
   render(<Rail book={[{ root: "/home/ada/training", name: "training", total: 400, sessions: sessions(50) }]} />);
-  expect(await screen.findByLabelText("50 / 400 会话")).toBeTruthy();
-  expect(screen.getAllByText(/^run \d+$/)).toHaveLength(50);
+  expect(await screen.findAllByText(/^run \d+$/)).toHaveLength(50);
+  expect(document.querySelector(".rowcount")).toBeNull();
   expect(screen.getByText("还有 350 个较早的会话，在那台机器上查看")).toBeTruthy();
 });
 
-it("shows a plain count for a far kernel that sends no total", async () => {
+it("points to nothing more for a far kernel that sends no total", async () => {
   render(<Rail book={[{ root: "/home/ada/training", name: "training", sessions: sessions(7) }]} />);
-  expect(await screen.findByLabelText("7 会话")).toBeTruthy();
+  expect(await screen.findAllByText(/^run \d+$/)).toHaveLength(7);
   expect(screen.queryByText(/较早的会话/)).toBeNull();
 });

@@ -59,13 +59,6 @@ export const unloaded = (ws: TreeWorkspace, loaded: number) => ws.remaining ?? M
 /** True when a folder's window has reached the most the sidebar will hold. */
 export const atCap = (loaded: number) => loaded >= TREE_MAX;
 
-/** The figure beside a folder: how many of its conversations are in view, and
- *  how many the view holds when some are not loaded. */
-export function sessionCount(ws: TreeWorkspace, shown: number): { shown: number; of?: number } {
-  const more = ws.remaining ?? 0;
-  return more > 0 ? { shown, of: shown + more } : { shown };
-}
-
 /** Whether the rows in hand answer the view being asked for. Until the kernel
  *  answers it they belong to the last view, and filtering them to this one would
  *  say "none" for a list that is merely still being read. */

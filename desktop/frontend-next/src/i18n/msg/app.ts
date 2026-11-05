@@ -61,8 +61,6 @@ export const APP: Messages = {
   "app.n_calls_never_got_started": { zh: "另有 {n} 个调用尚未开始，均未修改任何文件", en: "{n} calls never got started; they changed no files" },
   "app.n_files_restored": { zh: "已还原 {n} 个文件", en: "{n} files restored" },
   "app.n_of_them_are_still": { zh: "其中 {n} 个仍在运行：{names}", en: "{n} of them are still running: {names}" },
-  "app.n_sessions": { zh: "{n} 会话", en: "{n} sessions" },
-  "app.n_total_sessions": { zh: "{n} / {total} 会话", en: "{n} / {total} sessions" },
   "app.name_larger_than_size_mb": { zh: "{name}：超过 {size} MB，没有添加", en: "{name}: larger than {size} MB, not added" },
   "app.name_only_png_or_jpeg": { zh: "{name}：只支持 PNG 或 JPEG", en: "{name}: only PNG or JPEG is supported" },
   "app.name_the_limit_is_n": { zh: "{name}：最多 {n} 张，没有添加", en: "{name}: the limit is {n} images, not added" },
