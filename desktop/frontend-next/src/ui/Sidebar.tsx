@@ -297,6 +297,7 @@ export function Sidebar({
       tree={paletteTree}
       settings={paletteSettings}
       onOpenSetting={(target) => onSettings(target)}
+      runOf={(id) => (id ? runs[id]?.run : undefined)}
       onOpenSession={(path, ws) => void (ws.host ? onOpenRemote(ws.host, ws.root, path) : onOpen({ sessionPath: path })).catch(onError)}
     />
     {/* 收起而不是卸载：卸掉就丢了侧栏的滚动位置、Inspector 的展开、当前选

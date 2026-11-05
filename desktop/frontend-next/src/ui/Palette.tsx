@@ -3,6 +3,7 @@ import { useModalFocus } from "./useModalFocus";
 import type { TreeWorkspace } from "../port/hub";
 import { t } from "../i18n";
 import { StudioIcon, type StudioIconName } from "./StudioIcon";
+import { ageWord } from "./SessionAge";
 
 /** One thing the palette can do. Sessions are found by title; a command is
  *  found by its own words and by the terms someone would reach for instead,
@@ -32,6 +33,7 @@ type Scope = "" | "actions" | "sessions" | "settings";
 const SCOPES: Scope[] = ["", "actions", "sessions", "settings"];
 const SCOPE_LABEL: Record<Exclude<Scope, "">, string> = { actions: "app.action", sessions: "common.session", settings: "common.settings" };
 const PREFIX: Record<string, Exclude<Scope, "">> = { ">": "actions", "#": "sessions", ",": "settings" };
+const PREFIX_OF: Record<Exclude<Scope, "">, string> = { actions: ">", sessions: "#", settings: "," };
 
 interface Props {
   open: boolean;
@@ -41,6 +43,8 @@ interface Props {
   onOpenSession: (path: string, workspace: PaletteWorkspace) => void;
   settings?: PaletteSetting[];
   onOpenSetting?: (target: string) => void;
+  /** What a session is doing, if it is open: "running" or "halt" (waiting on the person). */
+  runOf?: (runtimeId: string | undefined) => string | undefined;
 }
 
 interface Hit {
@@ -49,6 +53,8 @@ interface Hit {
   icon: StudioIconName;
   note?: string;
   alert?: boolean;
+  dot?: "running" | "halt" | "none";
+  inline?: boolean;
   run: () => void;
 }
 
@@ -71,7 +77,7 @@ function remember(key: string) {
   } catch {}
 }
 
-export function Palette({ open, onClose, commands, tree, onOpenSession, settings = [], onOpenSetting }: Props) {
+export function Palette({ open, onClose, commands, tree, onOpenSession, settings = [], onOpenSetting, runOf }: Props) {
   const [query, setQuery] = useState("");
   const [scope, setScope] = useState<Scope>("");
   const [at, setAt] = useState(0);
@@ -95,7 +101,7 @@ export function Palette({ open, onClose, commands, tree, onOpenSession, settings
     const wants = (kind: Exclude<Scope, "">) => scope === "" || scope === kind;
     const actions: Hit[] = wants("actions")
       ? commands.filter((c) => !q || `${c.label} ${c.keywords}`.toLowerCase().includes(q)).slice(0, LIMIT)
-        .map((c) => ({ key: `c:${c.id}`, label: c.label, icon: c.icon, note: c.status ?? c.keys ?? t("app.action"), alert: c.status !== undefined, run: c.run }))
+        .map((c) => ({ key: `c:${c.id}`, label: c.label, icon: c.icon, note: c.status ?? c.keys ?? t("app.action"), alert: c.status !== undefined, inline: c.status !== undefined, run: c.run }))
       : [];
     const sessions: Hit[] = [];
     if (wants("sessions")) {
@@ -104,11 +110,16 @@ export function Palette({ open, onClose, commands, tree, onOpenSession, settings
           if (sessions.length >= LIMIT) break;
           const title = session.title || session.name;
           if (q && !`${title} ${workspace.name} ${workspace.host ?? ""}`.toLowerCase().includes(q)) continue;
+          const run = runOf?.(session.runtimeId);
+          const dot = run === "running" || run === "halt" ? run : undefined;
+          const age = !dot && session.lastActiveAt ? ageWord(session.lastActiveAt, Date.now()) : "";
           sessions.push({
             key: `s:${workspace.host ?? ""}:${session.path}`,
             label: title,
             icon: "clock",
-            note: [workspace.name, workspace.host].filter(Boolean).join(" · "),
+            dot: dot ?? "none",
+            inline: true,
+            note: [workspace.name, workspace.host, dot ? t(dot === "running" ? "common.running" : "session.needs_you") : age].filter(Boolean).join(" · "),
             run: () => onOpenSession(session.path, { ...workspace, root: session.workspaceRoot || workspace.root }),
           });
         }
@@ -142,7 +153,7 @@ export function Palette({ open, onClose, commands, tree, onOpenSession, settings
       }
     }
     return ordered.filter((g) => g.hits.length > 0);
-  }, [commands, tree, settings, query, scope, onOpenSession, onOpenSetting]);
+  }, [commands, tree, settings, query, scope, onOpenSession, onOpenSetting, runOf]);
 
   const flat = useMemo(() => groups.flatMap((g) => g.hits), [groups]);
   // A cursor past the end of a shorter list selects nothing and Enter does
@@ -213,10 +224,18 @@ export function Palette({ open, onClose, commands, tree, onOpenSession, settings
           />
           <kbd className="palette-esc" aria-hidden="true">Esc</kbd>
         </label>
+        <div className="palette-chips" role="group" aria-label={t("app.search_scope")}>
+          {(["actions", "sessions", "settings"] as const).map((kind) => (
+            <button key={kind} type="button" className="palette-chip" data-action="palette.scope" data-value={kind} aria-pressed={scope === kind}
+              onClick={() => { setScope(scope === kind ? "" : kind); setAt(0); box.current?.focus(); }}>
+              <b>{PREFIX_OF[kind]}</b>{t(SCOPE_LABEL[kind])}
+            </button>
+          ))}
+        </div>
         <div className="palette-results" ref={list}>
           {groups.map((group) => (
             <div key={group.label}>
-              <div className="palette-label">{group.label}</div>
+              <div className="palette-label">{group.label}{query.trim() && group.label !== t("app.best_match") && <i>{group.hits.length}</i>}</div>
               {group.hits.map((hit) => (
                 <button
                   key={hit.key}
@@ -227,16 +246,16 @@ export function Palette({ open, onClose, commands, tree, onOpenSession, settings
                   onMouseMove={() => setAt(flat.findIndex((h) => h.key === hit.key))}
                   onClick={() => pick(hit)}
                 >
-                  <StudioIcon name={hit.icon} />
+                  {hit.dot ? <i className="palette-dot" data-run={hit.dot} aria-hidden="true" /> : <StudioIcon name={hit.icon} />}
                   <span>{hit.label}</span>
-                  {hit.note && <small data-alert={hit.alert ? "" : undefined}>{hit.note}</small>}
+                  {hit.note && <small data-alert={hit.alert ? "" : undefined} data-inline={hit.inline ? "" : undefined}>{hit.note}</small>}
                 </button>
               ))}
             </div>
           ))}
           {flat.length === 0 && <div className="palette-empty">{t("app.nothing_matches")}</div>}
         </div>
-        <div className="palette-help">{t("app.to_move_enter_to_open")}</div>
+        <div className="palette-help"><span>{t("app.palette_keys")}</span><span>{t("app.palette_scopes")}</span></div>
       </div>
     </div>
   );
