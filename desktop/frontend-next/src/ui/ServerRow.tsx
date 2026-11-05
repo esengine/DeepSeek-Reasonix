@@ -4,6 +4,7 @@ import type { AgentPort, McpEntry } from "../port/port";
 import { Exception } from "./CapabilityScope";
 import { Clip } from "./Clip";
 import { Switch } from "./Switch";
+import { onRowItself, usePickRow } from "./extpick";
 import { reason } from "../i18n/kernel";
 import { listMatcher } from "./listsearch";
 
@@ -48,9 +49,11 @@ function loadTag(m: McpEntry): { text: string; pending: boolean } | null {
 // The tool list is the long half and the least urgent, so it folds behind its
 // own count — the same idiom a long file read uses in the transcript.
 export function ServerRow({
-  m, port, onDone, root, live,
+  m, port, onDone, root, live, detail = false,
 }: {
   m: McpEntry; port: AgentPort; onDone: () => void; root: string; live: boolean;
+  // Drawn as the extensions page's detail pane: everything at once, no fold.
+  detail?: boolean;
 }) {
   const [owner, setOwner] = useState({ port, root });
   const currentOwner = useRef(owner);
@@ -275,31 +278,7 @@ export function ServerRow({
   );
   const pendingWhy = m.state === "pending" && m.pendingReason ? PENDING_WHY[m.pendingReason] : undefined;
   const why = failed || (pendingWhy ? t(pendingWhy) : m.error);
-  if (!tools.length) {
-    return (
-      <div className="srv mcp-server" data-st={m.state} data-local={m.localOverride ? "" : undefined} aria-busy={!!busy}>
-        <div className="srv-hd">{head}</div>
-        {about}
-        {launch}
-        {held}{upgrade}{following}
-        {why && <div className="why" role={failed ? "alert" : undefined}>{why}</div>}
-        {actions}
-        {confirm}
-      </div>
-    );
-  }
-  return (
-    // Asking to remove has to open the row: the confirmation lives inside the
-    // fold. A row with withheld tools opens too, so the approval is not behind a click.
-    <details className="srv mcp-server" data-st={m.state} data-local={m.localOverride ? "" : undefined} aria-busy={!!busy} open={confirming || heldTools.length > 0 || !!why || undefined}>
-      <summary>{head}</summary>
-      {about}
-      {launch}
-      {held}{upgrade}{following}
-      {why && <div className="why" role={failed ? "alert" : undefined}>{why}</div>}
-      {actions}
-      {confirm}
-      {load}
+  const peek = (
       <div className="peek">
         {searchable && <div className="msearch">
           <input ref={search} type="search" data-action="mcp.tool-search" data-target={m.name}
@@ -321,6 +300,60 @@ export function ServerRow({
           </div>
         ))}
       </div>
+  );
+  const row = usePickRow("server", m.name);
+  const pickSummary = row ? { "data-action-click": "extensions.pick", "data-target": m.name } : {};
+  if (detail) {
+    return (
+      <div className="srv mcp-server ext-detail" data-st={m.state} data-local={m.localOverride ? "" : undefined} aria-busy={!!busy}>
+        <div className="ext-detail-hd">
+          <i className="pip" />
+          <b>{m.name}</b>
+          <span className="ext-chip" data-st={m.state}>{t(MCP_STATE[m.state] ?? m.state)}</span>
+        </div>
+        {about}
+        {launch}
+        {held}{upgrade}{following}
+        {why && <div className="why" role={failed ? "alert" : undefined}>{why}</div>}
+        {actions}
+        {confirm}
+        <dl className="ext-facts">
+          {m.transport && <><dt>{t("ext.transport")}</dt><dd>{m.transport}</dd></>}
+          {m.source && <><dt>{t("common.source")}</dt><dd>{m.source}</dd></>}
+          {m.httpStatus ? <><dt>HTTP</dt><dd>{m.httpStatus}</dd></> : null}
+        </dl>
+        {load}
+        {tools.length > 0 && <h4 className="ext-detail-sub">{t("ext.n_tools", { n: m.tools })}</h4>}
+        {tools.length > 0 && peek}
+      </div>
+    );
+  }
+  if (!tools.length) {
+    return (
+      <div className="srv mcp-server" data-st={m.state} data-local={m.localOverride ? "" : undefined} aria-busy={!!busy} data-picked={row?.on ? "" : undefined}>
+        <div className="srv-hd" {...pickSummary} onClick={row ? (e) => { if (onRowItself(e.target)) row.pick(); } : undefined}>{head}</div>
+        {about}
+        {launch}
+        {held}{upgrade}{following}
+        {why && <div className="why" role={failed ? "alert" : undefined}>{why}</div>}
+        {actions}
+        {confirm}
+      </div>
+    );
+  }
+  return (
+    // Asking to remove has to open the row: the confirmation lives inside the
+    // fold. A row with withheld tools opens too, so the approval is not behind a click.
+    <details className="srv mcp-server" data-st={m.state} data-local={m.localOverride ? "" : undefined} aria-busy={!!busy} open={confirming || heldTools.length > 0 || !!why || undefined} data-picked={row?.on ? "" : undefined}>
+      <summary {...pickSummary} onClick={row ? (e) => { e.preventDefault(); if (onRowItself(e.target)) row.pick(); } : undefined}>{head}</summary>
+      {about}
+      {launch}
+      {held}{upgrade}{following}
+      {why && <div className="why" role={failed ? "alert" : undefined}>{why}</div>}
+      {actions}
+      {confirm}
+      {load}
+      {peek}
     </details>
   );
 }

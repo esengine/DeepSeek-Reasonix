@@ -44,7 +44,7 @@ export function Nav({ at, onGo, onFiles, onHome, onRail, onFeedback, onNew, feed
       data-action={account ? "chrome.account" : action}
       aria-label={t(label)}
       aria-current={(sec ?? null) === at ? "page" : undefined}
-      onClick={() => (key === "files" ? onFiles() : sec === null ? (at === null ? onRail() : onHome()) : onGo(sec || undefined))}
+      onClick={() => (key === "files" ? onFiles() : sec === null ? (at === null ? onRail() : onHome()) : onGo(key === "ext" ? "extensions" : sec || undefined))}
     >
       {key === "files" ? <StudioIcon name="file" aria-hidden="true" /> : <svg viewBox="0 0 16 16" aria-hidden="true">
         {key === "chat" ? <path d={CHAT} /> : ICON[key]}

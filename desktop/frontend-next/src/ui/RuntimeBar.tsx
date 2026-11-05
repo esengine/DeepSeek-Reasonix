@@ -30,7 +30,7 @@ export function RuntimeBar({ notices, onSeen, watch, onStall, onSettings }: {
             <span className="t">{wording ? t(wording.text, wording.vars) : n.text}</span>
             {why && <span className="why">{why}</span>}
             {n.code === EXTENSION_SKIPPED && wording?.vars && onSettings && (
-              <button data-action="settings.section" data-value="ext" onClick={() => onSettings("ext")}>{t("app.open_tools_and_integrations")}</button>
+              <button data-action="settings.section" data-value="ext" onClick={() => onSettings("extensions")}>{t("app.open_tools_and_integrations")}</button>
             )}
             <button onClick={() => onSeen(n.id)}>{t("common.got_it")}</button>
           </div>

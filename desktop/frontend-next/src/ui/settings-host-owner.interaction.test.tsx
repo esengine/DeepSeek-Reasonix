@@ -29,7 +29,7 @@ it("keeps machine reads separate from active-pane account operations", async () 
   const remoteLogout = vi.spyOn(remote, "accountLogout").mockResolvedValue();
   const localLogout = vi.spyOn(local, "accountLogout");
   render(<App hub={hub} />);
-  await userEvent.click(await screen.findByRole("button", { name: /扩展/ }));
+  await userEvent.click(await screen.findByRole("button", { name: "设置" }));
   await userEvent.click(await screen.findByRole("tab", { name: /^数据/ }, { timeout: 10000 }));
   await screen.findAllByText("This machine fact");
   expect(remoteMemories).not.toHaveBeenCalled();
@@ -70,7 +70,7 @@ it.each(["second", "remote"])("uses the active local workspace, or first local f
   const storage = vi.spyOn(first, "storage");
   rememberActivePane(active);
   render(<App hub={hub} />);
-  await userEvent.click(await screen.findByRole("button", { name: /扩展/ }));
+  await userEvent.click(await screen.findByRole("button", { name: "设置" }));
   await userEvent.click(await screen.findByRole("tab", { name: /^数据/ }));
   await screen.findAllByText(`${expected} fact`);
   await userEvent.click(document.querySelector<HTMLButtonElement>('.memdetail [data-action="memory.forget"]')!);
@@ -87,7 +87,7 @@ it.each(["second", "remote"])("uses the active local workspace, or first local f
     await userEvent.keyboard("{Escape}");
     const tabs = within(screen.getByRole("tablist", { name: "会话面板" })).getAllByRole("tab");
     await userEvent.click(tabs[0]);
-    await userEvent.click(screen.getByRole("button", { name: /扩展/ }));
+    await userEvent.click(screen.getByRole("button", { name: "设置" }));
     await userEvent.click(await screen.findByRole("tab", { name: /^数据/ }));
     await screen.findAllByText("first fact");
     expect(screen.queryByText("second fact")).toBeNull();
@@ -120,7 +120,7 @@ it("saves a second-local-only default through the owner that offered it", async 
   const switched = vi.spyOn(second, "setModel");
   rememberActivePane("second");
   render(<App hub={hub} />);
-  await userEvent.click(await screen.findByRole("button", { name: /扩展/ }));
+  await userEvent.click(await screen.findByRole("button", { name: "设置" }));
   await userEvent.click(await screen.findByRole("tab", { name: /^模型/ }));
   await userEvent.click(await waitFor(() => document.querySelector<HTMLButtonElement>('[data-action="settings.open-page"][data-target="model"]')!));
   const select = await screen.findByRole("combobox", { name: "默认模型" }) as HTMLSelectElement;

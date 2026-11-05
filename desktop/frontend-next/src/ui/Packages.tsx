@@ -4,6 +4,7 @@ import type { AgentPort, PluginExport, PluginItem, PluginPackage } from "../port
 import { Switch } from "./Switch";
 import { CopyButton } from "./CopyButton";
 import { reason } from "../i18n/kernel";
+import { onRowItself, usePickRow } from "./extpick";
 
 interface Props {
   port: AgentPort;
@@ -97,11 +98,13 @@ function summary(p: PluginPackage): string {
   return parts.join(" · ");
 }
 
-function Package({
-  p, hidden, port, onDone, onReloadError, onReloaded, updating, onUpdate,
+export function Package({
+  p, hidden, port, onDone, onReloadError, onReloaded, updating, onUpdate, detail = false,
 }: {
   p: PluginPackage; port: AgentPort; onDone: () => void; updating: string; onUpdate: () => void;
   hidden: boolean;
+  // Drawn as the extensions page's detail pane: everything at once, no fold.
+  detail?: boolean;
   onReloadError: (message: string) => void;
   onReloaded: () => void;
 }) {
@@ -242,12 +245,45 @@ function Package({
     </>
   );
 
+  const row = usePickRow("package", p.name);
+  const peek = <PackagePeek p={p} />;
+  if (detail) {
+    return (
+      <div className="srv ext-detail" data-extension-name={p.name} data-st={p.enabled ? "ready" : "disabled"} aria-busy={locked}>
+        <div className="ext-detail-hd">
+          <i className="pip" />
+          <b>{p.name}</b>
+          {p.version && <span className="ext-ver">{p.version}</span>}
+          <span className="ext-chip" data-on={p.enabled ? "" : undefined}>{t(p.enabled ? "ext.state_enabled" : "ext.state_disabled")}</span>
+        </div>
+        {p.description && <p className="ext-detail-ds">{p.description}</p>}
+        {actions}
+        {confirm}
+        {notes}
+        <dl className="ext-facts">
+          {p.source && <><dt>{t("common.source")}</dt><dd>{p.source}</dd></>}
+          <dt>{t("ext.location")}</dt><dd>{p.root}</dd>
+          {p.manifestKind && <><dt>{t("ext.format")}</dt><dd>{p.manifestKind}</dd></>}
+        </dl>
+        <h4 className="ext-detail-sub">{t("ext.it_provides")}</h4>
+        {peek}
+      </div>
+    );
+  }
   return (
-    <details className="srv" hidden={hidden} data-extension-name={p.name} data-st={p.enabled ? "ready" : "disabled"} aria-busy={locked} open={confirming || !!failed || !!exported || !!p.error || undefined}>
-      <summary>{head}</summary>
+    <details className="srv" hidden={hidden} data-extension-name={p.name} data-picked={row?.on ? "" : undefined} data-st={p.enabled ? "ready" : "disabled"} aria-busy={locked} open={confirming || !!failed || !!exported || !!p.error || undefined}>
+      <summary data-action-click={row ? "extensions.pick" : undefined} data-target={row ? p.name : undefined}
+        onClick={row ? (e) => { e.preventDefault(); if (onRowItself(e.target)) row.pick(); } : undefined}>{head}</summary>
       {confirm}
       {notes}
       {actions}
+      {peek}
+    </details>
+  );
+}
+
+function PackagePeek({ p }: { p: PluginPackage }) {
+  return (
       <div className="peek">
         {/* What executes comes first: it is the part of a package a user has to
             know about, and it is also the part they cannot see from a name. */}
@@ -292,7 +328,6 @@ function Package({
           </div>
         ))}
       </div>
-    </details>
   );
 }
 

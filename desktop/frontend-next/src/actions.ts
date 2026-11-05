@@ -369,6 +369,7 @@ export const ACTIONS: UIAction[] = [
   { id: "extensions.cancel", kind: "navigation", target: "none", proof: "interaction" },
   { id: "extensions.finish", kind: "navigation", target: "none", proof: "interaction" },
   { id: "extensions.add", kind: "navigation", target: "none", proof: "interaction" },
+  { id: "extensions.pick", kind: "view", target: "entity", proof: "interaction" },
   { id: "extensions.pick-folder", kind: "shell-native", target: "none", proof: "interaction" },
   { id: "folders.pick", kind: "shell-native", target: "none", proof: "interaction" },
   { id: "folders.add", kind: "kernel-mutation", target: "none", proof: "authority-effect" },

@@ -239,3 +239,46 @@
 .deep-crumb b { color: var(--text); font-weight: var(--w-semi); }
 @keyframes deep-in { from { opacity: 0; transform: translateX(16px); } }
 @media (prefers-reduced-motion: reduce) { .deep-page { animation: none; } }
+
+.prefs-sheet[data-solo] { grid-template-columns: minmax(0, 1fr) auto; grid-template-rows: auto minmax(0, 1fr); }
+.prefs-sheet[data-solo] .prefs-find { display: none; }
+.prefs-sheet[data-solo]::before, .prefs-sheet[data-solo]::after { display: none; }
+.prefs-sheet[data-solo] .prefs-hd h1 { border-bottom: 1px solid var(--hair); }
+.prefs-sheet[data-solo] .prefs-hd h1 { grid-column: 1; grid-row: 1; padding: 16px 22px 8px; font-size: var(--fs-title); }
+.prefs-sheet[data-solo] .prefs-actions { grid-column: 2; grid-row: 1; border-bottom: 1px solid var(--hair); background: var(--surface); }
+.prefs-sheet[data-solo] .prefs-main { grid-column: 1 / -1; grid-row: 2; }
+.prefs-sheet[data-solo] .prefs-col { max-width: none; }
+.ext-md { display: grid; grid-template-columns: minmax(300px, 400px) minmax(0, 1fr); gap: 16px; align-items: start; }
+.ext-md-list { min-width: 0; }
+.ext-md-list .grp { padding: 10px 6px; }
+.ext-md-list .srv > :not(summary):not(.srv-hd) { display: none; }
+.ext-md-list .srv > summary, .ext-md-list .srv > .srv-hd, .ext-md-list .skrow { cursor: pointer; border-radius: var(--r-md); }
+.ext-md-list .srv { border-top: 0; padding: 2px 0; }
+.ext-md-list .srv > summary, .ext-md-list .srv > .srv-hd { padding: 8px 10px; }
+.ext-md-list .srv > summary:hover, .ext-md-list .srv > .srv-hd:hover, .ext-md-list .skrow:hover { background: var(--overlay); }
+.ext-md-list .srv[data-picked] > summary, .ext-md-list .srv[data-picked] > .srv-hd, .ext-md-list .skrow[data-picked] { background: var(--accent-wash); }
+.ext-md-list .srv .srv-sub > .meta { display: none; }
+.ext-md-list .skrow .sk-more, .ext-md-list .skrow .face .act { display: none; }
+.ext-md-list .grp .hint, .ext-md-list .grp .apply { display: none; }
+.ext-detail-pane {
+  position: sticky; top: 0; display: flex; flex-direction: column; gap: 12px; min-width: 0; padding: 16px 18px;
+  border: 1px solid var(--border); border-radius: var(--r-md); background: var(--raised);
+}
+.ext-detail-pane .ext-detail { display: flex; flex-direction: column; gap: 10px; padding: 0; border: 0; }
+.ext-detail-hd { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.ext-detail-hd > b { color: var(--text); font: var(--w-semi) var(--fs-lead) var(--ui); overflow-wrap: anywhere; }
+.ext-ver { color: var(--faint); font: var(--w-med) var(--fs-meta) var(--mono); }
+.ext-chip { padding: 0 8px; border-radius: var(--r-pill); background: var(--overlay); color: var(--muted); font: var(--w-med) var(--fs-micro)/1.8 var(--ui); }
+.ext-chip[data-on], .ext-chip[data-st="ready"] { background: color-mix(in srgb, var(--ok) 12%, transparent); color: var(--ok-ink); }
+.ext-chip[data-st="failed"] { background: color-mix(in srgb, var(--err) 10%, transparent); color: var(--err-ink); }
+.ext-detail-ds { margin: 0; color: var(--muted); font: var(--w-med) var(--fs-ui)/1.6 var(--ui); }
+.ext-detail .acts { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; }
+.ext-facts { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 6px 14px; margin: 0; padding: 10px 12px; border-radius: var(--r-md); background: var(--page); }
+.ext-facts dt { color: var(--faint); font: var(--w-med) var(--fs-meta) var(--ui); }
+.ext-facts dd { margin: 0; color: var(--text); font: var(--w-reg) var(--fs-meta) var(--mono); overflow-wrap: anywhere; }
+.ext-detail-sub { margin: 4px 0 0; color: var(--muted); font: var(--w-semi) var(--fs-meta) var(--ui); }
+.ext-detail .peek { margin: 0; }
+.ext-detail-none { margin: 0; padding: 24px 0; color: var(--faint); font: var(--w-med) var(--fs-ui)/1.6 var(--ui); text-align: center; }
+.ext-detail-foot { margin: 0; padding-top: 10px; border-top: 1px solid var(--hair); color: var(--faint); font: var(--w-med) var(--fs-micro)/1.6 var(--ui); }
+@container (max-width: 720px) { .ext-md { grid-template-columns: minmax(0, 1fr); } .ext-detail-pane { position: static; } }
+.ext-md-list .srv .srv-sub > .fold::before { display: none; }

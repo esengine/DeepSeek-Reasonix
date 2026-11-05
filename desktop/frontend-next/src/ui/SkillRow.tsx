@@ -10,6 +10,7 @@ import { CopyButton } from "./CopyButton";
 import { SkillUpdate } from "./SkillUpdate";
 import { SkillRemove } from "./SkillRemove";
 import { useDismiss } from "./dismiss";
+import { onRowItself, usePickRow } from "./extpick";
 import { StudioIcon } from "./StudioIcon";
 
 // One skill, and the two things a reader wants from it: whether the model can
@@ -60,10 +61,12 @@ function driftNote(source: SkillEntry["source"]): { text: string; says: string }
 }
 
 export function SkillRow({
-  sk, implicit, port, onDone, root, onFailed,
+  sk, implicit, port, onDone, root, onFailed, detail = false,
 }: {
   sk: SkillEntry; implicit: boolean; port: AgentPort; onDone: () => void; root: string;
   onFailed: (why: string) => void;
+  // Drawn as the extensions page's detail pane: everything at once.
+  detail?: boolean;
 }) {
   const [owner, setOwner] = useState({ port, root });
   const currentOwner = useRef(owner);
@@ -100,9 +103,45 @@ export function SkillRow({
     }
   };
   const toggle = () => act(() => port.setSkillEnabled(sk.name, !sk.enabled, "project", root || undefined));
+  const row = usePickRow("skill", sk.name);
+  const dialogs = <>
+    {updating && <SkillUpdate port={port} name={sk.name} onClose={() => setUpdating(false)} onDone={() => { setUpdating(false); onDone(); }} />}
+    {removing && <SkillRemove port={port} sk={sk} onClose={() => setRemoving(false)} onDone={() => { setRemoving(false); onDone(); }} />}
+  </>;
+  if (detail) {
+    return (
+      <div className="srv ext-detail" data-off={sk.enabled ? undefined : ""}>
+        <div className="ext-detail-hd">
+          <b>{command || sk.name}</b>
+          {command && <CopyButton key={command} text={command} iconOnly label={t("ext.copy_invocation_command", { command })} />}
+          <span className="ext-chip" data-on={sk.enabled ? "" : undefined}>{t(sk.enabled ? "ext.state_enabled" : "ext.state_disabled")}</span>
+          {drift && <i className="w" data-drift={sk.source?.state} title={drift.says}>{drift.text}</i>}
+        </div>
+        <p className="ext-detail-ds">{sk.description || t("ext.no_description_written")}</p>
+        {note.text && <p className="ext-detail-ds">{t(note.text)}</p>}
+        {drift && <p className="ext-detail-ds">{drift.says}</p>}
+        {(updatable || removable) && (
+          <span className="acts">
+            {updatable && !updating && <button className="act" data-action="skills.update-open" data-target={sk.name} onClick={() => setUpdating(true)}>{t("ext.update_from_source_folder")}</button>}
+            {removable && !removing && <button className="act ghost" data-action="skills.remove-open" data-target={sk.name} onClick={() => setRemoving(true)}>{t("ext.remove_2")}</button>}
+          </span>
+        )}
+        {dialogs}
+        <dl className="ext-facts">
+          <dt>{t("ext.scope")}</dt><dd>{sk.plugin || t(SCOPE[sk.scope ?? ""] ?? "") || sk.scope}</dd>
+          {sk.path && <><dt>{t("ext.location")}</dt><dd>{sk.path}</dd></>}
+          {sk.source?.path && <><dt>{t("common.source")}</dt><dd>{sk.source.path}</dd></>}
+        </dl>
+        <SkillDeclarations sk={sk} />
+        <SkillSpecInfo sk={sk} />
+      </div>
+    );
+  }
   return (
     <>
-    <div className="skrow" data-off={sk.enabled ? undefined : ""} data-local={local ? "" : undefined}>
+    <div className="skrow" data-off={sk.enabled ? undefined : ""} data-local={local ? "" : undefined} data-picked={row?.on ? "" : undefined}
+      data-action-click={row ? "extensions.pick" : undefined} data-target={row ? sk.name : undefined}
+      onClick={row ? (e) => { if (onRowItself(e.target)) row.pick(); } : undefined}>
       <span className="sk-main">
         <span className="sk-line">
           <span className="nm">
@@ -129,8 +168,7 @@ export function SkillRow({
       <SkillDeclarations sk={sk} />
       <SkillSpecInfo sk={sk} />
     </div>
-    {updating && <SkillUpdate port={port} name={sk.name} onClose={() => setUpdating(false)} onDone={() => { setUpdating(false); onDone(); }} />}
-    {removing && <SkillRemove port={port} sk={sk} onClose={() => setRemoving(false)} onDone={() => { setRemoving(false); onDone(); }} />}
+    {dialogs}
     </>
   );
 }

@@ -224,7 +224,7 @@ export function Sidebar({
       { id: "storage", label: t("common.storage"), icon: "file", keywords: "storage disk data 存储 磁盘 数据",
         run: () => onSettings("storage") },
       { id: "ext", label: t("session.tools_and_integrations"), icon: "plug", keywords: "tools mcp skills 工具 集成",
-        run: () => onSettings("ext") },
+        run: () => onSettings("extensions") },
       { id: "remote", label: t("session.where_it_runs"), icon: "server", keywords: "ssh local remote 运行环境",
         run: () => onSettings("remote") },
       { id: "providers", label: t("common.model_services"), icon: "layers", keywords: "model provider 模型 来源 服务",
@@ -409,7 +409,7 @@ export function Sidebar({
                 data-value={opensFiles ? undefined : section}
                 aria-label={name}
                 title={name}
-                onClick={() => (opensFiles ? onFiles() : onSettings(mark === "usage" ? "usage:usage" : section))}
+                onClick={() => (opensFiles ? onFiles() : onSettings(mark === "usage" ? "usage:usage" : mark === "ext" ? "extensions" : section))}
               >
                 {mark === "files" ? <StudioIcon name="file" aria-hidden="true" />
                   : <svg viewBox="0 0 16 16" width={16} height={16} fill="none" stroke="currentColor" strokeWidth={1.45} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{ICON[mark as Section]}</svg>}

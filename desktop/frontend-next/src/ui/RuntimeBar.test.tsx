@@ -94,7 +94,7 @@ describe("an extension left out because its sidecar is not running", () => {
     const onSettings = vi.fn();
     render(<RuntimeBar notices={[skipped()]} onSeen={() => {}} onSettings={onSettings} />);
     await userEvent.click(screen.getByRole("button", { name: "打开「工具与集成」" }));
-    expect(onSettings).toHaveBeenCalledWith("ext");
+    expect(onSettings).toHaveBeenCalledWith("extensions");
   });
 
   it("can still be dismissed", async () => {

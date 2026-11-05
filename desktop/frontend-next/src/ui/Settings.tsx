@@ -32,6 +32,8 @@ import type { RemoteHost } from "../port/remote";
 import { AddPlugin } from "./AddPlugin";
 import { Packages } from "./Packages";
 import { ExtAddMenu, type ExtAddWay } from "./ExtAddMenu";
+import { ExtDetail, ExtSplit, firstPick } from "./ExtDetail";
+import type { ExtPicked } from "./extpick";
 import { ExtTabs, MarketGroup } from "./Market";
 import { InstalledLocation } from "./InstalledLocation";
 import { Switch } from "./Switch";
@@ -98,7 +100,11 @@ export function Settings({ hub, onError, port, networkPort, localWorkspacePort, 
   const wide = useSyncExternalStore(onSettingsWideChange, settingsWide, settingsWide);
   const homePort = networkPort ?? port;
   const localPort = localWorkspacePort ?? homePort;
-  const [openedSection, openedAnchor = ""] = (opened ?? "").split(":", 2);
+  const [openedName, openedAnchor = ""] = (opened ?? "").split(":", 2);
+  // "extensions" is a destination of its own: the ext section drawn as a page.
+  const solo = openedName === "extensions";
+  const openedSection = solo ? "ext" : openedName;
+  const [picked, setPicked] = useState<ExtPicked | null>(null);
   const [at, setAt] = useState<Section>(homeFor((openedSection as Section) || "session", openedAnchor));
   const [pages, setPages] = useState<Partial<Record<Section, string>>>(() => {
     const home = homeFor((openedSection as Section) || "session", openedAnchor);
@@ -360,9 +366,9 @@ export function Settings({ hub, onError, port, networkPort, localWorkspacePort, 
       onMouseUp={(e) => { if (veiled.current && e.target === e.currentTarget && !updatingPkg.applying) close(); }}
       data-action-mouseup="settings.close"
     >
-      <div className="prefs-sheet" role="dialog" aria-modal="true" aria-labelledby="prefs-title" data-wide={wide || undefined}>
+      <div className="prefs-sheet" role="dialog" aria-modal="true" aria-labelledby="prefs-title" data-wide={wide || undefined} data-solo={solo ? "ext" : undefined}>
       <div className="prefs-hd">
-        <h1 id="prefs-title">{t("common.settings")}</h1>
+        <h1 id="prefs-title">{t(solo ? "ext.extension" : "common.settings")}</h1>
         {/* 原来这里挂着一句「改动立刻生效；需要重建运行时的……」。它对三档里的
             两档说了话，而且要读的人自己判断手上这一项属于哪一档 —— 那句话现在
             落在每一个设置块自己身上。 */}
@@ -429,10 +435,10 @@ export function Settings({ hub, onError, port, networkPort, localWorkspacePort, 
       </div>
       <ConfigTrouble port={port} onRepaired={onChanged} />
       <div className="prefs-body">
-        <SettingsNav at={at} values={nav} shown={shown} danger={danger} disabled={updatingPkg.applying} onSelect={(section) => { if (section !== at || deepAt) navigation.leave(() => { setLanded(""); setDeep(null); setAt(section); }); }} page={pageNow} onPage={(section, page) => navigation.leave(() => { setLanded(""); setPages((p) => ({ ...p, [section]: page })); })} />
+        {!solo && <SettingsNav at={at} values={nav} shown={shown} danger={danger} disabled={updatingPkg.applying} onSelect={(section) => { if (section !== at || deepAt) navigation.leave(() => { setLanded(""); setDeep(null); setAt(section); }); }} page={pageNow} onPage={(section, page) => navigation.leave(() => { setLanded(""); setPages((p) => ({ ...p, [section]: page })); })} />}
 
         <div className="prefs-main" key={at} role="tabpanel" aria-labelledby={pageNow ? `prefs-${at}-${pageNow}` : `prefs-${at}`} data-sec={at}>
-          <SettingsTitle at={at} />
+          {!solo && <SettingsTitle at={at} />}
           <Boundary
             fallback={
               <div className="find" data-lvl="err" role="alert">
@@ -444,7 +450,7 @@ export function Settings({ hub, onError, port, networkPort, localWorkspacePort, 
           {/* Keyed on the section: replacing this column is the navigation,
               and it is the one thing here whose mount really is the cause. */}
           <SettingDeepContext.Provider value={{ pages: true, open: deepAt, section: t(SECTION_NAME[at] ?? at), go: (id) => navigation.leave(() => { setLanded(""); setDeep(id); }) }}>
-          <div className="prefs-col" key={`${at}:${deepAt ?? ""}`} data-cols={TWO_COLUMN.includes(at) && !deepAt ? 2 : undefined} data-deep={deepAt ?? undefined}>
+          <div className="prefs-col" key={`${at}:${deepAt ?? ""}`} data-cols={TWO_COLUMN.includes(at) && !deepAt && !solo ? 2 : undefined} data-deep={deepAt ?? undefined}>
           <SettingsPageStyle section={at} page={pageNow} />
           {/* Every refused write on every page lands in one state, so it is
               said in one place. Copied onto the pages somebody remembered, it
@@ -615,6 +621,11 @@ export function Settings({ hub, onError, port, networkPort, localWorkspacePort, 
               {extTab === "market" && <MarketGroup port={port} onApplying={applyingChanged} onInstalled={afterExtChange} onViewInstalled={(kind, name) => { setInstalledTarget({ kind, name }); setExtTab("installed"); }} account={acct} onSignIn={() => go("account", "account")} />}
               {extTab === "installed" && (
               <>
+              <ExtSplit on={solo} picked={picked ?? firstPick(packages, looseMcp, looseSkills)} onPick={setPicked} detail={
+                <ExtDetail picked={picked ?? firstPick(packages, looseMcp, looseSkills)} packages={packages} mcp={mcp} skills={skills} port={port} root={scopeAt} live={live} implicit={implicit}
+                  updating={updatingPkg.name} onChanged={afterExtChange} onReloadError={reload.report} onReloaded={reload.applied}
+                  onUpdate={(name) => setUpdatingPkg((p) => ({ ...p, name, applying: false }))} onFailed={setFailed} />
+              }>
                 {scope && <ScopeBar scope={scope} scopes={scopes} onPick={setScopeAt} />}
                 <ModHost port={port} />
                 <Group id="plugins"
@@ -685,6 +696,7 @@ export function Settings({ hub, onError, port, networkPort, localWorkspacePort, 
                 >
                   {reload.note}
                 </Group>
+              </ExtSplit>
               </>
               )}
             </>

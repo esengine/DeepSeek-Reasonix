@@ -106,7 +106,7 @@ export function MeterRail({ tps, trail, running, speed, metrics, ctx, mcp, compa
             mcp={mcp}
             percent={contextPercent}
             compact={compact}
-            onManage={() => { closeMeter(); onSettings("ext"); }}
+            onManage={() => { closeMeter(); onSettings("extensions"); }}
           />
         </div>
       )}
