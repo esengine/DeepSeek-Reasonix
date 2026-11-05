@@ -269,7 +269,7 @@ export const SETTINGS: SettingEntry[] = [
   { section: "memory", anchor: "memory", title: "data.memory", scope: "chosen", apply: "immediate", keywords: ["记住", "忘记", "事实"] },
   { section: "usage", anchor: "currency", title: "usage.cost_display_currency", scope: "machine", apply: "immediate", keywords: ["币种", "货币", "人民币", "美元", "currency", "CNY", "USD", "汇率"] },
   { section: "usage", anchor: "upload-usage", title: "usage.upload_volume", scope: "machine", apply: "none", keywords: ["流量", "上传", "带宽", "请求", "upload", "traffic", "bandwidth"] },
-  { section: "usage", anchor: "usage", title: "usage.usage_cost", scope: "machine", apply: "none", keywords: ["token", "花费", "缓存命中"] },
+  { section: "usage", anchor: "usage", page: true, title: "usage.usage_cost", scope: "machine", apply: "none", keywords: ["token", "花费", "缓存命中"] },
   { section: "storage", anchor: "storage", page: true, title: "common.storage", scope: "machine", apply: "restart", keywords: ["搬家", "迁移", "磁盘", "位置"] },
   { section: "advanced", anchor: "elsewhere", title: "settings.not_in_this_version_yet", scope: "machine", apply: "none", keywords: ["配置文件"] },
 
