@@ -59,6 +59,7 @@ import { DisplaySettings } from "./DisplaySettings";
 import { SectionCard } from "./SectionCard";
 import { DataSettings } from "./DataSettings";
 import { AgentPresets } from "./AgentPresets";
+import { SettingDeepContext } from "./SettingDeep";
 import { Account } from "./Account";
 import { Providers } from "./Providers";
 import { activeKind, groupVendors } from "./Models";
@@ -109,6 +110,7 @@ export function Settings({ hub, onError, port, networkPort, localWorkspacePort, 
   // 当前这一页，而为了搜索把每一页都挂起来会让隐藏页面开始发请求。
   const [query, setQuery] = useState("");
   const [landed, setLanded] = useState(openedAnchor);
+  const [deepAt, setDeep] = useState<string | null>(() => (SETTING_AT(openedAnchor)?.page ? openedAnchor : null));
   // Opened from the composer's effort menu: the running source's editor opens
   // on its reasoning fields. The model ref's first segment is the source name.
   const declare = openedAnchor === "effort-declare" ? status?.modelRef?.split("/")[0] : undefined;
@@ -337,6 +339,7 @@ export function Settings({ hub, onError, port, networkPort, localWorkspacePort, 
     const section = homeFor(requested, anchor);
     navigation.leave(() => {
       setAt(section);
+      setDeep(SETTING_AT(anchor)?.page ? anchor : null);
       const target = pageOf(section, anchor);
       if (target) setPages((p) => ({ ...p, [section]: target }));
       setQuery("");
@@ -426,7 +429,7 @@ export function Settings({ hub, onError, port, networkPort, localWorkspacePort, 
       </div>
       <ConfigTrouble port={port} onRepaired={onChanged} />
       <div className="prefs-body">
-        <SettingsNav at={at} values={nav} shown={shown} danger={danger} disabled={updatingPkg.applying} onSelect={(section) => { if (section !== at) navigation.leave(() => { setLanded(""); setAt(section); }); }} page={pageNow} onPage={(section, page) => navigation.leave(() => { setLanded(""); setPages((p) => ({ ...p, [section]: page })); })} />
+        <SettingsNav at={at} values={nav} shown={shown} danger={danger} disabled={updatingPkg.applying} onSelect={(section) => { if (section !== at || deepAt) navigation.leave(() => { setLanded(""); setDeep(null); setAt(section); }); }} page={pageNow} onPage={(section, page) => navigation.leave(() => { setLanded(""); setPages((p) => ({ ...p, [section]: page })); })} />
 
         <div className="prefs-main" key={at} role="tabpanel" aria-labelledby={pageNow ? `prefs-${at}-${pageNow}` : `prefs-${at}`} data-sec={at}>
           <SettingsTitle at={at} />
@@ -440,7 +443,8 @@ export function Settings({ hub, onError, port, networkPort, localWorkspacePort, 
           >
           {/* Keyed on the section: replacing this column is the navigation,
               and it is the one thing here whose mount really is the cause. */}
-          <div className="prefs-col" key={at} data-cols={TWO_COLUMN.includes(at) ? 2 : undefined}>
+          <SettingDeepContext.Provider value={{ pages: true, open: deepAt, section: t(SECTION_NAME[at] ?? at), go: (id) => navigation.leave(() => { setLanded(""); setDeep(id); }) }}>
+          <div className="prefs-col" key={`${at}:${deepAt ?? ""}`} data-cols={TWO_COLUMN.includes(at) && !deepAt ? 2 : undefined} data-deep={deepAt ?? undefined}>
           <SettingsPageStyle section={at} page={pageNow} />
           {/* Every refused write on every page lands in one state, so it is
               said in one place. Copied onto the pages somebody remembered, it
@@ -747,6 +751,7 @@ export function Settings({ hub, onError, port, networkPort, localWorkspacePort, 
             </Group>
           )}
           </div>
+          </SettingDeepContext.Provider>
         </Boundary>
         </div>
       </div>

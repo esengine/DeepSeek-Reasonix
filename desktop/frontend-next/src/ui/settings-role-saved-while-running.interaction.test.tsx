@@ -19,7 +19,7 @@ function draw(port: AgentPort) {
       theme="light" onTheme={() => {}} contrast="" onContrast={() => {}} weight="" onWeight={() => {}}
       look={{} as never} onLook={() => {}} reloadThemes={() => {}}
       onClose={() => {}} onChanged={() => {}} onError={() => {}}
-      at="model"
+      at="model:model"
       account={null} accountUnread="" reloadAccount={() => {}}
     />,
   );

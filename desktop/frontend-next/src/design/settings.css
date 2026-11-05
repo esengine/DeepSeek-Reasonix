@@ -219,3 +219,23 @@
 .rmthost-menu > button { min-height: 30px; padding: 4px 10px; border: 0; border-radius: var(--r-sm); background: transparent; color: var(--text); font: var(--w-med) var(--fs-ui) var(--ui); text-align: start; white-space: nowrap; cursor: pointer; }
 .rmthost-menu > button:hover:not(:disabled) { background: var(--overlay); }
 .rmthost-menu > button[data-danger] { color: var(--err-ink); }
+.grp-link { padding: 0; }
+.grp-row {
+  display: flex; align-items: center; gap: 12px; width: 100%; padding: 12px 14px; box-sizing: border-box;
+  border: 0; border-radius: inherit; background: transparent; color: var(--text); text-align: start; cursor: pointer;
+}
+.grp-row:hover { background: var(--overlay); }
+.grp-row-t { display: flex; flex: 1; flex-direction: column; gap: 2px; min-width: 0; }
+.grp-row-t b { font: var(--w-med) var(--fs-ui)/1.4 var(--ui); }
+.grp-row-t small { overflow: hidden; color: var(--faint); font: var(--w-reg) var(--fs-meta)/1.5 var(--ui); white-space: nowrap; text-overflow: ellipsis; }
+.grp-row > .now { flex: none; color: var(--muted); font: var(--w-med) var(--fs-meta) var(--ui); }
+.grp-row > .studio-icon { flex: none; width: 14px; height: 14px; color: var(--faint); }
+.prefs-col[data-deep] :not(.deep-page, .deep-page *, :has(.deep-page)) { display: none; }
+.prefs-col[data-deep] :is(.prefs-card, .grp):has(.deep-page) { padding: 0; border: 0; background: none; box-shadow: none; }
+.deep-page { display: flex; flex-direction: column; gap: 12px; animation: deep-in var(--t-panel) var(--ease-out, ease-out); }
+.deep-crumb { display: flex; align-items: center; gap: 6px; color: var(--faint); font: var(--w-med) var(--fs-meta) var(--ui); }
+.deep-crumb button { padding: 0; border: 0; background: none; color: var(--muted); font: inherit; cursor: pointer; }
+.deep-crumb button:hover { color: var(--text); text-decoration: underline; }
+.deep-crumb b { color: var(--text); font-weight: var(--w-semi); }
+@keyframes deep-in { from { opacity: 0; transform: translateX(16px); } }
+@media (prefers-reduced-motion: reduce) { .deep-page { animation: none; } }

@@ -1,6 +1,7 @@
 import { t } from "../i18n";
 import { SETTING_AT, type SettingScope } from "./prefsnav";
 import type { ReactNode } from "react";
+import { SettingDeep } from "./SettingDeep";
 
 // id is required, and that is the whole enforcement: a settings block cannot
 // be written without naming itself, and a name the catalogue does not carry
@@ -12,6 +13,7 @@ export function Group({
   id: string; title: string; hint?: string; now?: string; action?: ReactNode; children?: ReactNode;
 }) {
   return (
+    <SettingDeep id={id} title={title} now={now} hint={hint}>
     <section className="grp" id={`set-${id}`} data-setting={id}>
       <div className="grp-hd">
         <h3>{title}</h3>
@@ -25,6 +27,7 @@ export function Group({
           as three alarms. */}
       <ApplyNote id={id} />
     </section>
+    </SettingDeep>
   );
 }
 

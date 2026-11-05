@@ -211,6 +211,7 @@ export const SETTINGS: Messages = {
   "settings.tool_approvals": { zh: "工具批准", en: "Tool approvals" },
   "settings.type_this_code_into_the": { zh: "在浏览器里打开的页面输入这串代码。没自动打开就手动访问 {uri}", en: "Type this code into the page your browser opened. If none opened, go to {uri}" },
   "settings.use_send_now_in_the": { zh: "可在待发送队列中选择“立即发送”来停止当前回复并开始新一轮。暂停、编辑和取回仍然可用。", en: "Use Send now in the queue to stop the current response and start a new turn. Hold, edit, and take back remain available." },
+  "settings.where_you_are": { zh: "当前位置", en: "Where you are" },
   "settings.changes_apply_from_the_next_turn": { zh: "启用、停用、安装或更新后，从下一轮开始生效；正在跑的这一轮不受影响。改了扩展自己的代码，用「重载运行时」重新读取。", en: "Enabling, disabling, installing or updating takes effect from the next turn; the one running is unaffected. After editing an extension's own code, use Reload runtime to read it again." },
   "settings.used_for_posting_to_the": { zh: "用于社区发帖与崩溃问题跟进。与模型 API key 无关 —— 登录不会上传你的对话、代码或密钥。", en: "Used for posting to the community and following up crashes. Unrelated to your model API keys — signing in uploads none of your conversations, code or secrets." },
   "settings.warns_when_the_drive_holding": { zh: "项目或会话所在的磁盘剩余空间很少时提醒（不足 5 GB 或不足 3%），同一块盘长时间不重复提醒；只提醒，不会清理任何文件", en: "Warns when the drive holding your project or sessions runs short (under 5 GB or 3%), and does not repeat for the same drive for hours. It only warns; it never deletes anything." },

@@ -57,7 +57,7 @@ it("the settings table reads every source, then gives each job only what it can 
       status={{ preset: "balanced", toolApprovalMode: "ask", modelRef: chat[0].ref } as SessionStatus}
       theme="light" onTheme={() => {}} contrast="" onContrast={() => {}} weight="" onWeight={() => {}}
       look={{} as never} onLook={() => {}} reloadThemes={() => {}}
-      onClose={() => {}} onChanged={() => {}} onError={() => {}} at="model"
+      onClose={() => {}} onChanged={() => {}} onError={() => {}} at="model:model"
       account={null} accountUnread="" reloadAccount={() => {}}
     />,
   );
