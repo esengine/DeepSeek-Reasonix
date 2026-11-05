@@ -451,6 +451,8 @@ export const ACTIONS: UIAction[] = [
   { id: "remote.enable", kind: "view", target: "entity", proof: "interaction" },
   { id: "remote.read", kind: "repeatable", target: "entity", proof: "authority-effect" },
   { id: "workspace.add", kind: "kernel-mutation", target: "none", proof: "authority-effect" },
+  { id: "hero.suggest", kind: "view", target: "none", proof: "interaction" },
+  { id: "settings.changed-toggle", kind: "view", target: "none", proof: "interaction" },
   { id: "workspace.fold-all", kind: "view", target: "none", proof: "interaction" },
   { id: "workspace.add-cancel", kind: "view", target: "none", proof: "interaction" },
   { id: "root-missing.reselect", kind: "view", target: "none", proof: "interaction" },

@@ -417,3 +417,5 @@
 .contributions .row .sc { font-family: var(--ui); }
 .mkt-bar .seg button { font: var(--w-reg) var(--fs-meta) var(--ui); }
 .mkt-bar .seg button:is([aria-pressed="true"], [aria-checked="true"]) { font-weight: var(--w-med); }
+.changed-keys { display: flex; flex-direction: column; gap: 4px; margin: 4px 0 0; padding: 8px 0 2px; border-top: 1px solid var(--hair); list-style: none; }
+.changed-keys li { color: var(--muted); font: var(--w-reg) var(--fs-meta) var(--mono); }

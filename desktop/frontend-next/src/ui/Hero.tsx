@@ -5,9 +5,10 @@ interface HeroProps {
   needsProject: boolean;
   onOpen: () => void;
   onKeep: () => void;
+  onSuggest?: (text: string) => void;
 }
 
-export function Hero({ needsProject, onOpen, onKeep }: HeroProps) {
+export function Hero({ needsProject, onOpen, onKeep, onSuggest }: HeroProps) {
   return (
     <div className="hero">
       <SymbolMark />
@@ -25,6 +26,12 @@ export function Hero({ needsProject, onOpen, onKeep }: HeroProps) {
           <button className="stay" onClick={onKeep}>
             {t("chat.stay_where_i_am")}
           </button>
+        </div>
+      ) : onSuggest ? (
+        <div className="herostart">
+          {[t("chat.starter_explain_the_project"), t("chat.starter_find_the_regression"), t("chat.starter_write_tests")].map((text) => (
+            <button key={text} type="button" data-action="hero.suggest" onClick={() => onSuggest(text)}>{text}</button>
+          ))}
         </div>
       ) : null}
     </div>

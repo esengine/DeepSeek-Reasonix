@@ -556,6 +556,7 @@ function PaneView({ port, hub, rt, title, active, visible, sideHost, side, onFoc
         needsProject={needsProject}
         onOpenProject={onOpenProject}
         onKeepHere={onKeepHere}
+        onSuggest={(text) => setInserted((was) => ({ n: was.n + 1, text }))}
       />
       </ThoughtFolds.Provider></JobsLiveContext.Provider></AgentRunOpener.Provider></PlanLiveContext.Provider>
       </NewAnswerAnchor.Provider>

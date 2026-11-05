@@ -8,6 +8,7 @@ import { ThemeModeRow } from "./ThemeModeRow";
 import { UpdateMode } from "./UpdateMode";
 import { SectionCard } from "./SectionCard";
 import { SettingRow } from "./SettingRow";
+import { ChangedSettings } from "./ChangedSettings";
 
 const LANGS: [string, string][] = [
   ["", "look.follow_the_system"],
@@ -52,6 +53,7 @@ export function CommonSettings({ port, homePort, theme, onTheme, look, onLook }:
         <Notifications port={port} />
         <ThemeModeRow theme={theme} onTheme={onTheme} />
       </SectionCard>
+      <ChangedSettings port={port} />
     </>
   );
 }

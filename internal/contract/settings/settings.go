@@ -295,3 +295,18 @@ func (e Entry) check(id string, value any) error {
 	}
 	return nil
 }
+
+// Changed lists, in id order, the plain keys whose value on cfg differs from def.
+// A secret or structured key is never named: its value cannot be shown here.
+func Changed(cfg, def *config.Config) []string {
+	var out []string
+	for _, e := range All() {
+		a, errA := Read(cfg, e.ID)
+		b, errB := Read(def, e.ID)
+		if errA != nil || errB != nil || reflect.DeepEqual(a, b) {
+			continue
+		}
+		out = append(out, e.ID)
+	}
+	return out
+}

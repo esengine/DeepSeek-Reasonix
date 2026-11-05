@@ -328,6 +328,7 @@ type RuntimeSettings interface {
 	SaveObservabilitySettings(patch ObservabilityPatch) (ObservabilitySettings, error)
 	FoldWorkSettings() FoldWorkSettings
 	SaveFoldWorkSettings(fold bool) error
+	ChangedSettings() ChangedSettings
 	TurnNarrationSettings() TurnNarrationSettings
 	SaveTurnNarrationSettings(level string) error
 	PersonaSettings() PersonaSettings

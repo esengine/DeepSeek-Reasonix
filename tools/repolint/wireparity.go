@@ -207,6 +207,7 @@ var mirroredWireTypesHead = []wireMirror{
 	{"internal/session/control/schedules.go", "SchedulePendingView", tsScheduleFile, "SchedulePendingView"},
 	{"internal/session/control/schedules.go", "ScheduleResultView", tsScheduleFile, "ScheduleResultView"},
 	{"internal/session/control/fold_work_settings.go", "FoldWorkSettings", tsBoundaryFile, "FoldWorkSettings"},
+	{"internal/session/control/changed_settings.go", "ChangedSettings", tsBoundaryFile, "ChangedSettings"},
 	{"internal/session/control/ask_timeout.go", "AskTimeoutSettings", tsBoundaryFile, "AskTimeoutSettings"},
 	{"internal/session/control/session_ref_settings.go", "SessionRefSettings", tsBoundaryFile, "SessionRefSettings"},
 	{"internal/session/control/auto_archive.go", "AutoArchiveSettings", tsBoundaryFile, "AutoArchiveSettings"},

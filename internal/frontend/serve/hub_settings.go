@@ -12,6 +12,7 @@ func (s *Server) registerMachineSettingsRoutes(mux *http.ServeMux) {
 	s.registerFeedbackRoutes(mux)
 	s.registerDisplayCurrencyRoutes(mux)
 	s.registerFoldWorkRoutes(mux)
+	s.registerChangedSettingsRoutes(mux)
 	s.registerTurnNarrationRoutes(mux)
 	s.registerWebAccessRoutes(mux)
 	s.registerBackupFileRoutes(mux)

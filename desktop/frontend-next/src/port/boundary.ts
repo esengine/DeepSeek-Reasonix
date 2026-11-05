@@ -279,6 +279,11 @@ export interface FoldWorkSettings {
   path: string;
 }
 
+export interface ChangedSettings {
+  keys: string[];
+  path: string;
+}
+
 // How much the model says between tool calls; the user file holds it.
 export interface TurnNarrationSettings {
   level: "brief" | "detailed";
