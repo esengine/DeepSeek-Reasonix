@@ -325,3 +325,5 @@
 .ulegend i[data-s="miss"], .ustack .utip i[data-s="miss"] { background: var(--chart-miss); }
 .ustack .utip .r { display: flex; justify-content: space-between; gap: 12px; color: var(--muted); font: var(--w-med) var(--fs-micro) var(--ui); }
 .ustack .utip .r b { color: var(--text); font-weight: var(--w-semi); }
+.prefs { padding: 24px; }
+.prefs-sheet:not([data-wide]) { width: 100%; height: 100%; }

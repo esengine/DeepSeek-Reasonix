@@ -194,7 +194,7 @@ export const SETTINGS: Messages = {
   "settings.text": { zh: "中文", en: "中文" },
   "settings.text_in_web_pages_and": { zh: "网页和工具结果里的文字可能是别人写给 agent 的指令。开启后，照抄这些文字的调用先问你。", en: "Text in web pages and tool results can be instructions someone wrote for the agent. When on, a call that copies that text asks you first." },
   "settings.the_answer_is_written_or": { zh: "回答写完、或者这一轮失败了", en: "The answer is written, or the turn failed" },
-  "settings.the_few_settings_changed_most": { zh: "最常改的几项放这里，打开设置先看到它们", en: "The few settings changed most often, first in view when settings opens" },
+  "settings.the_few_settings_changed_most": { zh: "最常改的几项放这里，打开设置先看到它们 · 这里是常用项的快捷入口，每项的完整位置在各自分类里", en: "The few settings changed most often, first in view when settings opens · a shortcut here; each one also lives in its own category" },
   "settings.the_items_below_have_no": { zh: "以下项目尚未提供设置界面，此处仅说明它们当前的位置。", en: "The items below have no settings screen yet; this only states where they currently live." },
   "settings.the_os_could_not_register": { zh: "系统未能注册此快捷键：可能已被占用、未获授权，或当前桌面不支持。", en: "The OS could not register this shortcut: it may be occupied, denied permission, or unsupported by this desktop." },
   "settings.the_previous_sign_in_has": { zh: "上次的登录已过期。", en: "The previous sign-in has expired." },
