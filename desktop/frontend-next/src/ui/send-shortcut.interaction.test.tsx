@@ -12,11 +12,11 @@ describe("send shortcut setting", () => {
   it("updates subscribers immediately and survives remount", () => {
     const view = render(<><SendShortcut /><Reader /></>);
     expect(screen.getByRole("radio", { name: "Enter" }).getAttribute("aria-checked")).toBe("true");
-    fireEvent.click(screen.getByRole("radio", { name: "Ctrl Enter" }));
+    fireEvent.click(screen.getByRole("radio", { name: "Ctrl+Enter" }));
     expect(screen.getByText("modifier_enter")).toBeTruthy();
     view.unmount();
     render(<SendShortcut />);
-    expect(screen.getByRole("radio", { name: "Ctrl Enter" }).getAttribute("aria-checked")).toBe("true");
+    expect(screen.getByRole("radio", { name: "Ctrl+Enter" }).getAttribute("aria-checked")).toBe("true");
   });
   it("normalizes unknown saved values and follows storage changes", () => {
     localStorage.setItem("rx-send-shortcut", "future");
@@ -37,6 +37,6 @@ describe("send shortcut setting", () => {
 it("keeps the selected mode when reads work but storage writes fail", () => {
   vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => { throw new Error("quota"); });
   render(<><SendShortcut /><Reader /></>);
-  fireEvent.click(screen.getByRole("radio", { name: "Ctrl Enter" }));
+  fireEvent.click(screen.getByRole("radio", { name: "Ctrl+Enter" }));
   expect(screen.getByText("modifier_enter")).toBeTruthy();
 });

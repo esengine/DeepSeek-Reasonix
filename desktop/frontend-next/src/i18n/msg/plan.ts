@@ -24,7 +24,6 @@ export const PLAN: Messages = {
   "plan.settled.revise": { zh: "继续规划", en: "Still planning" },
   "plan.settled.revise_note": { zh: "在下方说明需要修改的内容，规划者将据此重写该计划。", en: "Say what to change below and the planner rewrites the plan." },
   "plan.show_collapsed_plan_progress": { zh: "收起时显示计划进度", en: "Show collapsed plan progress" },
-  "plan.show_each_steps_progress_as": { zh: "收起的计划条上用小格子显示每一步的进度。默认显示，仅保存在本机。", en: "Show each step's progress as segments on the collapsed plan strip. On by default; saved only on this machine." },
   "plan.step.done": { zh: "已完成", en: "Done" },
   "plan.step.now": { zh: "进行中", en: "In progress" },
   "plan.step.todo": { zh: "未开始", en: "Not started" },

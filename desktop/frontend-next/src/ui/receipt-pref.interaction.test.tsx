@@ -128,7 +128,7 @@ describe("the setting", () => {
       status={{ preset: "balanced", toolApprovalMode: "ask" } as SessionStatus}
       theme="light" onTheme={() => {}} contrast="" onContrast={() => {}} weight="" onWeight={() => {}}
       look={{} as never} onLook={() => {}} reloadThemes={() => {}}
-      onClose={() => {}} onChanged={() => {}} onError={() => {}} at="session"
+      onClose={() => {}} onChanged={() => {}} onError={() => {}} at="display"
       account={null} accountUnread="" reloadAccount={() => {}}
     /> <ReceiptPrefContext.Provider value={receiptPrefOf(port)}>{transcript(items)}</ReceiptPrefContext.Provider></>);
     const sw = await screen.findByRole("switch", { name: t("settings.show_the_delivery_receipt_card") });
@@ -153,7 +153,7 @@ describe("the setting", () => {
       status={{ preset: "balanced", toolApprovalMode: "ask" } as SessionStatus}
       theme="light" onTheme={() => {}} contrast="" onContrast={() => {}} weight="" onWeight={() => {}}
       look={{} as never} onLook={() => {}} reloadThemes={() => {}}
-      onClose={() => {}} onChanged={() => {}} onError={() => {}} at="session"
+      onClose={() => {}} onChanged={() => {}} onError={() => {}} at="display"
       account={null} accountUnread="" reloadAccount={() => {}}
     />);
     const sw = await screen.findByRole("switch", { name: t("settings.show_the_delivery_receipt_card") });

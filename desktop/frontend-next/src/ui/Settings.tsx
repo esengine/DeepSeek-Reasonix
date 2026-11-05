@@ -12,13 +12,15 @@ import { useSettingsSearch } from "./useSettingsSearch";
 import { useSettingLanding } from "./useSettingLanding";
 import { bytes, tokens as fmtTokens } from "../i18n/format";
 import { STORAGE_TALLY_DELAY, cachedStorageTotal, storageTotal } from "./storageTally";
-import { LOOK_FAMILY, SECTION_NAME, SETTING_AT, pageFor, pageHome } from "./prefsnav";
+import { SECTION_NAME, SETTING_AT, pageFor, pageHome } from "./prefsnav";
 import { SettingsNav, SettingsTitle } from "./SettingsNav";
 import { SettingsPageStyle, SoloStyle } from "./SettingsPageStyle";
 import { firstPage, pageOf } from "./settingPages";
 import { Group, SCOPE_SAID } from "./Group";
 import { CommonSettings } from "./CommonSettings";
 import { AgentSettings } from "./AgentSettings";
+import { ChatDisplaySettings } from "./ChatDisplaySettings";
+import { OpsSettings } from "./OpsSettings";
 import { AccountSettings } from "./AccountSettings";
 import { ConnectSettings } from "./ConnectSettings";
 import { SafetySettings } from "./SafetySettings";
@@ -38,9 +40,7 @@ import { SkillGroups } from "./SkillRow";
 import { Hooks } from "./Hooks";
 import { ScheduledRuns } from "./ScheduledRuns";
 import { ConfigTrouble } from "./ConfigTrouble";
-import { PresentFiles } from "./PresentFiles";
 import { ModHost } from "./ModHost";
-import { DisplaySettings } from "./DisplaySettings";
 import { DataSettings } from "./DataSettings";
 import { SettingDeepContext } from "./SettingDeep";
 import { activeKind, groupVendors } from "./Models";
@@ -470,17 +470,8 @@ export function Settings({ hub, onError, port, networkPort, localWorkspacePort, 
               onMode={(id) => run(id, () => port.setApprovalMode(id))} />
           )}
 
-          {at === "display" && (
-            <>
-              <DisplaySettings port={port} />
-              <Group id="present-files"
-                title={t("settings.ai_file_delivery_cards")}
-                hint={t("settings.file_previews_remain_available_from")}
-              >
-                <PresentFiles port={port} />
-              </Group>
-            </>
-          )}
+          {at === "display" && <ChatDisplaySettings port={port} />}
+          {at === "controls" && <OpsSettings />}
 
           {at === "ext" && (
             <>
@@ -596,7 +587,7 @@ export function Settings({ hub, onError, port, networkPort, localWorkspacePort, 
 
           {at === "common" && <CommonSettings port={port} homePort={homePort} theme={theme} onTheme={onTheme} look={look} onLook={onLook} />}
 
-          {LOOK_FAMILY.includes(at) && (
+          {at === "appearance" && (
             <Appearance port={homePort} theme={theme} onTheme={onTheme} contrast={contrast} onContrast={onContrast} weight={weight} onWeight={onWeight} reloadThemes={reloadThemes} look={look} onLook={onLook} />
           )}
 

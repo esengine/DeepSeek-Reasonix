@@ -4,9 +4,8 @@ import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import "./testkit";
 import { App } from "./App";
-import { Appearance } from "./Appearance";
+import { OpsSettings } from "./OpsSettings";
 import { MockHub } from "../port/mock_hub";
-import { MockPort } from "../port/mock";
 import { setShowsSessionTabs } from "../state/prefs";
 
 beforeEach(() => {
@@ -32,8 +31,7 @@ async function hub(panes = 2) {
 function draw(kernel: MockHub) {
   return render(<>
     <App hub={kernel} />
-    <Appearance port={new MockPort()} theme="light" onTheme={() => {}} contrast="" onContrast={() => {}}
-      weight="" onWeight={() => {}} look={{}} onLook={() => {}} reloadThemes={() => {}} />
+    <OpsSettings />
   </>);
 }
 

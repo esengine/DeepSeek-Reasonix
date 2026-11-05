@@ -8,7 +8,7 @@ const LABEL: Record<number, string> = { 0: "settings.off", 10: "settings.n_10_mi
 export function LiveGraceSection() {
   const minutes = useSyncExternalStore(onLiveGraceChange, liveGraceMinutes, liveGraceMinutes);
   return (
-    <Group id="live-grace" title={t("settings.keep_finished_sessions_in_running")} hint={t("settings.after_a_session_finishes_a")}>
+    <Group id="live-grace" inline title={t("settings.keep_finished_sessions_in_running")} hint={t("settings.finished_sessions_stay_in_running")}>
       <div className="seg" data-text role="group" aria-label={t("settings.keep_finished_sessions_in_running")}>
         {LIVE_GRACE_CHOICES.map((m) => (
           <button key={m} data-action="appearance.live-grace" data-value={String(m)} aria-pressed={minutes === m} onClick={() => setLiveGraceMinutes(m)}>

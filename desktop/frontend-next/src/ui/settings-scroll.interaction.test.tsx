@@ -72,17 +72,15 @@ it("keeps a search result's anchor after switching away from a scrolled category
   await userEvent.type(screen.getByRole("textbox", { name: "搜索设置" }), "柔和");
   await userEvent.click(await screen.findByRole("option", { name: /文字对比度/ }));
   const target = document.querySelector<HTMLElement>('[data-setting="contrast"]')!;
-  expect(target.closest<HTMLDetailsElement>("details")?.open).toBe(true);
   expect(scroll.mock.contexts).toContain(target);
   expect(screen.getByRole("tabpanel").scrollTop).toBe(420);
 });
 
-it("opens an initial anchor inside its disclosure", async () => {
+it("lands on an initial anchor and scrolls it into view", async () => {
   const scroll = anchorScrolling();
   draw("appearance:contrast");
   await screen.findByRole("tab", { name: /^外观/, selected: true });
   const target = document.querySelector<HTMLElement>('[data-setting="contrast"]')!;
-  expect(target.closest<HTMLDetailsElement>("details")?.open).toBe(true);
   expect(scroll.mock.contexts).toContain(target);
   expect(screen.getByRole("tabpanel").scrollTop).toBe(420);
 });

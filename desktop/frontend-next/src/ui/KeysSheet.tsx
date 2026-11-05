@@ -27,9 +27,9 @@ const KEYS: Array<[string, string]> = [
 export function KeysSheet() {
   return (
     <Group
-      id="keys"
+      id="keys" pill={t("settings.view_and_edit")}
       title={t("settings.keyboard_shortcuts")}
-      hint={t("settings.these_keys_work_inside_the")}
+      hint={t("settings.all_shortcuts_incl_global_and_esc")}
     >
       {KEYS.map(([keys, what]) => (
         <div className="lrow keys-row" key={keys + what}>

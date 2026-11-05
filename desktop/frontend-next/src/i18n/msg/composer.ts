@@ -245,7 +245,6 @@ export const COMPOSER: Messages = {
   "composer.server_returned_http_status": { zh: "服务器返回 HTTP {status}", en: "Server returned HTTP {status}" },
   "composer.session_messages_waiting_for_your": { zh: "等你决定的会话间消息", en: "Session messages waiting for your decision" },
   "composer.show_amounts": { zh: "显示金额", en: "Show amounts" },
-  "composer.show_task_and_queue_guidance": { zh: "在空白任务输入框中显示任务和排队提示。默认显示，仅保存在本机，不影响输入和发送。", en: "Show task and queue guidance in the empty composer. On by default; saved only on this machine. Does not affect typing or sending." },
   "composer.show_the_largest_items_in": { zh: "展开{name}中最大的几项", en: "Show the largest items in {name}" },
   "composer.side_question": { zh: "辅助会话", en: "Side question" },
   "composer.size_of_a_referenced_conversation": { zh: "引用历史会话的长度", en: "Size of a referenced conversation" },

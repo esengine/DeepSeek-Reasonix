@@ -11,25 +11,11 @@ import { t } from "../i18n";
 import { pct } from "../i18n/format";
 import { reason } from "../i18n/kernel";
 import { useCrop } from "./useCrop";
-import { Folding } from "./Folding";
 import { WindowSection } from "./WindowSection";
-import { LiveGraceSection } from "./LiveGraceSection";
-import { OpenSessionLimitSection } from "./OpenSessionLimitSection";
-import { LiveStreamBudgetSection } from "./LiveStreamBudgetSection";
-import { NewAnswerSection } from "./NewAnswerSection";
-import { PlanProgressSection } from "./PlanProgressSection";
-import { ComposerHintSection } from "./ComposerHintSection";
-import { OfficePreviewSection } from "./OfficePreviewSection";
-import { SessionQuickSection } from "./SessionQuickSection";
-import { NavEntriesSection } from "./NavEntriesSection";
-import { NavRailSection } from "./NavRailSection";
 import { GraphicsSection } from "./GraphicsSection";
-import { GlobalShortcutSection } from "./GlobalShortcutSection";
-import { RunningMessageSetting } from "./RunningMessageSetting";
-import { KeysSheet } from "./KeysSheet";
-import { SessionTabsSetting } from "./SessionTabsSetting";
-import { EscStopSetting } from "./EscStopSetting";
-import { PageSleepSetting } from "./PageSleepSetting";
+import { SectionCard } from "./SectionCard";
+import { SegChoice, SettingRow } from "./SettingRow";
+import { ThemeModeRow } from "./ThemeModeRow";
 import { ThemeImport } from "./ThemeImport";
 import { ThemeRemove } from "./ThemeRemove";
 import { WallpaperSceneImport } from "./WallpaperSceneImport";
@@ -95,7 +81,7 @@ const at = (v: number, min: number, max: number) =>
 /** What the picker offers: the kernel's list of wallpaper types. */
 export const WALLPAPER_ACCEPT = "image/png,image/jpeg,image/webp,image/avif,image/gif,video/mp4,video/webm";
 
-export function Appearance({ port, theme, contrast, onContrast, weight, onWeight, reloadThemes, look, onLook }: Props) {
+export function Appearance({ port, theme, onTheme, contrast, onContrast, weight, onWeight, reloadThemes, look, onLook }: Props) {
   const { packs, unread, load } = useThemeInventory(port);
   const effects = useSyncExternalStore(onEffectsChange, effectsMode);
 
@@ -195,14 +181,6 @@ export function Appearance({ port, theme, contrast, onContrast, weight, onWeight
   const uiFonts = useMemo(() => installed(UI_FAMILIES), []);
   const monoFonts = useMemo(() => installed(MONO_FAMILIES), []);
 
-  // Read here rather than inside the summary: these are the same three values
-  // the folded blocks render, and a second reading of them is a second answer.
-  const changed = [
-    look.fontUi ? t("look.typeface") : "",
-    weight ? t("look.text_weight") : "",
-    contrast ? t("look.text_contrast") : "",
-    effects === "reduced" ? t("look.visual_effects") : "",
-  ].filter(Boolean);
 
   return (
     <>
@@ -211,8 +189,10 @@ export function Appearance({ port, theme, contrast, onContrast, weight, onWeight
           <span className="t">{failed || unread}</span>
         </div>
       )}
-      <SettingDeep id="scheme" title={t("look.interface_theme")} hint={t("look.choose_the_workbench_surfaces_and")}
-        now={packs.find((p) => p.active)?.name ?? t("common.default")}>
+      <SectionCard title={t("settings.theme_card")}>
+        <ThemeModeRow theme={theme} onTheme={onTheme} />
+        <SettingDeep id="scheme" title={t("settings.palette")} hint={t("settings.accent_and_overall_tone")}
+        act={packs.find((p) => p.active)?.name ?? t("common.default")}>
       <section className="grp" id="set-scheme" data-setting="scheme">
         <div className="grp-hd">
           <h3>{t("look.interface_theme")}</h3>
@@ -257,110 +237,7 @@ export function Appearance({ port, theme, contrast, onContrast, weight, onWeight
       </section>
       </SettingDeep>
 
-      <section className="grp" id="set-code-appearance" data-setting="font">
-        <div className="grp-hd">
-          <h3>{t("look.code_appearance")}</h3>
-        </div>
-        <p className="hint">{t("look.code_blocks_commands_diffs_and")}</p>
-        <div className="grp-items">
-          <FontPick
-            slot="mono"
-            label={t("look.monospace_font")}
-            value={look.fontMono ?? ""}
-            options={monoFonts}
-            sample="func main() { fmt.Println(0O1lI) }"
-            onPick={(v) => set({ fontMono: v })}
-          />
-        </div>
-        <ApplyNote id="font" />
-      </section>
-
-      <section className="grp" id="set-size" data-setting="size">
-        <div className="grp-hd">
-          <h3>{t("look.size")}</h3>
-        </div>
-        <p className="hint">{t("look.interface_scales_spacing_and_controls")}</p>
-        {host().inShell() && <p className="hint">{t("look.keyboard_up_larger_down_smaller", { up: chord("+"), down: chord("-"), reset: chord("0") })}</p>}
-        <div className="grp-items">
-          <div className="prow">
-            <span className="tx">{t("look.interface")}</span>
-            <div className="seg" data-text role="group" aria-label={t("look.interface_size")}>
-              {ZOOM_PRESETS.map(([v, name]) => (
-                <button key={v} data-action="appearance.zoom" aria-pressed={(look.zoom || 1) === v} onClick={() => set({ zoom: v })}>
-                  {t(name)}
-                </button>
-              ))}
-            </div>
-          </div>
-          <div className="prow">
-            <span className="tx">{t("look.fine_tune")}</span>
-            <input
-              className="slider"
-              style={at(look.zoom || 1, zoomRange.min, zoomRange.max)}
-              type="range"
-              min={zoomRange.min}
-              max={zoomRange.max}
-              step={zoomRange.step}
-              disabled={!look.zoomRange}
-              value={look.zoom || 1}
-              aria-label={t("look.fine_tune_interface_size")}
-              data-action="appearance.zoom"
-              onChange={(e) => set({ zoom: Number(e.target.value) })}
-            />
-            <span className="now">{pct(look.zoom || 1)}</span>
-          </div>
-          <div className="prow">
-            <span className="tx">{t("look.interface_text")}</span>
-            <div className="seg" data-text role="group" aria-label={t("look.interface_text_size")}>
-              {TEXT_STEPS.map(([v, name]) => (
-                <button key={v} data-action="appearance.text-size" aria-pressed={(look.textSize || 1) === v} onClick={() => set({ textSize: v === 1 ? 0 : v })}>
-                  {t(name)}
-                </button>
-              ))}
-            </div>
-          </div>
-          <div className="prow">
-            <span className="tx">{t("common.body_text")}</span>
-            <div className="seg" data-text role="group" aria-label={t("look.body_text_size")}>
-              {readSteps().map(([v, name]) => (
-                <button key={v} data-action="appearance.reading-size" aria-pressed={readSizeOf(look.readSize) === v} onClick={() => set({ readSize: v })}>
-                  {t(name)}
-                </button>
-              ))}
-            </div>
-          </div>
-          <div className="prow">
-            <span className="tx">{t("look.line_width")}</span>
-            <div className="seg" data-text role="group" aria-label={t("look.body_line_width")}>
-              {MEASURES.map(([id, name, why]) => (
-                <button key={id} data-action="appearance.measure" data-value={id}
-                  aria-pressed={(look.width || "standard") === id} title={t(why)}
-                  disabled={id === "custom" && !look.widthRange} onClick={() => set({ width: id })}>
-                  {t(name)}
-                </button>
-              ))}
-            </div>
-          </div>
-          {look.width === "custom" && (
-            <div className="prow">
-              <span className="tx">{t("look.conversation_width")}</span>
-              <input className="slider" type="range"
-                style={at(look.widthPercent ?? 1, widthRange.min, widthRange.max)}
-                min={widthRange.min} max={widthRange.max} step={widthRange.step}
-                disabled={!look.widthRange} value={look.widthPercent ?? 1}
-                aria-label={t("look.conversation_width")} aria-valuetext={pct((look.widthPercent ?? 1) / 100)}
-                data-action="appearance.measure" data-value="custom"
-                onChange={(e) => set({ widthPercent: Number(e.target.value) })} />
-              <span className="now">{pct((look.widthPercent ?? 1) / 100)}</span>
-            </div>
-          )}
-        </div>
-        <p className="hint">{t(look.width === "custom"
-          ? "look.custom_percentage_resizes_both_the"
-          : "look.line_width_applies_to_prose")}</p>
-        <ApplyNote id="size" />
-      </section>
-
+        <SettingDeep id="wallpaper" title={t("look.wallpaper")} hint={t("settings.chat_background_image_or_video")} act={t("settings.choose_wallpaper")}>
       <section className="grp" id="set-wallpaper" data-setting="wallpaper">
         <div className="grp-hd">
           <h3>{t("look.wallpaper")}</h3>
@@ -508,42 +385,21 @@ export function Appearance({ port, theme, contrast, onContrast, weight, onWeight
 
 
 
-      <WindowSection port={port} />
-      <NavRailSection />
-      <NavEntriesSection />
-      <LiveGraceSection />
-      <OpenSessionLimitSection />
-      <LiveStreamBudgetSection />
-      <SessionQuickSection />
-      <NewAnswerSection />
-      <GraphicsSection />
-      <ComposerHintSection />
-      <OfficePreviewSection />
-      <RunningMessageSetting />
-      <EscStopSetting />
-      <GlobalShortcutSection />
-      <KeysSheet />
-      <PageSleepSetting />
-      <SessionTabsSetting />
-      <Folding />
-      <PlanProgressSection />
-
-      {/* What makes this page read as a console is that all of it arrives at
-          once, not that any one control is obscure. The summary says what is
-          folded and whether it has been changed — a disclosure hiding a value
-          somebody set is a screen disagreeing with the window itself. */}
-      <details className="advset appearance-advanced">
-        <summary className="grp" id="set-advanced-appearance" data-setting="advanced-appearance">
-          <h3 className="grp-hd"><span>{t("look.advanced_appearance")}</span></h3>
-          <span className="hint">{changed.length ? t("look.changed_list", { list: changed.join(" · ") }) : t("look.fonts_text_weight_text_contrast")}</span>
-        </summary>
-        <section className="grp" id="set-font" data-setting="font">
-          <div className="grp-hd">
-            <h3>{t("look.typeface")}</h3>
-          </div>
-          <p className="hint">{t("look.enter_a_typeface_name_or")}</p>
-          <div className="grp-items">
-            <FontPick
+        </SettingDeep>
+        <SettingRow id="effects" title={t("look.visual_effects")} desc={t("settings.frosted_glass_glow_effects")}>
+          <SegChoice<EffectsMode> label={t("look.visual_effects")} value={effects} action="appearance.effects" onPick={setEffectsMode}
+            options={EFFECTS.map(([id, name]) => [id, t(name)] as const)} />
+        </SettingRow>
+      </SectionCard>
+      <SectionCard title={t("settings.text_card")}>
+        <SettingDeep id="font" title={t("look.typeface")} hint={t("settings.interface_and_code_typeface")} act={t("settings.change")}>
+          <section className="grp" id="set-font" data-setting="font">
+            <div className="grp-hd">
+              <h3>{t("look.typeface")}</h3>
+            </div>
+            <p className="hint">{t("look.enter_a_typeface_name_or")}</p>
+            <div className="grp-items">
+              <FontPick
               slot="ui"
               label={t("look.interface")}
               value={look.fontUi ?? ""}
@@ -551,61 +407,121 @@ export function Appearance({ port, theme, contrast, onContrast, weight, onWeight
               sample={t("look.typeface_preview_aa_bb_0123")}
               onPick={(v) => set({ fontUi: v })}
             />
-          </div>
-          <ApplyNote id="font" />
-        </section>
-
-        <section className="grp" id="set-weight" data-setting="weight">
-          <div className="grp-hd">
-            <h3>{t("look.text_weight")}</h3>
-          </div>
-          <p className="hint">{t("look.adjusts_stroke_weight_dense_chinese")}</p>
-          <div className="grp-items">
-            <div className="seg" data-text role="group" aria-label={t("look.text_weight")}>
-              {WEIGHTS.map(([id, name, why]) => (
-                <button key={id || "auto"} data-action="appearance.weight" data-value={id || "auto"} aria-pressed={weight === id} title={t(why)} onClick={() => onWeight(id)}>
+              <FontPick
+            slot="mono"
+            label={t("look.monospace_font")}
+            value={look.fontMono ?? ""}
+            options={monoFonts}
+            sample="func main() { fmt.Println(0O1lI) }"
+            onPick={(v) => set({ fontMono: v })}
+          />
+            </div>
+            <ApplyNote id="font" />
+          </section>
+        </SettingDeep>
+        <SettingDeep id="size" title={t("look.size")} hint={t("settings.overall_text_size")} act={t("settings.adjust")}>
+      <section className="grp" id="set-size" data-setting="size">
+        <div className="grp-hd">
+          <h3>{t("look.size")}</h3>
+        </div>
+        <p className="hint">{t("look.interface_scales_spacing_and_controls")}</p>
+        {host().inShell() && <p className="hint">{t("look.keyboard_up_larger_down_smaller", { up: chord("+"), down: chord("-"), reset: chord("0") })}</p>}
+        <div className="grp-items">
+          <div className="prow">
+            <span className="tx">{t("look.interface")}</span>
+            <div className="seg" data-text role="group" aria-label={t("look.interface_size")}>
+              {ZOOM_PRESETS.map(([v, name]) => (
+                <button key={v} data-action="appearance.zoom" aria-pressed={(look.zoom || 1) === v} onClick={() => set({ zoom: v })}>
                   {t(name)}
                 </button>
               ))}
             </div>
           </div>
-          <ApplyNote id="weight" />
-        </section>
-
-        <section className="grp" id="set-effects" data-setting="effects">
-          <div className="grp-hd">
-            <h3>{t("look.visual_effects")}</h3>
+          <div className="prow">
+            <span className="tx">{t("look.fine_tune")}</span>
+            <input
+              className="slider"
+              style={at(look.zoom || 1, zoomRange.min, zoomRange.max)}
+              type="range"
+              min={zoomRange.min}
+              max={zoomRange.max}
+              step={zoomRange.step}
+              disabled={!look.zoomRange}
+              value={look.zoom || 1}
+              aria-label={t("look.fine_tune_interface_size")}
+              data-action="appearance.zoom"
+              onChange={(e) => set({ zoom: Number(e.target.value) })}
+            />
+            <span className="now">{pct(look.zoom || 1)}</span>
           </div>
-          <p className="hint">{t("look.if_the_window_keeps_your_2")}</p>
-          <div className="grp-items">
-            <div className="seg" data-text role="group" aria-label={t("look.visual_effects")}>
-              {EFFECTS.map(([id, name, why]) => (
-                <button key={id} data-action="appearance.effects" data-value={id} aria-pressed={effects === id} title={t(why)} onClick={() => setEffectsMode(id)}>
+          <div className="prow">
+            <span className="tx">{t("look.interface_text")}</span>
+            <div className="seg" data-text role="group" aria-label={t("look.interface_text_size")}>
+              {TEXT_STEPS.map(([v, name]) => (
+                <button key={v} data-action="appearance.text-size" aria-pressed={(look.textSize || 1) === v} onClick={() => set({ textSize: v === 1 ? 0 : v })}>
                   {t(name)}
                 </button>
               ))}
             </div>
           </div>
-          <ApplyNote id="effects" />
-        </section>
-
-        <section className="grp" id="set-contrast" data-setting="contrast">
-          <div className="grp-hd">
-            <h3>{t("look.text_contrast")}</h3>
-          </div>
-          <p className="hint">{t("look.adjusts_the_contrast_of_body")}</p>
-          <div className="grp-items">
-            <div className="seg" data-text role="group" aria-label={t("look.text_contrast")}>
-              {CONTRASTS.map(([id, name, why]) => (
-                <button key={id || "auto"} data-action="appearance.contrast" data-value={id || "auto"} aria-pressed={contrast === id} title={t(why)} onClick={() => onContrast(id)}>
+          <div className="prow">
+            <span className="tx">{t("common.body_text")}</span>
+            <div className="seg" data-text role="group" aria-label={t("look.body_text_size")}>
+              {readSteps().map(([v, name]) => (
+                <button key={v} data-action="appearance.reading-size" aria-pressed={readSizeOf(look.readSize) === v} onClick={() => set({ readSize: v })}>
                   {t(name)}
                 </button>
               ))}
             </div>
           </div>
-          <ApplyNote id="contrast" />
-        </section>
-      </details>
+          <div className="prow">
+            <span className="tx">{t("look.line_width")}</span>
+            <div className="seg" data-text role="group" aria-label={t("look.body_line_width")}>
+              {MEASURES.map(([id, name, why]) => (
+                <button key={id} data-action="appearance.measure" data-value={id}
+                  aria-pressed={(look.width || "standard") === id} title={t(why)}
+                  disabled={id === "custom" && !look.widthRange} onClick={() => set({ width: id })}>
+                  {t(name)}
+                </button>
+              ))}
+            </div>
+          </div>
+          {look.width === "custom" && (
+            <div className="prow">
+              <span className="tx">{t("look.conversation_width")}</span>
+              <input className="slider" type="range"
+                style={at(look.widthPercent ?? 1, widthRange.min, widthRange.max)}
+                min={widthRange.min} max={widthRange.max} step={widthRange.step}
+                disabled={!look.widthRange} value={look.widthPercent ?? 1}
+                aria-label={t("look.conversation_width")} aria-valuetext={pct((look.widthPercent ?? 1) / 100)}
+                data-action="appearance.measure" data-value="custom"
+                onChange={(e) => set({ widthPercent: Number(e.target.value) })} />
+              <span className="now">{pct((look.widthPercent ?? 1) / 100)}</span>
+            </div>
+          )}
+        </div>
+        <p className="hint">{t(look.width === "custom"
+          ? "look.custom_percentage_resizes_both_the"
+          : "look.line_width_applies_to_prose")}</p>
+        <ApplyNote id="size" />
+      </section>
+
+        </SettingDeep>
+        <SettingRow id="weight" title={t("look.text_weight")} desc={t("settings.weight_of_text")}>
+          <SegChoice<string> label={t("look.text_weight")} value={weight} action="appearance.weight" onPick={onWeight}
+            options={WEIGHTS.map(([id, name]) => [id, t(name)] as const)} />
+        </SettingRow>
+        <SettingRow id="contrast" title={t("look.text_contrast")} desc={t("settings.contrast_between_text_and_background")}>
+          <SegChoice<string> label={t("look.text_contrast")} value={contrast} action="appearance.contrast" onPick={onContrast}
+            options={CONTRASTS.map(([id, name]) => [id, t(name)] as const)} />
+        </SettingRow>
+      </SectionCard>
+      <SectionCard title={t("common.window")}>
+        <SettingDeep id="window" title={t("common.window")} hint={t("settings.remember_window_position_and_size")} act={t("settings.change")}>
+          <WindowSection port={port} />
+        </SettingDeep>
+        <GraphicsSection />
+      </SectionCard>
     </>
   );
 }

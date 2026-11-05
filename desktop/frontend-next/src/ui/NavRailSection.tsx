@@ -8,7 +8,7 @@ const LABEL: Record<NavRailMode, string> = { on: "settings.always", collapsed: "
 export function NavRailSection() {
   const mode = useSyncExternalStore(onNavRailChange, navRailMode, navRailMode);
   return (
-    <Group id="navrail" title={t("settings.icon_rail")} hint={t("settings.a_column_of_icons_left")}>
+    <Group id="navrail" inline title={t("settings.icon_rail")} hint={t("settings.which_entries_the_left_rail_shows")}>
       <div className="seg" data-text role="group" aria-label={t("settings.icon_rail")}>
         {NAV_RAIL_MODES.map((m) => (
           <button key={m} data-action="appearance.nav-rail" data-value={m} aria-pressed={mode === m} onClick={() => setNavRailMode(m)}>

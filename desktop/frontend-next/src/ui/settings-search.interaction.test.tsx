@@ -135,12 +135,11 @@ describe("finding a setting", () => {
   // A block folded into a disclosure is in the DOM and not on screen, so
   // finding it is not the same as arriving at it: the jump has to open what it
   // is folded into, or it lands the reader on a blank stretch of the page.
-  it("opens the disclosure the block is folded behind", async () => {
+  it("lands on the row a result names", async () => {
     const { find, block } = draw();
     await userEvent.type(find(), "柔和");
     await userEvent.click(await screen.findByRole("option", { name: /文字对比度/ }));
     await waitFor(() => expect(block("contrast")).toBeTruthy());
-    expect(block("contrast")?.closest<HTMLDetailsElement>("details.advset")?.open).toBe(true);
   });
 
   // An alias is a way in. "代理" is not what this setting is called, and the

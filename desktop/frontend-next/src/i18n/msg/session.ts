@@ -162,7 +162,6 @@ export const SESSION: Messages = {
   "session.show_full_path": { zh: "查看完整路径", en: "Show full path" },
   "session.show_in_file_manager": { zh: "在文件管理器中显示", en: "Show in file manager" },
   "session.show_more": { zh: "显示更多", en: "Show more" },
-  "session.show_pin_on_the_left": { zh: "悬停或键盘聚焦会话时，左侧显示置顶按钮，右侧显示归档按钮。默认关闭；关闭时可通过会话菜单操作。", en: "Show Pin on the left and Archive on the right when a session is hovered or focused. Off by default; when hidden, use the session menu." },
   "session.show_run_analysis": { zh: "显示运行分析", en: "Show run analysis" },
   "session.show_session_tabs": { zh: "显示会话标签栏", en: "Show session tabs" },
   "session.show_tabs_at_the_top": { zh: "打开多个会话时，在顶部显示标签，方便切换会话。", en: "Show tabs at the top when multiple sessions are open, for quick switching." },

@@ -67,14 +67,14 @@ describe("the appearance family", () => {
     expect(shown("keys")).toBe(false);
   });
 
-  it("lists what stops or sends a turn together, before the key table", async () => {
+  it("lists the shortcuts together, then what a running turn does with a message", async () => {
     draw("controls");
     await waitFor(() => expect(shown("keys")).toBe(true));
     const order = [...document.querySelectorAll<HTMLElement>("[data-setting]")]
       .filter((el) => shown(el.dataset.setting ?? ""))
       .map((el) => el.dataset.setting)
       .filter((id) => ["running-message-intent", "esc-stop", "keys"].includes(id ?? ""));
-    expect(order).toEqual(["running-message-intent", "esc-stop", "keys"]);
+    expect(order).toEqual(["keys", "esc-stop", "running-message-intent"]);
   });
 
   it("lands an anchor on the page that owns it, whatever section it was opened under", async () => {
@@ -90,6 +90,5 @@ describe("what wraps a setting leaves with it", () => {
     await waitFor(() => expect(shown("navrail")).toBe(true));
     const style = [...document.querySelectorAll("style")].map((s) => s.textContent).join("\n");
     expect(style).toContain('details:has(> [data-setting="wallpaper"])');
-    expect(style).toContain('details:has(> [data-setting="advanced-appearance"])');
   });
 });

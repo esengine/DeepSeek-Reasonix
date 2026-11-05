@@ -10,17 +10,11 @@ export function FoldWorkSetting({ port }: { port: AgentPort }) {
   const on = useFoldsTurnWork(port);
   const [error, setError] = useState("");
   return (
-    <Group id="fold-work" title={t("settings.fold_the_work_in_between")} hint={t("settings.when_a_turn_ends_tool")}>
-      <div className="lrow">
-        <span className="tx">
-          <span className="lb">{t("settings.fold_the_work_inside_a")}</span>
-          <span className="ds">{t("settings.off_by_default_a_step")}</span>
-        </span>
-        <Switch data-action="chrome.fold-work" on={on} label={t("settings.fold_the_work_inside_a")} onClick={() => {
+    <Group id="fold-work" inline title={t("settings.fold_the_work_in_between")} hint={t("settings.tool_calls_and_thinking_fold")}>
+      <Switch data-action="chrome.fold-work" on={on} label={t("settings.fold_the_work_inside_a")} onClick={() => {
           setError("");
           saveFoldWorkPref(port, !on).catch((e) => setError(reason(e)));
         }} />
-      </div>
       {error && <div className="why">{error}</div>}
     </Group>
   );

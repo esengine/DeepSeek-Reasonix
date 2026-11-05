@@ -32,18 +32,12 @@ export function PresentFiles({ port }: { port: AgentPort }) {
   };
 
   return (
-    <div className="box">
+    <>
       {state ? (
-        <div className="lrow">
-          <span className="tx">
-            <span className="lb">{t("workbench.enable_ai_file_delivery_cards")}</span>
-            <span className="ds">{t("workbench.let_ai_present_generated_files")}</span>
-          </span>
-          <Switch data-action="present-files.enabled" on={state.enabled} busy={busy}
-            label={t("workbench.enable_ai_file_delivery_cards")} onClick={() => void flip()} />
-        </div>
+        <Switch data-action="present-files.enabled" on={state.enabled} busy={busy}
+          label={t("workbench.enable_ai_file_delivery_cards")} onClick={() => void flip()} />
       ) : <div className="empty">{t(error ? "workbench.could_not_read_file_delivery" : "workbench.loading")}</div>}
       {error && <div className="why" role="alert">{error}</div>}
-    </div>
+    </>
   );
 }

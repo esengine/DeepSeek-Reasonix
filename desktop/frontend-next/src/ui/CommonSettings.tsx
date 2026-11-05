@@ -4,11 +4,10 @@ import { STORAGE as LANG_KEY, t } from "../i18n";
 import { DefaultMode } from "./DefaultMode";
 import { Notifications } from "./Notifications";
 import { SendShortcut } from "./SendShortcut";
-import { ThemeScheduleFields } from "./ThemeScheduleFields";
+import { ThemeModeRow } from "./ThemeModeRow";
 import { UpdateMode } from "./UpdateMode";
 import { SectionCard } from "./SectionCard";
-import { SegChoice, SettingRow } from "./SettingRow";
-import { SCHEMES } from "./Appearance";
+import { SettingRow } from "./SettingRow";
 
 const LANGS: [string, string][] = [
   ["", "look.follow_the_system"],
@@ -51,10 +50,7 @@ export function CommonSettings({ port, homePort, theme, onTheme, look, onLook }:
         </SettingRow>
         <SendShortcut />
         <Notifications port={port} />
-        <SettingRow id="mode" title={t("settings.light_and_dark")} desc={t("settings.follow_the_system_light_or")}>
-          <SegChoice label={t("settings.light_and_dark")} value={theme} action="appearance.scheme" onPick={onTheme} options={SCHEMES.map(([id, name]) => [id, t(name)] as const)} />
-        </SettingRow>
-        {theme === "scheduled" && <ThemeScheduleFields />}
+        <ThemeModeRow theme={theme} onTheme={onTheme} />
       </SectionCard>
     </>
   );

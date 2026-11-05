@@ -56,7 +56,6 @@ export const WORKBENCH: Messages = {
   "workbench.job_follow": { zh: "回到最新输出", en: "Back to the latest output" },
   "workbench.job_following": { zh: "跟着最新输出", en: "Following the latest output" },
   "workbench.job_paused": { zh: "向上滚就停在那里，点右边的箭头回到最新", en: "Scrolled up, so it stays put; use the arrow to return to the latest" },
-  "workbench.let_ai_present_generated_files": { zh: "允许 AI 将已生成的文件展示为可点击的卡片，在工作台中打开预览。仅保存到用户配置，重新打开会话后生效。", en: "Let AI present generated files as clickable cards that open in the workbench. Saved only to your user configuration and applied when you reopen the session." },
   "workbench.loading": { zh: "加载中…", en: "Loading…" },
   "workbench.may_contain_secrets_files": { zh: "可能含有密钥：{files}", en: "May contain secrets: {files}" },
   "workbench.n_commits": { zh: "{n} 个提交", en: "{n} commits" },

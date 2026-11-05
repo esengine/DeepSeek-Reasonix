@@ -21,7 +21,7 @@ export function NavEntriesSection() {
   };
   const changed = layout.order.length > 0 || layout.hidden.length > 0;
   return (
-    <Group id="naventries" title={t("settings.navigation_entries")} hint={t("settings.the_shortcuts_to_pages_in")}>
+    <Group id="naventries" pill={t("settings.adjust_navigation")} title={t("settings.navigation_entries")} hint={t("settings.which_entries_the_left_rail_shows")}>
       {list.map((key, i) => (
         <div className="lrow" key={key}>
           <span className="tx">
