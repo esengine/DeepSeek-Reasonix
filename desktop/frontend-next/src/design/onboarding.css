@@ -1,8 +1,8 @@
 .onb-flow .onb-card { display: flex; flex-direction: column; gap: 14px; animation: onb-step-in var(--t-panel) var(--ease-out, ease-out) both; }
 .onb-flow .onb-card[data-back] { animation-name: onb-step-back; }
 .onb-flow .onb-card[data-step="welcome"] { animation: none; }
-@keyframes onb-step-in { from { opacity: 0; transform: translateX(28px); } }
-@keyframes onb-step-back { from { opacity: 0; transform: translateX(-28px); } }
+@keyframes onb-step-in { from { opacity: 0; transform: translateX(40px); } }
+@keyframes onb-step-back { from { opacity: 0; transform: translateX(-40px); } }
 
 .onb-steps { display: flex; align-items: center; gap: 12px; margin-bottom: 8px; }
 .onb-steps ol { display: flex; flex: 1; align-items: center; gap: 10px; min-width: 0; margin: 0; padding: 0; list-style: none; }
@@ -42,10 +42,25 @@
 .onb-model small { margin-inline-start: auto; color: var(--faint); font: var(--w-med) var(--fs-micro) var(--ui); }
 
 .onb-flow .onb-found { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border: 0; border-radius: var(--r-md); background: color-mix(in srgb, var(--ok) 10%, transparent); color: var(--ok-ink); font: var(--w-med) var(--fs-ui) var(--ui); animation: onb-found-in var(--t-card) ease-out; }
-@keyframes onb-found-in { from { opacity: 0; } }
+@keyframes onb-found-in { from { opacity: 0; transform: translateY(6px); } }
 .onb-flow .onb-acts { display: flex; flex-direction: row-reverse; align-items: center; justify-content: flex-start; gap: 10px; margin-top: 4px; }
 .onb-flow .onb-acts .onb-go { width: auto; min-width: 120px; }
 .onb-flow .onb-note { color: var(--faint); font: var(--w-reg) var(--fs-meta)/1.6 var(--ui); }
 .onb-flow .onb-err { color: var(--err-ink); font: var(--w-med) var(--fs-meta)/1.6 var(--ui); }
 .onb-flow input[aria-invalid="true"] { border-color: var(--err); }
-@media (prefers-reduced-motion: reduce) { .onb-flow .onb-card, .onb-flow .onb-found { animation: none; } }
+@keyframes onb-tile { from { opacity: 0; transform: scale(.92); } }
+@keyframes onb-row { from { opacity: 0; transform: translateY(6px); } }
+@keyframes onb-shake { 20% { transform: translateX(-6px); } 40% { transform: translateX(5px); } 60% { transform: translateX(-3px); } 80% { transform: translateX(2px); } }
+@keyframes onb-err-in { from { opacity: 0; } }
+.onb-welcome-mark { animation: onb-tile var(--t-panel) var(--ease-out) both; }
+.onb-flow .onb-model, .onb-flow .onb-service { animation: onb-row var(--t-card) var(--ease-out) both; animation-delay: calc(min(var(--i, 0), 7) * var(--m-step)); transition: border-color var(--t-line) var(--ease-out), box-shadow var(--t-line) var(--ease-out), background var(--t-line) var(--ease-out); }
+.onb-flow .onb-model > i { transition: border var(--t-line) var(--ease-out); }
+.onb-flow :is(.onb-models, .onb-services) > :nth-child(2) { --i: 1; }
+.onb-flow :is(.onb-models, .onb-services) > :nth-child(3) { --i: 2; }
+.onb-flow :is(.onb-models, .onb-services) > :nth-child(4) { --i: 3; }
+.onb-flow :is(.onb-models, .onb-services) > :nth-child(5) { --i: 4; }
+.onb-flow :is(.onb-models, .onb-services) > :nth-child(6) { --i: 5; }
+.onb-flow :is(.onb-models, .onb-services) > :nth-child(7) { --i: 6; }
+.onb-flow :is(.onb-models, .onb-services) > :nth-child(n+8) { --i: 7; }
+.onb-flow .onb-err { animation: onb-err-in var(--t-card) var(--ease-out) both; }
+.onb-flow .onb-field:has(.onb-err) input[aria-invalid="true"] { animation: onb-shake var(--t-panel) var(--ease-out); }
