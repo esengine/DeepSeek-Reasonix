@@ -46,6 +46,7 @@
 - 市场的包详情改为卡片：名字、类型和「管理员标记可信」标签在一行，摘要、底色块里的详细信息、评价行，底部是说明和「返回 / 查看将安装的内容」；列表里的类型和可信也改成标签。「未固定」提醒和「显示的是缓存」说明改为底色块，不再用左侧色条（5d2ae5c03）。
 - 发布表单改为带标题的卡片：先选类型，紧接着填来源地址，再并排填名称和版本，其余在后；「仅自己可见」改成开关样式的一行；底部是说明和提交按钮。「我的发布」里每个版本的状态改为圆点 + 字（已公开 / 审核中 / 未通过 / 仅自己可见）（9b9d4661d）。
 - 技能的「从源文件夹更新…」和「卸载…」收进行尾的「···」菜单（卸载为红色）；更新和卸载确认改为卡片：问题作标题，提醒用底色块而不是左侧色条，按钮在底部（f7a19ccc3）。
+- 远程机器改为卡片：一行是状态点、名字、地址和状态标签，下一行是默认文件夹和数量；没连上的机器卡片上直接给「测试连接」；编辑、测试连接、在侧栏隐藏、移除收进「···」，开关保留在外；~/.ssh/config 里找到的多台机器可以「全部添加」。市场安装卡片的关闭按钮改名为「关掉安装确认」，避免和设置窗口的「关闭」混淆（afbb2ba7c）。
 
 
 ---
@@ -99,3 +100,4 @@
 - A market package opens as a card: name with kind and trust tags, the summary, the facts in a tinted box, the vote row, and a footer with the note and next step; kind and trust are tags in the list too. The unpinned warning and the cached-data notice are tinted boxes instead of edge bars (5d2ae5c03).
 - The publish form is a titled card: type first, then the source address, then name and version side by side and the rest; Visible only to me is a switch row; the footer holds the note and submit. In My publications each version shows its state as a dot and a word (9b9d4661d).
 - Update from source folder and Uninstall move into a More menu on the skill row (uninstall in the danger colour); the update and uninstall confirmations become cards with the question as the title, tinted warnings instead of edge bars, and the buttons at the foot (f7a19ccc3).
+- Remote machines are cards: dot, name, address and state on one line, folder and counts under it; a machine that is not connected offers Test it on the card, edit/test/hide/remove move into a More menu, and the switch stays in view. Machines found in ~/.ssh/config can be added all at once. The market install card's close button now names what it dismisses (afbb2ba7c).
