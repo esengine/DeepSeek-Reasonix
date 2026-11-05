@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"sync"
 	"testing"
+	"time"
 )
 
 // A directory another test creates and removes while the guard walks the tree
@@ -30,7 +31,12 @@ func TestStateRootJoinsSurvivesDirectoriesVanishingMidWalk(t *testing.T) {
 			// by the churn rebuilding it a moment later on a slow machine.
 			dir := filepath.Join(root, fmt.Sprintf("churn-%d", i))
 			_ = os.MkdirAll(filepath.Join(dir, "sub"), 0o755)
-			_ = os.RemoveAll(dir)
+			for range 200 {
+				if os.RemoveAll(dir) == nil {
+					break
+				}
+				time.Sleep(time.Millisecond)
+			}
 		}
 	})
 	defer func() { close(stop); wg.Wait() }()
