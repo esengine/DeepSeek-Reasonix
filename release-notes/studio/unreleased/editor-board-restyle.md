@@ -44,6 +44,7 @@
 - 技能行改为两行：第一行是名字（或命令）和标记——源文件夹有更新 / 副本被改过 / 两边都改过（警示色）、源文件夹不见了（红色）、子代理、只读——第二行是说明；右边是「我的 / 项目」标签和开关。外部服务出错只用红点表示，去掉左侧红竖线（c72d86a56）。
 - 市场安装确认改为带标题的卡片：标题写明「xx 版本 将安装以下内容」，右上角可关闭；已固定的版本先给绿色的「已按内容摘要核对」和摘要值，未固定或自己的版本仍先给提醒；提醒和「需要逐项看过」改成底色块，不再用左侧色条。内核的风险分组不变（7969fd7e8）。
 - 市场的包详情改为卡片：名字、类型和「管理员标记可信」标签在一行，摘要、底色块里的详细信息、评价行，底部是说明和「返回 / 查看将安装的内容」；列表里的类型和可信也改成标签。「未固定」提醒和「显示的是缓存」说明改为底色块，不再用左侧色条（5d2ae5c03）。
+- 发布表单改为带标题的卡片：先选类型，紧接着填来源地址，再并排填名称和版本，其余在后；「仅自己可见」改成开关样式的一行；底部是说明和提交按钮。「我的发布」里每个版本的状态改为圆点 + 字（已公开 / 审核中 / 未通过 / 仅自己可见）（9b9d4661d）。
 
 
 ---
@@ -95,3 +96,4 @@
 - Skill rows go on two lines: the name with its marks (drift from source in the warning colour, a missing source in red, subagent, read-only), then the description, with where it lives as a tag before the switch. A failed service is marked by its red dot alone; the red bar down its edge is gone (c72d86a56).
 - The market install confirmation is a titled card with a close button. A pinned version leads with the digest check in green and the digest beneath; an unpinned or own version keeps its warning first. Warnings and the read-each group are tinted boxes rather than edge bars; the kernel's risk grouping is unchanged (7969fd7e8).
 - A market package opens as a card: name with kind and trust tags, the summary, the facts in a tinted box, the vote row, and a footer with the note and next step; kind and trust are tags in the list too. The unpinned warning and the cached-data notice are tinted boxes instead of edge bars (5d2ae5c03).
+- The publish form is a titled card: type first, then the source address, then name and version side by side and the rest; Visible only to me is a switch row; the footer holds the note and submit. In My publications each version shows its state as a dot and a word (9b9d4661d).
