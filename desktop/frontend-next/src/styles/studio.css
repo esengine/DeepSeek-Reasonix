@@ -1715,7 +1715,7 @@ button, input, textarea { font-size: var(--fs-ui); }
 .studio-deckchip[aria-expanded="true"] { color: var(--text); background: var(--overlay); border-color: var(--hair); }
 /* Live is the one thing here worth a moving mark: work is happening that this
    row is the only sign of. */
-.studio-deckchip[data-live] .studio-icon { color: var(--accent); animation: m-pulse 2.4s ease-in-out infinite; }
+.studio-deckchip[data-live] .studio-icon { color: var(--accent); animation: m-pulse var(--t-live) ease-in-out infinite; }
 @media (prefers-reduced-motion: reduce) {
   .studio-deck-pop { transition: none }
   .studio-deckchip[data-live] .studio-icon { animation: none }
@@ -2421,7 +2421,7 @@ button, input, textarea { font-size: var(--fs-ui); }
 
 .studio-browser-note[data-loading]::before {
   content: ""; width: 6px; height: 6px; display: inline-block; margin-right: 6px;
-  border-radius: 50%; background: #7890c7; animation: m-pulse 1.1s ease-in-out infinite;
+  border-radius: 50%; background: #7890c7; animation: m-pulse var(--t-live) ease-in-out infinite;
 }
 
 /* Product wordmark: the interface face remains neutral; the brand gets its
@@ -2641,7 +2641,7 @@ button, input, textarea { font-size: var(--fs-ui); }
 .studio-runstate .rmark path:nth-child(3) { animation-delay: -1.44s; }
 .studio-runstate[data-waiting] .rmark path {
   stroke-dasharray: 100;
-  animation: m-pulse 1.8s ease-in-out infinite;
+  animation: m-pulse var(--t-live) ease-in-out infinite;
 }
 @keyframes studio-r-run { to { stroke-dashoffset: -100; } }
 /* At rest the mark is a whole letter, not a segment mid-trace: a shape that
@@ -3383,7 +3383,7 @@ button, input, textarea { font-size: var(--fs-ui); }
 .turntools .studio-refine { order: 1; }
 .studio-refine[aria-disabled="true"] { cursor: default; }
 .studio-refine[aria-disabled="true"] > .studio-icon { opacity: .35; }
-.studio-refine[aria-busy="true"] > .studio-icon { animation: m-pulse 1s ease-in-out infinite; }
+.studio-refine[aria-busy="true"] > .studio-icon { animation: m-pulse var(--t-live) ease-in-out infinite; }
 .refine-card {
   display: grid;
   gap: 8px;

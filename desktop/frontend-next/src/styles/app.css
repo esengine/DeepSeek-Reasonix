@@ -340,7 +340,7 @@
   .mode.danger::before {
     content: ""; position: absolute; inset: 0; z-index: -1; border-radius: inherit;
     background: color-mix(in srgb, var(--err) 12%, transparent);
-    animation: m-pulse 2.6s var(--ease) infinite;
+    animation: m-pulse var(--t-live) var(--ease) infinite;
   }
   
   .sep { width: 1px; height: 14px; flex: none; margin-inline: -1px; background: var(--border); opacity: .75 }
@@ -1021,7 +1021,7 @@
 
   .out .txt code { font: var(--w-reg) var(--fs-ui) var(--mono); color: var(--text) }
 
-  .caret { display: inline-block; width: 6px; height: 13px; background: var(--net); vertical-align: -2px; animation: m-pulse 1.1s var(--ease) infinite }
+  .caret { display: inline-block; width: 6px; height: 13px; background: var(--net); vertical-align: -2px; animation: caret-blink 1s steps(1) infinite }
     .tk .caret { width: 5px; height: 11px; background: var(--faint); margin-left: 2px }
     .rgroup { display: flex; flex-direction: column; gap: 4px }
   .rgroup .hd { font: var(--w-med) var(--fs-micro) var(--mono); letter-spacing: var(--track-cap); color: var(--warn-ink) }
@@ -2488,7 +2488,7 @@
   .srv-hd { display: flex; align-items: baseline; gap: 9px }
   .srv .pip { align-self: center }
   .srv[data-st="ready"] .pip { background: var(--ok) }
-  .srv[data-st="connecting"] .pip { background: var(--net); animation: m-pulse 1.6s ease-in-out infinite }
+  .srv[data-st="connecting"] .pip { background: var(--net); animation: m-pulse var(--t-live) ease-in-out infinite }
   .srv[data-st="failed"] .pip { background: var(--err) }
   .srv[data-st="pending"] .pip { background: var(--warn-ink) }
   .srv[data-st="disabled"] .pip { background: var(--ghost) }
@@ -2558,7 +2558,7 @@
     flex: none; width: 5px; height: 5px; border-radius: 50%; background: var(--ghost);
     transition: background var(--t-line) var(--ease-out);
   }
-  .reload[data-s="run"] .rdot { background: var(--net); animation: m-pulse 1.1s var(--ease) infinite }
+  .reload[data-s="run"] .rdot { background: var(--net); animation: m-pulse var(--t-live) var(--ease) infinite }
   .reload[data-s="run"]:disabled { color: var(--text) }
   .reload[data-s="ok"] { color: var(--ok-ink); border-color: var(--ok) }
   .reload[data-s="ok"] .rdot { background: var(--ok); animation: m-card var(--t-card) var(--ease-out) }
@@ -4116,7 +4116,7 @@
   .ptab-host::before { content: "◦"; margin-right: 2px; opacity: .7 }
   .ptab .pip { flex: none; background: var(--ghost) }
 
-  .ptab[data-run="running"] .pip { background: var(--net); animation: m-pulse 1.4s ease-in-out infinite }
+  .ptab[data-run="running"] .pip { background: var(--net); animation: m-pulse var(--t-live) ease-in-out infinite }
   @media (prefers-reduced-motion: reduce) { .ptab[data-run="running"] .pip { animation: none } }
   .ptab[data-run="halt"] .pip { background: var(--accent-ink) }
   .ptab[data-run="done"] .pip { background: transparent; box-shadow: inset 0 0 0 1.5px var(--ok) }
