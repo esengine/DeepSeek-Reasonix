@@ -232,7 +232,7 @@ export const SETTINGS: SettingEntry[] = [
   { section: "peers", anchor: "peer-projects", within: "peers", title: "remote.projects_allowed_through", scope: "machine", apply: "next-turn", keywords: ["放行", "项目", "不再询问", "长期", "撤销", "peer", "release", "会话间"] },
   { section: "tools", anchor: "write-lease", page: true, title: "session.several_sessions_writing_one_project", scope: "machine", apply: "on-open", keywords: ["lease", "写锁", "并行", "多会话", "乐观", "optimistic", "write_lease", "等待"] },
   { section: "session", anchor: "subagent-claims", title: "session.sub_agent_write_scope", scope: "machine", apply: "runtime-rebuild", keywords: ["subagent", "子代理", "并发", "write_paths", "乐观", "optimistic", "写锁"] },
-  { section: "account", anchor: "trace-export", title: "data.trace_export", scope: "machine", apply: "on-open", keywords: ["追踪", "opentelemetry", "otlp", "观测", "遥测", "trace", "collector", "收集器"] },
+  { section: "account", anchor: "trace-export", page: true, title: "data.trace_export", scope: "machine", apply: "on-open", keywords: ["追踪", "opentelemetry", "otlp", "观测", "遥测", "trace", "collector", "收集器"] },
   { section: "tools", anchor: "web-access", page: true, title: "models.web_search_and_fetch", scope: "machine", apply: "on-open", keywords: ["搜索", "searxng", "deepseek", "抓取", "计费", "付费", "web search", "fetch"] },
   { section: "tools", anchor: "browser-tools", title: "common.built_in_browser", scope: "machine", apply: "runtime-rebuild", keywords: ["browser", "网页", "chrome", "浏览器工具"] },
   // The four blocks below carry a scope control of their own, and the kernel
@@ -249,22 +249,22 @@ export const SETTINGS: SettingEntry[] = [
   { section: "ext", anchor: "skills", title: "settings.skills", scope: "chosen", apply: "immediate", keywords: ["skill", "技能包"] },
 
   { section: "network", anchor: "network", page: true, title: "common.network", scope: "machine", apply: "immediate", keywords: ["代理", "proxy", "抓取", "超时"] },
-  { section: "remote", anchor: "remote", title: "settings.remote", scope: "machine", apply: "immediate", keywords: ["ssh", "机器", "远端工作区"] },
+  { section: "remote", anchor: "remote", page: true, title: "settings.remote", scope: "machine", apply: "immediate", keywords: ["ssh", "机器", "远端工作区"] },
   // Machine rather than session: the door is this window's, and a phone that
   // walks through it reaches every pane. Nothing is written, so nothing outlives
   // the window either.
-  { section: "remote", anchor: "phone", title: "remote.phone_access", scope: "machine", apply: "immediate", keywords: ["手机", "扫码", "二维码", "局域网", "配对", "phone", "mobile", "qr"] },
-  { section: "remote", anchor: "phone-notify", title: "remote.phone_notifications", scope: "machine", apply: "immediate", keywords: ["推送", "提醒", "手机", "批准", "push", "notification", "phone"] },
-  { section: "remote", anchor: "phone-device", title: "remote.this_phones_reminders", scope: "machine", apply: "immediate", keywords: ["推送", "提醒", "手机", "push", "notification"] },
-  { section: "account", anchor: "account", title: "settings.account", scope: "account", apply: "immediate", keywords: ["登录", "社区"] },
+  { section: "remote", anchor: "phone", page: true, title: "remote.phone_access", scope: "machine", apply: "immediate", keywords: ["手机", "扫码", "二维码", "局域网", "配对", "phone", "mobile", "qr"] },
+  { section: "remote", anchor: "phone-notify", within: "phone", title: "remote.phone_notifications", scope: "machine", apply: "immediate", keywords: ["推送", "提醒", "手机", "批准", "push", "notification", "phone"] },
+  { section: "remote", anchor: "phone-device", within: "phone", title: "remote.this_phones_reminders", scope: "machine", apply: "immediate", keywords: ["推送", "提醒", "手机", "push", "notification"] },
+  { section: "account", anchor: "account", page: true, title: "settings.account", scope: "account", apply: "immediate", keywords: ["登录", "社区"] },
   // Shown only while signed in; restoring writes through the ordinary config paths and reloads the runtime.
   { section: "storage", anchor: "backup-file", page: true, title: "data.export_and_import_config", scope: "machine", apply: "immediate", keywords: ["备份", "导出", "导入", "换机", "迁移", "文件"] },
   { section: "storage", anchor: "backup", page: true, title: "data.cloud_backup", scope: "account", apply: "immediate", keywords: ["备份", "恢复", "换机", "同步", "导出"] },
   { section: "versions", anchor: "versions", page: true, title: "common.version", scope: "machine", apply: "immediate", keywords: ["更新", "升级"] },
   { section: "common", anchor: "update-mode", title: "about.update_mode", scope: "machine", apply: "immediate", keywords: ["自动更新", "检查更新", "更新提醒", "后台", "update", "auto update", "notify", "自动下载", "download"] },
-  { section: "versions", anchor: "logs", title: "about.logs_and_abnormal_exit_records", scope: "machine", apply: "none", keywords: ["日志", "崩溃", "闪退", "异常退出", "log", "logs", "crash", "路径"] },
-  { section: "versions", anchor: "community", title: "common.community_and_contributors", scope: "machine", apply: "none", keywords: ["社区", "交流群", "QQ", "加群", "二维码", "discord", "贡献者", "contributors", "community"] },
-  { section: "versions", anchor: "sponsor", title: "about.support_the_project", scope: "machine", apply: "none", keywords: ["捐助", "支付宝", "微信支付", "收款码", "paypal", "donate", "sponsor", "support", "alipay", "wechat"] },
+  { section: "versions", anchor: "logs", page: true, title: "about.logs_and_abnormal_exit_records", scope: "machine", apply: "none", keywords: ["日志", "崩溃", "闪退", "异常退出", "log", "logs", "crash", "路径"] },
+  { section: "versions", anchor: "community", page: true, title: "common.community_and_contributors", scope: "machine", apply: "none", keywords: ["社区", "交流群", "QQ", "加群", "二维码", "discord", "贡献者", "contributors", "community"] },
+  { section: "versions", anchor: "sponsor", page: true, title: "about.support_the_project", scope: "machine", apply: "none", keywords: ["捐助", "支付宝", "微信支付", "收款码", "paypal", "donate", "sponsor", "support", "alipay", "wechat"] },
   { section: "memory", anchor: "memory", page: true, title: "data.memory", scope: "chosen", apply: "immediate", keywords: ["记住", "忘记", "事实"] },
   { section: "usage", anchor: "currency", title: "usage.cost_display_currency", scope: "machine", apply: "immediate", keywords: ["币种", "货币", "人民币", "美元", "currency", "CNY", "USD", "汇率"] },
   { section: "usage", anchor: "upload-usage", page: true, title: "usage.upload_volume", scope: "machine", apply: "none", keywords: ["流量", "上传", "带宽", "请求", "upload", "traffic", "bandwidth"] },

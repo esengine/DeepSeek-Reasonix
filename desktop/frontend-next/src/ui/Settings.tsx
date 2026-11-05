@@ -19,14 +19,11 @@ import { firstPage, pageOf } from "./settingPages";
 import { Group, SCOPE_SAID } from "./Group";
 import { CommonSettings } from "./CommonSettings";
 import { AgentSettings } from "./AgentSettings";
+import { AccountSettings } from "./AccountSettings";
+import { ConnectSettings } from "./ConnectSettings";
 import { SafetySettings } from "./SafetySettings";
 import type { Section } from "./prefsnav";
 import { AddServer } from "./AddServer";
-import { PhoneAccess } from "./PhoneAccess";
-import { PhoneReminders } from "./PhoneReminders";
-import { remoteDeviceId } from "../port/cloud_remote";
-import { PhoneNotifications } from "./PhoneNotifications";
-import { Remotes } from "./Remotes";
 import type { RemoteHost } from "../port/remote";
 import { AddPlugin } from "./AddPlugin";
 import { Packages } from "./Packages";
@@ -40,22 +37,18 @@ import { ServerRow } from "./ServerRow";
 import { SkillGroups } from "./SkillRow";
 import { Hooks } from "./Hooks";
 import { ScheduledRuns } from "./ScheduledRuns";
-import { Network } from "./Network";
 import { ConfigTrouble } from "./ConfigTrouble";
 import { PresentFiles } from "./PresentFiles";
-import { TraceExport } from "./TraceExport";
 import { ModHost } from "./ModHost";
 import { DisplaySettings } from "./DisplaySettings";
 import { DataSettings } from "./DataSettings";
 import { SettingDeepContext } from "./SettingDeep";
-import { Account } from "./Account";
 import { activeKind, groupVendors } from "./Models";
 import { useModelCatalog } from "./useModelCatalog";
 import { useRoles } from "./useRoles";
 import { KIND_LABEL } from "./vendors";
 import { planProtocolSwitch } from "./protocolswitch";
 import { Boundary } from "./Boundary";
-import { About } from "./About";
 import { DEFAULT_DAYS } from "./Usage";
 import { Appearance, SCHEMES } from "./Appearance";
 import { ScopeBar } from "./CapabilityScope";
@@ -592,36 +585,10 @@ export function Settings({ hub, onError, port, networkPort, localWorkspacePort, 
             </>
           )}
           {at === "network" && (
-            <Group id="network"
-              title={t("common.network")}
-              hint={t("settings.model_requests_remote_mcp_services")}
-            >
-              <Network port={networkPort ?? port} host={networkHost ?? ""} />
-            </Group>
+            <ConnectSettings port={port} networkPort={networkPort ?? port} host={networkHost ?? ""} hub={hub} onError={onError} remote={shown("remote")} />
           )}
-          {at === "account" && <TraceExport port={port} />}
 
-          {at === "network" && shown("remote") && (
-            <Group id="remote"
-              title={t("settings.remote")}
-              hint={t("settings.connect_a_workspace_on_another")}
-            >
-              <Remotes hub={hub} onError={onError} />
-            </Group>
-          )}
-          {at === "network" && shown("remote") && <PhoneAccess hub={hub} onError={onError} />}
-          {at === "network" && shown("remote") && <PhoneNotifications hub={hub} port={port} onError={onError} />}
-          {at === "network" && shown("remote") && remoteDeviceId() && <PhoneReminders host={remoteDeviceId()!} />}
-
-          {at === "account" && (
-            <Group id="account"
-              title={t("settings.account")}
-              hint={t("settings.reasonix_itself_needs_no_account")}
-            >
-              <Account port={port} state={acct} unread={accountUnread} reload={reloadAccount} />
-            </Group>
-          )}
-          {at === "account" && <About port={homePort} />}
+          {at === "account" && <AccountSettings port={port} homePort={homePort} state={acct} unread={accountUnread} reload={reloadAccount} />}
           {at === "storage" && (
             <DataSettings port={port} homePort={homePort} localPort={localPort} hub={hub} workspace={workspaceRoot ?? (homePort === port ? status?.workspaceRoot ?? "" : "")} cwd={status?.cwd} busy={busy}
               signedIn={!!acct?.signedIn && !!acct.user} memories={memCount} onIsolate={() => run("isolate", () => port.isolateWorkspace())} onChanged={onChanged} onRecovered={() => { onChanged(); onSessionsRecovered?.(); }} />

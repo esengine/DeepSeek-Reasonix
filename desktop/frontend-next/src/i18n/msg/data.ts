@@ -118,7 +118,6 @@ export const DATA: Messages = {
   "data.same_as_this_machine": { zh: "与本机相同", en: "Same as this machine" },
   "data.scanning": { zh: "正在扫描…", en: "Scanning…" },
   "data.search_indexes_and_derived_data": { zh: "搜索索引与派生数据，删除后会自动重建", en: "Search indexes and derived data; deleting them rebuilds them" },
-  "data.send_each_turn_to_your": { zh: "把每轮对话以 OpenTelemetry 追踪的形式发给你自己的观测系统。默认关闭；只发送结构、耗时、数量和名称，不发送提示词、工具参数、结果或文件路径。", en: "Send each turn to your own observability stack as OpenTelemetry traces. Off by default; only structure, timing, counts and names are sent, never prompts, tool arguments, results or file paths." },
   "data.service_name": { zh: "服务名", en: "Service name" },
   "data.session_imported_with_its_original": { zh: "会话已导入，绑定版本保持不变。", en: "Session imported with its original composition version." },
   "data.session_storage": { zh: "会话存储", en: "Session storage" },

@@ -11,7 +11,7 @@ afterEach(() => { cleanup(); vi.restoreAllMocks(); history.replaceState(null, ""
 const drawn = () => render(<Settings hub={new MockHub()} onError={() => {}} port={new MockPort()} networkPort={new MockPort()}
   status={null} theme="" reloadThemes={() => {}} onTheme={() => {}} contrast="" onContrast={() => {}}
   weight="" onWeight={() => {}} look={{}} onLook={() => {}} onClose={() => {}} onChanged={() => {}}
-  at="remote" account={null} accountUnread="" reloadAccount={() => {}} />);
+  at="remote:phone" account={null} accountUnread="" reloadAccount={() => {}} />);
 
 it("offers a phone its own reminders only on a page that controls a computer", async () => {
   history.replaceState(null, "", "/?device=" + "ab".repeat(32));

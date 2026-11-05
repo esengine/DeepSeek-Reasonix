@@ -16,7 +16,7 @@ interface Props {
   onPage?: (section: Section, page: string) => void;
 }
 
-const countOf = (id: Section) => SETTINGS.filter((e) => !e.hidden && pageHome(e.section) === id).length;
+const countOf = (id: Section) => SETTINGS.filter((e) => !e.hidden && !e.within && pageHome(e.section) === id).length;
 
 export function SettingsNav({ at, values, shown, danger, disabled, onSelect, page, onPage }: Props) {
   return (
@@ -60,7 +60,7 @@ export function SettingsNav({ at, values, shown, danger, disabled, onSelect, pag
 export function SettingsTitle({ at }: { at: Section }) {
   const group = NAV.find(([, items]) => items.some(([id]) => id === at));
   const name = group?.[1].find(([id]) => id === at)?.[1] ?? at;
-  const count = SETTINGS.filter((e) => !e.hidden && pageHome(e.section) === at).length;
+  const count = SETTINGS.filter((e) => !e.hidden && !e.within && pageHome(e.section) === at).length;
   const desc = SECTION_DESC[at];
   return (
     <div className="prefs-pagetitle">

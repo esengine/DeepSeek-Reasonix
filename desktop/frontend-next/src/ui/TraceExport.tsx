@@ -52,7 +52,7 @@ export function TraceExport({ port }: { port: AgentPort }) {
   };
 
   return (
-    <Group id="trace-export" title={t("data.trace_export")} hint={t("data.send_each_turn_to_your")}>
+    <Group id="trace-export" pill={t("settings.set_up_trace")} title={t("data.trace_export")} hint={t("settings.trace_hint")}>
       <div className="box">
         <div className="lrow">
           <span className="tx">

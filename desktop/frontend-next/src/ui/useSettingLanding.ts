@@ -9,7 +9,7 @@ export function useSettingLanding(root: RefObject<HTMLDivElement | null>, anchor
     let done: ReturnType<typeof setTimeout> | undefined;
     const behavior = matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth";
     const aim = () => {
-      const found = col.querySelector<HTMLElement>(`#set-${CSS.escape(anchor)}`);
+      const found = col.querySelector<HTMLElement>(`.deep-page[data-setting="${CSS.escape(anchor)}"], #set-${CSS.escape(anchor)}`);
       if (!found) return;
       for (let parent = found.closest("details"); parent; parent = parent.parentElement?.closest("details") ?? null)
         parent.open = true;

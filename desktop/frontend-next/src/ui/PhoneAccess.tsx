@@ -3,7 +3,6 @@ import { t } from "../i18n";
 import type { HubPort } from "../port/hub";
 import type { CloudShareOffer, ShareOffer, ShareStatus } from "../port/share";
 import { copyText } from "./CopyButton";
-import { ApplyNote } from "./Group";
 import { Switch } from "./Switch";
 
 interface Props {
@@ -301,14 +300,13 @@ export function PhoneAccess({ hub, onError }: Props) {
   // A settings page must not grow a heading for a door this kernel cannot open.
   if (!share.st) return null;
   return (
-    <section className="grp" id="set-phone" data-setting="phone">
+    <div className="phone-door">
       <div className="grp-hd">
         <h3>{t("remote.phone_access")}</h3>
       </div>
       <div className="grp-items share">
         <ShareBody share={share} />
       </div>
-      <ApplyNote id="phone" />
-    </section>
+    </div>
   );
 }

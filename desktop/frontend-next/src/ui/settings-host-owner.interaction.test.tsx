@@ -37,6 +37,7 @@ it("keeps machine reads separate from active-pane account operations", async () 
   expect(localAccount).not.toHaveBeenCalled();
   expect(remoteAccount).toHaveBeenCalled();
   await userEvent.click(screen.getByRole("tab", { name: /账号/ }));
+  await userEvent.click(await screen.findByRole("button", { name: "账号信息" }));
   await screen.findAllByText("Remote account");
   await userEvent.click(screen.getByRole("button", { name: "退出登录" }));
   await userEvent.click(screen.getByRole("button", { name: /确认退出/ }));

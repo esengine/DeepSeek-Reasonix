@@ -27,7 +27,7 @@ function AccountSettings({ port, onChanged }: { port: AgentPort; onChanged: () =
     status={{ preset: "balanced", toolApprovalMode: "ask" } as SessionStatus}
     theme="light" onTheme={() => {}} contrast="" onContrast={() => {}} weight="" onWeight={() => {}}
     look={{} as never} onLook={() => {}} reloadThemes={() => {}}
-    onClose={() => {}} onChanged={onChanged} onError={() => {}} at="account"
+    onClose={() => {}} onChanged={onChanged} onError={() => {}} at="account:account"
     account={account} accountUnread="" reloadAccount={() => { void port.account().then(setAccount); }}
   />;
 }
