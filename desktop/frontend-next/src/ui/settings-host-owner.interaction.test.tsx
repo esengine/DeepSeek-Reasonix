@@ -79,6 +79,7 @@ it.each(["second", "remote"])("uses the active local workspace, or first local f
   await userEvent.click(await waitFor(() => document.querySelector<HTMLButtonElement>('[data-action="settings.open-page"][data-target="model"]')!));
   await waitFor(() => expect((screen.getByRole("combobox", { name: "默认模型" }) as HTMLSelectElement).value).toBe(expected));
   await userEvent.click(screen.getByRole("tab", { name: /^数据/ }));
+  await userEvent.click(await waitFor(() => document.querySelector<HTMLButtonElement>('[data-action="settings.open-page"][data-target="storage"]')!));
   await userEvent.click(await screen.findByRole("button", { name: "选择旧版数据目录…" }));
   expect(imported).toHaveBeenCalledWith("/legacy-fixture", `/${expected}`);
   expect(storage).toHaveBeenCalled();

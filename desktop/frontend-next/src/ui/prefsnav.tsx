@@ -238,8 +238,8 @@ export const SETTINGS: SettingEntry[] = [
   // takes that choice as a parameter — hook.Scope, McpInstallScope, the skill
   // activation scope, a memory's project/global flag. Naming one authority here
   // would be wrong whenever the reader picks the other.
-  { section: "hooks", anchor: "scheduled-runs", title: "panels.scheduled_runs", scope: "machine", apply: "immediate", keywords: ["定时", "计划", "任务", "每天", "schedule", "cron", "unattended", "无人值守"] },
-  { section: "hooks", anchor: "hooks", title: "settings.automation", scope: "chosen", apply: "immediate", keywords: ["钩子", "hook", "触发"] },
+  { section: "hooks", anchor: "scheduled-runs", page: true, title: "panels.scheduled_runs", scope: "machine", apply: "immediate", keywords: ["定时", "计划", "任务", "每天", "schedule", "cron", "unattended", "无人值守"] },
+  { section: "hooks", anchor: "hooks", page: true, title: "settings.automation", scope: "chosen", apply: "immediate", keywords: ["钩子", "hook", "触发"] },
 
   { section: "ext", anchor: "ext-runtime", title: "settings.runtime", scope: "session", apply: "immediate", keywords: ["扩展", "沙盒"] },
   { section: "ext", anchor: "market", title: "ext.community_market", scope: "machine", apply: "immediate", keywords: ["市场", "market", "社区", "发现", "下载", "发布", "publish", "主题"] },
@@ -247,7 +247,7 @@ export const SETTINGS: SettingEntry[] = [
   { section: "ext", anchor: "mcp", title: "settings.external_tools", scope: "chosen", apply: "immediate", keywords: ["mcp", "服务器", "连接外部"] },
   { section: "ext", anchor: "skills", title: "settings.skills", scope: "chosen", apply: "immediate", keywords: ["skill", "技能包"] },
 
-  { section: "network", anchor: "network", title: "common.network", scope: "machine", apply: "immediate", keywords: ["代理", "proxy", "抓取", "超时"] },
+  { section: "network", anchor: "network", page: true, title: "common.network", scope: "machine", apply: "immediate", keywords: ["代理", "proxy", "抓取", "超时"] },
   { section: "remote", anchor: "remote", title: "settings.remote", scope: "machine", apply: "immediate", keywords: ["ssh", "机器", "远端工作区"] },
   // Machine rather than session: the door is this window's, and a phone that
   // walks through it reaches every pane. Nothing is written, so nothing outlives
@@ -257,9 +257,9 @@ export const SETTINGS: SettingEntry[] = [
   { section: "remote", anchor: "phone-device", title: "remote.this_phones_reminders", scope: "machine", apply: "immediate", keywords: ["推送", "提醒", "手机", "push", "notification"] },
   { section: "account", anchor: "account", title: "settings.account", scope: "account", apply: "immediate", keywords: ["登录", "社区"] },
   // Shown only while signed in; restoring writes through the ordinary config paths and reloads the runtime.
-  { section: "storage", anchor: "backup-file", title: "data.export_and_import_config", scope: "machine", apply: "immediate", keywords: ["备份", "导出", "导入", "换机", "迁移", "文件"] },
+  { section: "storage", anchor: "backup-file", page: true, title: "data.export_and_import_config", scope: "machine", apply: "immediate", keywords: ["备份", "导出", "导入", "换机", "迁移", "文件"] },
   { section: "storage", anchor: "backup", title: "data.cloud_backup", scope: "account", apply: "immediate", keywords: ["备份", "恢复", "换机", "同步", "导出"] },
-  { section: "versions", anchor: "versions", title: "common.version", scope: "machine", apply: "immediate", keywords: ["更新", "升级"] },
+  { section: "versions", anchor: "versions", page: true, title: "common.version", scope: "machine", apply: "immediate", keywords: ["更新", "升级"] },
   { section: "common", anchor: "update-mode", title: "about.update_mode", scope: "machine", apply: "immediate", keywords: ["自动更新", "检查更新", "更新提醒", "后台", "update", "auto update", "notify", "自动下载", "download"] },
   { section: "versions", anchor: "logs", title: "about.logs_and_abnormal_exit_records", scope: "machine", apply: "none", keywords: ["日志", "崩溃", "闪退", "异常退出", "log", "logs", "crash", "路径"] },
   { section: "versions", anchor: "community", title: "common.community_and_contributors", scope: "machine", apply: "none", keywords: ["社区", "交流群", "QQ", "加群", "二维码", "discord", "贡献者", "contributors", "community"] },
@@ -268,7 +268,7 @@ export const SETTINGS: SettingEntry[] = [
   { section: "usage", anchor: "currency", title: "usage.cost_display_currency", scope: "machine", apply: "immediate", keywords: ["币种", "货币", "人民币", "美元", "currency", "CNY", "USD", "汇率"] },
   { section: "usage", anchor: "upload-usage", title: "usage.upload_volume", scope: "machine", apply: "none", keywords: ["流量", "上传", "带宽", "请求", "upload", "traffic", "bandwidth"] },
   { section: "usage", anchor: "usage", title: "usage.usage_cost", scope: "machine", apply: "none", keywords: ["token", "花费", "缓存命中"] },
-  { section: "storage", anchor: "storage", title: "common.storage", scope: "machine", apply: "restart", keywords: ["搬家", "迁移", "磁盘", "位置"] },
+  { section: "storage", anchor: "storage", page: true, title: "common.storage", scope: "machine", apply: "restart", keywords: ["搬家", "迁移", "磁盘", "位置"] },
   { section: "advanced", anchor: "elsewhere", title: "settings.not_in_this_version_yet", scope: "machine", apply: "none", keywords: ["配置文件"] },
 
   { section: "common", anchor: "language", title: "common.language", scope: "machine", apply: "restart", keywords: ["中文", "english", "界面语言"] },
