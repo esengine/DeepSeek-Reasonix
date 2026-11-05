@@ -642,6 +642,7 @@ export const ACTIONS: UIAction[] = [
   { id: "reasoning.effort", kind: "kernel-mutation", target: "none", proof: "authority-effect" },
   { id: "files.open", kind: "navigation", target: "none", proof: "interaction" },
   { id: "palette.pick", kind: "view", target: "entity", proof: "interaction" },
+  { id: "palette.scope", kind: "view", target: "none", proof: "interaction" },
   { id: "palette.search", kind: "view", target: "none", proof: "interaction" },
   { id: "reply.quote", kind: "view", target: "entity", proof: "interaction" },
   { id: "reply.branch", kind: "kernel-mutation", target: "entity", proof: "interaction" },
