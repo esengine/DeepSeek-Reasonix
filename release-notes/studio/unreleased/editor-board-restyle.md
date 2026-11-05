@@ -47,6 +47,7 @@
 - 发布表单改为带标题的卡片：先选类型，紧接着填来源地址，再并排填名称和版本，其余在后；「仅自己可见」改成开关样式的一行；底部是说明和提交按钮。「我的发布」里每个版本的状态改为圆点 + 字（已公开 / 审核中 / 未通过 / 仅自己可见）（9b9d4661d）。
 - 技能的「从源文件夹更新…」和「卸载…」收进行尾的「···」菜单（卸载为红色）；更新和卸载确认改为卡片：问题作标题，提醒用底色块而不是左侧色条，按钮在底部（f7a19ccc3）。
 - 远程机器改为卡片：一行是状态点、名字、地址和状态标签，下一行是默认文件夹和数量；没连上的机器卡片上直接给「测试连接」；编辑、测试连接、在侧栏隐藏、移除收进「···」，开关保留在外；~/.ssh/config 里找到的多台机器可以「全部添加」。市场安装卡片的关闭按钮改名为「关掉安装确认」，避免和设置窗口的「关闭」混淆（afbb2ba7c）。
+- 设备访问卡片改为「在手机上用 Studio」，写明手机能做什么（看会话、发消息、批准操作）；已连接的手机放在最前，合成「n 台手机已连接」，每台写明是哪种方式连的；下面「手机怎么连过来」分成两块：「同一个 Wi-Fi」（写明地址、自带开关、二维码和网络选择）在前，「在外面也能连」（需要登录账号）在后。两种方式仍各自独立，打开一个不会顺带打开另一个（99fb58d0f）。
 
 
 ---
@@ -101,3 +102,4 @@
 - The publish form is a titled card: type first, then the source address, then name and version side by side and the rest; Visible only to me is a switch row; the footer holds the note and submit. In My publications each version shows its state as a dot and a word (9b9d4661d).
 - Update from source folder and Uninstall move into a More menu on the skill row (uninstall in the danger colour); the update and uninstall confirmations become cards with the question as the title, tinted warnings instead of edge bars, and the buttons at the foot (f7a19ccc3).
 - Remote machines are cards: dot, name, address and state on one line, folder and counts under it; a machine that is not connected offers Test it on the card, edit/test/hide/remove move into a More menu, and the switch stays in view. Machines found in ~/.ssh/config can be added all at once. The market install card's close button now names what it dismisses (afbb2ba7c).
+- The device-access card is titled Use Studio on your phone and says what a paired phone can do. Connected phones come first under one count, each saying how it came in; then How the phone gets here offers Same Wi-Fi (address, its own switch, QR and network picker) and From anywhere (needs sign-in) as separate blocks. Switching one route on never opens the other (99fb58d0f).
