@@ -1,0 +1,6 @@
+.sw { width: 34px; height: 20px; border: 1px solid var(--border); background: var(--overlay); box-shadow: none; }
+.sw i { width: 12px; height: 12px; margin-left: 3px; background: var(--ghost); }
+.sw[aria-checked="true"] { border-color: var(--accent); background: var(--accent-wash); box-shadow: none; }
+.sw[aria-checked="true"] i { transform: translateX(14px); background: var(--accent); }
+.sw:hover:not(:disabled) { border-color: var(--muted); }
+.sw[aria-checked="true"]:hover:not(:disabled) { border-color: var(--accent); }

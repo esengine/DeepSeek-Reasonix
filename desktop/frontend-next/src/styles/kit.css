@@ -3,7 +3,7 @@
   box-sizing: border-box; height: 24px; padding: 0 10px; margin: 0;
   border: 1px solid var(--border); border-radius: var(--r-pill);
   background: transparent; color: var(--text);
-  font: var(--w-reg) var(--fs-meta)/1 var(--ui); letter-spacing: normal; white-space: nowrap;
+  font: var(--w-med) var(--fs-meta)/1 var(--ui); letter-spacing: normal; white-space: nowrap;
   cursor: pointer;
   transition: background var(--m-line), border-color var(--m-line), color var(--m-line), transform var(--t-press);
 }
