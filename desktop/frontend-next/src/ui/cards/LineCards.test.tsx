@@ -48,7 +48,10 @@ describe("a guardian review", () => {
   it("says the verdict and the risk on the head, the subject and the reason under it", () => {
     const box = render(<GuardianCard g={review({ outcome: "deny", risk_level: "high", subject: "git push --force", rationale: "rewrites remote history" })} />).container;
     expect(box.querySelector(".note-nm")?.textContent).toContain("已拦截");
-    expect(box.querySelector(".note-meta")?.textContent).toBe("高风险");
+    expect(box.querySelector(".note-risk")?.textContent).toBe("高风险");
+    expect(box.querySelectorAll(".note-gauge i")).toHaveLength(3);
+    expect(box.querySelectorAll(".note-gauge i[data-on]")).toHaveLength(3);
+    expect(box.querySelector(".note-verdict")?.textContent).toBe("已拦截");
     expect(box.querySelector(".note-subject")?.textContent).toBe("git push --force");
     expect(box.querySelector(".note-text")?.textContent).toBe("rewrites remote history");
   });

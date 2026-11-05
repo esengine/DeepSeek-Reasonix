@@ -374,11 +374,11 @@ export function Settings({ hub, onError, port, networkPort, localWorkspacePort, 
           }}
         />
         <div className="prefs-actions">
-        <button className="btn sm" type="button" data-action="settings.expand" aria-pressed={wide} aria-label={t("settings.enlarge_the_settings_window")} title={t(wide ? "settings.shrink_the_settings_window" : "settings.enlarge_the_settings_window")} onClick={() => setSettingsWide(!wide)}>
+        <button className="prefs-icon" type="button" data-action="settings.expand" aria-pressed={wide} aria-label={t("settings.enlarge_the_settings_window")} title={t(wide ? "settings.shrink_the_settings_window" : "settings.enlarge_the_settings_window")} onClick={() => setSettingsWide(!wide)}>
           <StudioIcon name={wide ? "collapseAll" : "expand"} />
         </button>
-        <button className="btn sm" data-action="settings.close" disabled={updatingPkg.applying} onClick={close}>
-          {t("common.close")} <span className="esc">Esc</span>
+        <button className="prefs-icon" type="button" data-action="settings.close" disabled={updatingPkg.applying} onClick={close} aria-label={`${t("common.close")} Esc`} title={`${t("common.close")} Esc`}>
+          <StudioIcon name="close" />
         </button>
         {wide && <WindowControls />}
         </div>

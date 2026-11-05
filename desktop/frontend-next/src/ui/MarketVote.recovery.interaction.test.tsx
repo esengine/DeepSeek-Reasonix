@@ -71,6 +71,7 @@ it("retries by keyboard, waits for the fresh vote, then withdraws its actual val
   expect(up().getAttribute("aria-pressed")).toBe("true");
   expect(screen.getByText("好评 80%（10 票）")).toBeTruthy();
   await userEvent.tab();
+  await userEvent.tab();
   expect(document.activeElement).toBe(up());
   await userEvent.keyboard("{Enter}");
   expect(f.cast).toHaveBeenLastCalledWith(f.pkg.slug, 0);

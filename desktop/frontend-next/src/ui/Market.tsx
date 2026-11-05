@@ -330,6 +330,17 @@ function Entry({ port, account, slug, inspect = false, onBack, onInstalled, onVi
         <span className="nm">{p.name}</span>
         <span className="mkt-kind">{t(KIND_NAME[p.kind] ?? p.kind)}</span>
         {p.verified && <span className="mkt-badge" data-tone="ok">{t("ext.admin_marked_trusted")}</span>}
+        <span className="mkt-fill" />
+        {!current && !stuck && d.pinned && (
+          <button className="act" data-action="market.inspect" data-primary disabled={busy || !!d.cache} onClick={() => void look()}>
+            {t(busy ? "ext.reading" : update ? "ext.see_what_the_update_installs" : "ext.see_what_it_installs")}
+          </button>
+        )}
+        {!current && !stuck && !d.pinned && (
+          <button className="act" data-action="market.trust" data-primary disabled={busy || !!d.cache} onClick={() => void look(true)}>
+            {t(busy ? "ext.reading" : "ext.trust_and_install")}
+          </button>
+        )}
       </div>
       {d.cache && <CacheNotice cache={d.cache} action="market.detail-retry" onRetry={() => { panel.current?.focus(); setAttempt((n) => n + 1); }} />}
       {p.summary && <p className="mkt-sum">{p.summary}</p>}
@@ -340,28 +351,12 @@ function Entry({ port, account, slug, inspect = false, onBack, onInstalled, onVi
           <span className="why">{t("ext.no_content_digest_was_recorded", { handle: p.handle })}</span>
         </div>
       )}
-      <dl className="mkt-facts">
-        <dt>{t("ext.publisher")}</dt>
-        <dd>@{p.handle}</dd>
-        <dt>{t("ext.reviewed_version")}</dt>
-        <dd>{v?.version || p.latestVersion}</dd>
-        <dt>{t("common.source")}</dt>
-        <dd className="mono">{v?.source || "—"}</dd>
-        <dt>{t("ext.pinned_content")}</dt>
-        <dd className={d.pinned ? "mono" : undefined} data-missing={d.pinned ? undefined : ""}>{d.pinned ? v?.contentHash : t("ext.not_pinned_no_content_digest")}</dd>
-        {p.repoUrl && (
-          <>
-            <dt>{t("ext.repository")}</dt>
-            <dd className="mono">{p.repoUrl}</dd>
-          </>
-        )}
-        {p.tags.length > 0 && (
-          <>
-            <dt>{t("ext.tags")}</dt>
-            <dd>{p.tags.join(" · ")}</dd>
-          </>
-        )}
-      </dl>
+      <div className="mkt-detail-meta">
+        <span>@{p.handle}</span>
+        <span>v{v?.version || p.latestVersion}{d.pinned ? ` · ${t("common.pinned")}` : ""}</span>
+        <span>{t("ext.n_installs", { n: p.installCount })}</span>
+        {(v?.source || p.repoUrl) && <span className="mono">{v?.source || p.repoUrl}</span>}
+      </div>
       <MarketVote key={account?.signedIn ? `signed-in:${account.user?.handle ?? ""}` : "signed-out"} port={port} pkg={p} onSignIn={onSignIn} />
       {result?.stage === "retry" && <Outcome plan={result.plan} />}
       <div className="acts">
@@ -375,16 +370,6 @@ function Entry({ port, account, slug, inspect = false, onBack, onInstalled, onVi
               : t("ext.everything_it_would_install_is")}
         </span>
         {back}
-        {!current && !stuck && d.pinned && (
-          <button className="act" data-action="market.inspect" data-primary disabled={busy || !!d.cache} onClick={() => void look()}>
-            {t(busy ? "ext.reading" : update ? "ext.see_what_the_update_installs" : "ext.see_what_it_installs")}
-          </button>
-        )}
-        {!current && !stuck && !d.pinned && (
-          <button className="act" data-action="market.trust" data-primary disabled={busy || !!d.cache} onClick={() => void look(true)}>
-            {t(busy ? "ext.reading" : "ext.trust_and_install")}
-          </button>
-        )}
       </div>
       {error && <div className="why" role="alert">{error}</div>}
     </div>

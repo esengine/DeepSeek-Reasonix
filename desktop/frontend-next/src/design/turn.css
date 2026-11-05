@@ -155,28 +155,37 @@
 .flow .call[data-k="host"][data-light] { margin: 14px 0; }
 .flow .call[data-k="host"][data-light] > .c { border: 0; border-left: 2px solid var(--hair); border-radius: 0; background: transparent; padding: 2px 0 2px 14px; overflow: visible; }
 .flow .call[data-k="host"][data-light] > .c > .hl { min-height: 0; padding: 0; gap: 6px; }
-.flow .call[data-k="host"][data-light] > .c > .hl .nm { color: var(--text); font: var(--w-semi) var(--fs-ui)/1.5 var(--ui); }
+.flow .call[data-k="host"][data-light] > .c > .hl .nm { color: var(--text); font: var(--w-med) var(--fs-ui)/1.5 var(--ui); }
 .flow .call[data-k="host"][data-light] > .g { display: none; }
 .flow .call[data-k="host"][data-light] .comp { margin-top: 4px; }
 .flow .call[data-k="host"][data-light] .comp-n { margin-top: 2px; line-height: 1.6; }
 .flow .call[data-k="host"][data-light] .comp details > summary { color: var(--text); font: var(--w-med) var(--fs-meta)/1.5 var(--ui); cursor: pointer; }
 .flow .call[data-k="host"][data-light] > .c > .hl { border: 0; }
 .flow .call[data-k="host"][data-light] > .c > .out { margin: 0; padding: 0; }
-.flow .note { margin: 10px 0; padding: 2px 0 2px 14px; border-left: 2px solid var(--hair); }
+.flow .note { display: flex; flex-direction: column; gap: 4px; margin: 10px 0; padding: 2px 0 2px 14px; border-left: 2px solid var(--hair); }
 .flow .note[data-lvl="warn"] { border-left-color: var(--warn); }
 .flow .note[data-lvl="err"] { border-left-color: var(--err); }
-.note-hd { display: flex; align-items: center; gap: 8px; min-height: 24px; }
+.note-hd { display: flex; align-items: center; gap: 8px; min-height: 22px; }
 .note-hd .sym { color: var(--faint); }
 .note[data-lvl="warn"] .note-hd .sym { color: var(--warn-ink); }
 .note[data-lvl="err"] .note-hd .sym { color: var(--err-ink); }
-.note-nm { flex: none; color: var(--text); font: var(--w-semi) var(--fs-ui)/1.5 var(--ui); }
+.note-nm { flex: none; color: var(--text); font: var(--w-med) var(--fs-ui)/1.5 var(--ui); }
 .note[data-lead] .note-nm { color: var(--muted); font-weight: var(--w-reg); }
-.note-strong { min-width: 0; overflow: hidden; color: var(--text); font: var(--w-semi) var(--fs-ui)/1.5 var(--ui); text-overflow: ellipsis; white-space: nowrap; }
+.note-verdict { color: var(--text); }
+.note[data-lvl="warn"] .note-verdict { color: var(--warn-ink); }
+.note[data-lvl="err"] .note-verdict { color: var(--err-ink); }
+.note-strong { min-width: 0; overflow: hidden; color: var(--text); font: var(--w-med) var(--fs-ui)/1.5 var(--ui); text-overflow: ellipsis; white-space: nowrap; }
 .note-meta { flex: 0 1 auto; color: var(--faint); font: var(--w-reg) var(--fs-meta)/1.5 var(--ui); white-space: nowrap; }
-.note-act { margin-left: auto; flex: none; padding: 0; border: 0; background: none; color: var(--text); font: var(--w-semi) var(--fs-meta)/1.5 var(--ui); cursor: pointer; }
+.note-risk { flex: none; color: var(--muted); font: var(--w-reg) var(--fs-ui)/1.5 var(--ui); }
+.note-gauge { display: inline-flex; gap: 3px; }
+.note-gauge i { width: 14px; height: 4px; border-radius: 2px; background: var(--hair); }
+.note[data-lvl="warn"] .note-gauge i[data-on] { background: var(--warn); }
+.note[data-lvl="err"] .note-gauge i[data-on] { background: var(--err); }
+.note-act { margin-left: auto; flex: none; padding: 0; border: 0; background: none; color: var(--text); font: var(--w-med) var(--fs-meta)/1.5 var(--ui); cursor: pointer; }
 .note-act:hover { text-decoration: underline; }
 .note-act:disabled { color: var(--faint); cursor: default; text-decoration: none; }
-.note-subject { margin: 2px 0 0 22px; overflow: hidden; color: var(--muted); font: var(--w-reg) var(--fs-meta)/1.5 var(--mono); text-overflow: ellipsis; white-space: nowrap; }
-.note-text { margin: 2px 0 0 22px; color: var(--muted); font: var(--w-reg) var(--fs-meta)/1.6 var(--ui); overflow-wrap: anywhere; }
+.note-subject { margin-left: 22px; overflow: hidden; color: var(--muted); font: var(--w-reg) var(--fs-meta)/1.5 var(--mono); text-overflow: ellipsis; white-space: nowrap; }
+.note-text { margin-left: 22px; color: var(--muted); font: var(--w-reg) var(--fs-meta)/1.6 var(--ui); overflow-wrap: anywhere; }
 .note[data-gone] { opacity: .6; }
 .note[data-gone] .note-strong { text-decoration: line-through; }
+.flow .call[data-k="host"][data-light] > .c > .hl .tag { background: none; padding: 0; color: var(--faint); font: var(--w-med) var(--fs-micro) var(--ui); }

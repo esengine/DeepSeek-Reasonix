@@ -17,6 +17,22 @@ const row = (slug: string, pinned?: boolean): MarketPackage => ({
 });
 
 describe("market list", () => {
+  it("draws a package's detail as the board does: the install step in the head, one meta line, no facts table", async () => {
+    const port = new MockPort() as unknown as AgentPort;
+    port.marketList = vi.fn().mockResolvedValue({ packages: [row("a/kit", true)], limit: 24, offset: 0 });
+    port.marketDetail = vi.fn().mockResolvedValue({ package: { ...row("a/kit", true), repoUrl: "https://github.com/a/kit" }, pinned: true, approved: { version: "1.0.0", source: "github:a/kit", contentHash: "sha256:abc", riskLevel: "low", createdAt: "" } });
+    const { container } = render(<Market port={port} onInstalled={() => {}} />);
+    await userEvent.click(await screen.findByRole("button", { name: /kit/ }));
+    await screen.findByRole("button", { name: "查看将安装的内容" });
+    expect(container.querySelector(".mkt-hd [data-action='market.inspect']")).not.toBeNull();
+    expect(container.querySelector(".mkt-facts")).toBeNull();
+    const meta = container.querySelector(".mkt-detail-meta")!;
+    expect(meta.textContent).toContain("@a");
+    expect(meta.textContent).toContain("v1.0.0");
+    expect(meta.textContent).toContain("3 次安装");
+    expect(meta.querySelector(".mono")?.textContent).toBe("github:a/kit");
+  });
+
   it.each([
     ["more", "success"], ["more", "failure"], ["retry", "success"], ["retry", "failure"],
   ])("keeps focus in the market while a next-page %s ends in %s", async (trigger, outcome) => {
@@ -110,7 +126,7 @@ describe("market list", () => {
     await screen.findByRole("button", { name: "查看将安装的内容" });
     expect(document.activeElement).toBe(detail);
     await userEvent.tab();
-    expect(document.activeElement).toBe(screen.getByRole("button", { name: "返回列表" }));
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "查看将安装的内容" }));
     expect(port.marketDetail).toHaveBeenNthCalledWith(2, "a/kit", { refresh: true });
     expect(screen.queryByText("无法读取 a/kit")).toBeNull();
     expect(plan).not.toHaveBeenCalled();
@@ -334,8 +350,7 @@ describe("market list", () => {
     await userEvent.click(await screen.findByRole("checkbox", { name: "只看已固定" }));
     await userEvent.click(await screen.findByRole("button", { name: /lm-studio-vision-bridge/ }));
 
-    await screen.findByText("未固定——审核时没有记录内容摘要");
-    expect(screen.getByText("内容未经审核固定")).toBeTruthy();
+    expect(await screen.findByText("内容未经审核固定")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "查看将安装的内容" })).toBeNull();
     await userEvent.click(screen.getByRole("button", { name: "信任并安装" }));
 
