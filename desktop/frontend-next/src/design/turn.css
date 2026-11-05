@@ -188,3 +188,4 @@
 .flow .call[data-k="host"][data-light] > .c > .hl .tag { background: none; padding: 0; color: var(--faint); font: var(--w-med) var(--fs-micro) var(--ui); }
 .activity-group .activity-errors { font-size: var(--fs-micro); }
 .activity-body .hl .tag { display: none; }
+.activity-body .hl > .tool-fold { display: none; }

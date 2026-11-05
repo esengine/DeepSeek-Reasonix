@@ -160,7 +160,7 @@ export const SETTINGS: Messages = {
   "settings.tabs": { zh: "个", en: "tabs" },
   "settings.tabs_with_a_live_connection": { zh: "实时连接的标签数", en: "Tabs with a live connection" },
   "settings.takes_effect_after_a_restart": { zh: "重启后生效", en: "Takes effect after a restart" },
-  "settings.text": { zh: "中文", en: "中文" },
+  "settings.text": { zh: "简体中文", en: "简体中文" },
   "settings.the_answer_is_written_or": { zh: "回答写完、或者这一轮失败了", en: "The answer is written, or the turn failed" },
   "settings.changed_settings": { zh: "改过的设置", en: "Changed settings" },
   "settings.every_setting_is_the_default": { zh: "所有设置都是默认值", en: "Every setting is the default" },
