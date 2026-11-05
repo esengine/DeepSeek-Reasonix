@@ -37,7 +37,7 @@ import type { ExtPicked } from "./extpick";
 import { ExtTabs, MarketGroup } from "./Market";
 import { InstalledLocation } from "./InstalledLocation";
 import { Switch } from "./Switch";
-import { ProviderHealthSetting } from "./ProviderHealthSetting";
+import { ModelSettings } from "./ModelSettings";
 import { ServerRow } from "./ServerRow";
 import { SkillGroups } from "./SkillRow";
 import { Hooks } from "./Hooks";
@@ -47,7 +47,6 @@ import { Shell as ShellPicker } from "./Shell";
 import { ExternalOrigin } from "./ExternalOrigin";
 import { Rules, ToolList } from "./Rules";
 import { ConfigTrouble } from "./ConfigTrouble";
-import { Compaction } from "./Compaction";
 import { Sandbox } from "./Sandbox";
 import { BrowserTools } from "./BrowserTools";
 import { PresentFiles } from "./PresentFiles";
@@ -63,9 +62,7 @@ import { DataSettings } from "./DataSettings";
 import { AgentPresets } from "./AgentPresets";
 import { SettingDeep, SettingDeepContext } from "./SettingDeep";
 import { Account } from "./Account";
-import { Providers } from "./Providers";
 import { activeKind, groupVendors } from "./Models";
-import { ModelUsage } from "./ModelUsage";
 import { useModelCatalog } from "./useModelCatalog";
 import { useRoles } from "./useRoles";
 import { KIND_LABEL } from "./vendors";
@@ -513,34 +510,22 @@ export function Settings({ hub, onError, port, networkPort, localWorkspacePort, 
           )}
 
           {at === "model" && (
-            <>
-              <Group id="model" title={t("settings.models_by_use")} now={nav.model}
-                hint={t("settings.choose_a_model_and_reasoning")}>
-                <ModelUsage models={models} roles={roles} main={status?.modelRef} busy={busy} protocol={protocol}
-                  onMain={(ref) => run(ref, async () => {
-                    await port.setModel(ref);
-                    await localPort.setDefaultModel(ref);
-                    // The row reads the catalogue's default, so the list has to
-                    // be re-read or the controlled select snaps back.
-                    loadModels();
-                  })}
-                  effort={status?.effort || "auto"} onEffort={(level) => run(`effort:${level}`, () => port.setEffort(level))}
-                  onRole={(role, ref, effort) => run(`role:${role}`, () => port.setRole(role, ref, effort).finally(loadRoles))}
-                  overrides={overrides} onClearOverride={(role, key) => run(`role:${role}`, () => port.clearRoleOverride(role, key).finally(loadRoles))} />
-              </Group>
-              <Group id="context" title={t("settings.context_maintenance")}
-                hint={t("settings.compacts_automatically_from_model_capacity")}>
-                <Compaction port={port} />
-              </Group>
-            <ProviderHealthSetting port={port} onChanged={onChanged} onFailed={setFailed} />
-            <Group id="providers" title={t("common.model_services")}
-              hint={t("settings.pick_a_service_to_see")}>
-              <Providers port={port} onChanged={() => { loadModels(); onChanged(); }} onFailed={setFailed} protocol={protocol}
-                activeKindFor={(a) => kindFor(a.key)}
-                declare={declare}
-                onProtocol={(a, kind) => switchProtocol(a.key, kind)} />
-            </Group>
-            </>
+            <ModelSettings port={port} onChanged={onChanged} onFailed={setFailed}
+              usage={{
+                models, roles, main: status?.modelRef, busy, protocol,
+                onMain: (ref) => run(ref, async () => {
+                  await port.setModel(ref);
+                  await localPort.setDefaultModel(ref);
+                  loadModels();
+                }),
+                effort: status?.effort || "auto", onEffort: (level) => run(`effort:${level}`, () => port.setEffort(level)),
+                onRole: (role, ref, effort) => run(`role:${role}`, () => port.setRole(role, ref, effort).finally(loadRoles)),
+                overrides, onClearOverride: (role, key) => run(`role:${role}`, () => port.clearRoleOverride(role, key).finally(loadRoles)),
+              }}
+              providers={{
+                port, onChanged: () => { loadModels(); onChanged(); }, onFailed: setFailed, protocol,
+                activeKindFor: (a) => kindFor(a.key), declare, onProtocol: (a, kind) => switchProtocol(a.key, kind),
+              }} />
           )}
 
           {at === "tools" && (

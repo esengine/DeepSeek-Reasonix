@@ -49,3 +49,19 @@ it("opens the page a landing belongs to: the block's own, or the one it is drawn
   expect(pageFor("composition-picker")).toBe("agent-presets");
   expect(pageFor("approval")).toBeNull();
 });
+
+it("draws a block that names its action as a setting row with a pill, and opens the same page", () => {
+  const go = vi.fn();
+  render(
+    <SettingDeepContext.Provider value={{ pages: true, open: null, section: "权限与安全", go }}>
+      <SettingDeep id="rules" title="明确的规则" hint="哪些操作始终禁止" act="编辑规则（3 条）"><p>规则内容</p></SettingDeep>
+    </SettingDeepContext.Provider>,
+  );
+  const row = document.querySelector('.srow[data-setting="rules"]')!;
+  expect(row.querySelector(".srow-name")?.textContent).toBe("明确的规则");
+  expect(row.querySelector(".srow-desc")?.textContent).toBe("哪些操作始终禁止");
+  expect(row.querySelector(".apply")?.textContent).toContain("本机");
+  fireEvent.click(screen.getByRole("button", { name: "编辑规则（3 条）" }));
+  expect(go).toHaveBeenCalledWith("rules");
+  expect(screen.queryByText("规则内容")).toBeNull();
+});

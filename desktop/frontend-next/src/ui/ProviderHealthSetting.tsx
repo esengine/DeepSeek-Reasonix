@@ -3,7 +3,7 @@ import { HttpError, type AgentPort } from "../port/port";
 import { t } from "../i18n";
 import { reason } from "../i18n/kernel";
 import { Switch } from "./Switch";
-import { Group } from "./Group";
+import { SettingRow } from "./SettingRow";
 
 export function ProviderHealthSetting({ port, onChanged, onFailed }: {
   port: Partial<Pick<AgentPort, "providerHealthSettings" | "saveProviderHealthSettings">>;
@@ -25,22 +25,23 @@ export function ProviderHealthSetting({ port, onChanged, onFailed }: {
     });
     return () => { live = false; generation.current++; };
   }, [port]);
-  return <Group id="provider-health" title={t("models.automatically_check_connections_and_balances")}
-    hint={t("models.off_by_default_when_enabled")}
-    action={<Switch data-action="provider.health-setting" on={enabled === true}
-      busy={busy || enabled === null || !port.saveProviderHealthSettings}
-      label={t("models.automatically_check_connections_and_balances")} onClick={async () => {
-        if (!port.saveProviderHealthSettings) return;
-        const version = generation.current;
-        setBusy(true);
-        try {
-          const value = await port.saveProviderHealthSettings(!enabled);
-          if (version === generation.current) { setEnabled(value.enabled); onChanged(); }
-        } catch (e) { if (version === generation.current) onFailed(reason(e)); }
-        finally { if (version === generation.current) setBusy(false); }
-      }} />}>
+  return <>
+    <SettingRow id="provider-health" title={t("models.automatically_check_connections_and_balances")} desc={t("models.check_while_the_list_opens")}>
+      <Switch data-action="provider.health-setting" on={enabled === true}
+        busy={busy || enabled === null || !port.saveProviderHealthSettings}
+        label={t("models.automatically_check_connections_and_balances")} onClick={async () => {
+          if (!port.saveProviderHealthSettings) return;
+          const version = generation.current;
+          setBusy(true);
+          try {
+            const value = await port.saveProviderHealthSettings(!enabled);
+            if (version === generation.current) { setEnabled(value.enabled); onChanged(); }
+          } catch (e) { if (version === generation.current) onFailed(reason(e)); }
+          finally { if (version === generation.current) setBusy(false); }
+        }} />
+    </SettingRow>
     {unavailable && <p className="note" role="status">{t(unavailable === "unsupported"
       ? "models.this_server_does_not_support"
       : "models.cannot_read_check_settings_check")}</p>}
-  </Group>;
+  </>;
 }

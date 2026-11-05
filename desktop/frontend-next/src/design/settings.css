@@ -8,7 +8,7 @@
 }
 .prefs-nav { padding: 8px 10px 14px; gap: 2px; background: var(--page); }
 .prefs-nav button { height: 30px; min-height: 30px; padding: 0 10px; gap: 9px; border-radius: var(--r-sm); color: var(--muted); font: var(--w-reg) var(--fs-ui) var(--ui); }
-.prefs-nav button[aria-selected="true"] { background: var(--overlay); color: var(--text); }
+.prefs-nav button[aria-selected="true"] { background: var(--overlay); color: var(--text); font-weight: var(--w-reg); }
 .prefs-nav button .nv { font: var(--w-reg) var(--fs-meta) var(--ui); color: var(--faint); }
 .prefs-main { padding: 18px 24px; background: var(--surface); }
 .prefs-pagetitle { margin: 0 0 12px; gap: 10px; max-width: none; align-items: baseline; }
@@ -54,7 +54,7 @@
 .prefs-nav { padding: 0 10px 14px; gap: 2px; }
 .prefs-nav button { gap: 9px; font: var(--w-reg) var(--fs-ui) var(--ui); }
 .prefs-nav button svg { width: 16px; height: 16px; stroke-width: 1.45; stroke-linecap: round; stroke-linejoin: round; }
-.prefs-nav button[aria-selected="true"] { font-weight: var(--w-med); }
+.prefs-nav button[aria-selected="true"] { font-weight: var(--w-reg); }
 .prefs-nav button .nv { margin-left: auto; font: var(--w-reg) var(--fs-meta) var(--ui); color: var(--faint); }
 .prefs-sheet { isolation: isolate; }
 .prefs-sheet::before { content: ""; position: absolute; z-index: -1; left: 0; top: 0; bottom: 0; width: 240px; background: var(--page); }

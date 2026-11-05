@@ -206,12 +206,12 @@ export const SETTINGS: SettingEntry[] = [
   // Machine-wide despite sitting on the model page, and the clearest case for
   // not reading scope off a section: the economic threshold is one
   // [agent] key in the user config that every session on this computer reads.
-  { section: "model", anchor: "context", title: "settings.context_maintenance", scope: "machine", apply: "runtime-rebuild", keywords: ["上下文窗口", "压缩", "compaction"] },
+  { section: "model", anchor: "context", page: true, title: "settings.context_maintenance", scope: "machine", apply: "runtime-rebuild", keywords: ["上下文窗口", "压缩", "compaction"] },
   // Adding a source does not rebuild; changing which protocol a source is
   // reached through switches the model, and that does. The stronger of the two
   // is what the row promises, because the weaker one would be a promise this
   // block cannot keep.
-  { section: "providers", anchor: "providers", title: "common.model_services", scope: "machine", apply: "runtime-rebuild", keywords: ["模型来源", "连接", "提供商", "供应商", "api key", "密钥", "协议", "地址"] },
+  { section: "providers", anchor: "providers", page: true, title: "common.model_services", scope: "machine", apply: "runtime-rebuild", keywords: ["模型来源", "连接", "提供商", "供应商", "api key", "密钥", "协议", "地址"] },
   { section: "providers", anchor: "provider-health", title: "models.automatically_check_connections_and_balances", scope: "machine", apply: "immediate", keywords: ["检测", "余额", "连接", "health", "balance"] },
 
   // Takes effect on this session at once and is also persisted as the default

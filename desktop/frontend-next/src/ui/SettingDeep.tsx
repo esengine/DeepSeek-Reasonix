@@ -1,5 +1,6 @@
 import { createContext, useContext, type ReactNode } from "react";
 import { t } from "../i18n";
+import { ApplyNote } from "./Group";
 import { SETTING_AT } from "./prefsnav";
 import { StudioIcon } from "./StudioIcon";
 
@@ -16,10 +17,25 @@ export const SettingDeepContext = createContext<Deep>({ pages: false, open: null
 
 /** A block the catalogue gives a page of its own: on the section it is one row
  *  saying what it holds, and opened it is the whole column under a breadcrumb.
+ *  Given `act`, the row is a setting row with a pill; otherwise a link card.
  *  Its contents mount only once it is opened. */
-export function SettingDeep({ id, title, now, hint, children }: { id: string; title: string; now?: string; hint?: string; children: ReactNode }) {
+export function SettingDeep({ id, title, now, hint, act, children }: { id: string; title: string; now?: string; hint?: string; act?: string; children: ReactNode }) {
   const deep = useContext(SettingDeepContext);
   if (!deep.pages || !SETTING_AT(id)?.page) return <>{children}</>;
+  if (deep.open !== id && act) {
+    return (
+      <div className="srow" id={`set-${id}`} data-setting={id}>
+        <div className="srow-meta">
+          <span className="srow-name">{title}</span>
+          {hint && <span className="srow-desc">{hint}</span>}
+          <ApplyNote id={id} />
+        </div>
+        <div className="srow-ctl">
+          <button type="button" className="spill" data-action="settings.open-page" data-target={id} onClick={() => deep.go(id)}>{act}</button>
+        </div>
+      </div>
+    );
+  }
   if (deep.open !== id) {
     return (
       <section className="grp grp-link" id={`set-${id}`} data-setting={id}>

@@ -48,7 +48,7 @@ export interface Account {
   kinds: string[];
 }
 
-function groupAccounts(list: ProviderEntry[]): Account[] {
+export function groupAccounts(list: ProviderEntry[]): Account[] {
   const out = new Map<string, Account>();
   for (const p of list) {
     const host = hostOf(p.baseUrl);
