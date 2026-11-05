@@ -3,7 +3,6 @@ import type { Messages } from "./types";
 export const USAGE: Messages = {
   "usage.a_plans_usage_is_converted": { zh: "订阅套餐的用量按上面的价格折算成估算值，单独显示，不会计入实际花费。", en: "A plan's usage is converted to an estimate at the prices above and shown separately; it is never counted as money spent." },
   "usage.a_vendors_own_domain_is": { zh: "供应商自己的域名会按它的格式读取；其他地址（例如中转站）必须选择它返回的格式，否则不读取余额。", en: "A vendor's own domain is read in that vendor's format; any other address (a relay, for example) must name the format it answers in, or no balance is read." },
-  "usage.active_days": { zh: "活跃天数", en: "Active days" },
   "usage.add_a_decision_source_under": { zh: "在「模型服务」添加决策来源", en: "Add a decision source under Model services" },
   "usage.adjustable_reasoning": { zh: "可调推理", en: "Adjustable reasoning" },
   "usage.api_priced_estimate": { zh: "等价估算", en: "API-priced estimate" },
@@ -89,7 +88,6 @@ export const USAGE: Messages = {
   "usage.no_usage_yet": { zh: "尚未产生用量", en: "No usage yet" },
   "usage.not_applicable": { zh: "不适用", en: "Not applicable" },
   "usage.nothing_recorded_yet_counting_starts": { zh: "还没有记录：从这个版本起开始统计。", en: "Nothing recorded yet: counting starts with this version." },
-  "usage.of_the_tok_input_tokens": { zh: "该时间段送入的 {tok} 输入 tokens 中，{rate}% 命中前缀缓存 —— 命中部分按缓存价计费，较未命中低一个数量级。", en: "Of the {tok} input tokens sent in this span, {rate}% hit the prefix cache — a hit bills at the cache rate, an order of magnitude under a miss." },
   "usage.open_the_price_source_of": { zh: "{model} 打开价格来源", en: "Open the price source of {model}" },
   "usage.openrouter_format": { zh: "OpenRouter 格式", en: "OpenRouter format" },
   "usage.paid": { zh: "实付", en: "Paid" },

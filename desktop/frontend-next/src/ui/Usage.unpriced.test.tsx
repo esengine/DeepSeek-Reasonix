@@ -24,13 +24,13 @@ const REPORT: UsageReport = {
 async function open(report: UsageReport) {
   const port = { usage: vi.fn().mockResolvedValue(report), providers: vi.fn().mockResolvedValue([]), models: vi.fn().mockResolvedValue([]) } as unknown as AgentPort;
   const view = render(<Usage port={port} />);
-  await waitFor(() => expect(view.container.querySelector(".uhero")).toBeTruthy());
+  await waitFor(() => expect(view.container.querySelector(".utile-paid")).toBeTruthy());
   return view;
 }
 
 // The scopes beside the figure: the caveats a person reads before trusting it.
 function scopes(container: HTMLElement): string {
-  return Array.from(container.querySelectorAll(".uhero-scope")).map((el) => el.textContent ?? "").join(" | ");
+  return Array.from(container.querySelectorAll(".utile-paid .m")).map((el) => el.textContent ?? "").join(" | ");
 }
 
 describe("the unpriced-call count on the usage page", () => {

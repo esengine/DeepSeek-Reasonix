@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { UsageStack, type StackPoint } from "./UsageStack";
-import { niceMax } from "./usagescale";
 import { usageCsv } from "./usagecsv";
 import { t } from "../i18n";
 import { count, money, tokens as fmtTokens } from "../i18n/format";
@@ -64,95 +63,6 @@ function moneyList(list?: Money[]): string {
 
 // A tick ladder a person reads: round the top up to a 1/2/5-ish step. An empty
 // series still needs two distinct halves, or both upper ticks label as 1.
-
-interface PlotPoint {
-  key: string;
-  axis: string;
-  tip: string;
-  value: number;
-}
-
-interface PlotProps {
-  points: PlotPoint[];
-  label: (v: number) => string;
-  aria: string;
-}
-
-// One series, so no legend: the card's title names it. Area fill, recessive
-// grid, an emphasised endpoint, and a crosshair that reads the nearest point.
-function Plot({ points, label, aria }: PlotProps) {
-  const [at, setAt] = useState<number | null>(null);
-  const W = 860, H = 176, PL = 58, PR = 12, PT = 12, PB = 24;
-  const max = niceMax(Math.max(...points.map((p) => p.value), 0));
-  const x = (i: number) => PL + (points.length < 2 ? 0 : (i * (W - PL - PR)) / (points.length - 1));
-  const y = (v: number) => PT + (1 - v / max) * (H - PT - PB);
-  // The 365-day range rebuilds a ~365-segment path string; none of it depends
-  // on which day the cursor is over, so a hover must not pay for it.
-  const { pts, line, fill } = useMemo(() => {
-    const at2 = points.map((p, i) => [x(i), y(p.value)] as const);
-    const path = at2.map((p, i) => (i ? "L" : "M") + p[0].toFixed(1) + " " + p[1].toFixed(1)).join(" ");
-    return {
-      pts: at2, line: path,
-      fill: at2.length ? `${path} L${x(points.length - 1).toFixed(1)} ${H - PB} L${PL} ${H - PB} Z` : "",
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [points, max]);
-  const every = Math.max(1, Math.ceil(points.length / 5));
-  const hover = at === null ? null : points[at];
-
-  return (
-    <div className="uplot" data-on={hover ? "" : undefined}>
-      <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label={aria}>
-        <g className="ugrid">
-          {[0, max / 2, max].map((v) => (
-            <line key={v} x1={PL} x2={W - PR} y1={y(v)} y2={y(v)} />
-          ))}
-        </g>
-        <g className="uaxis">
-          {[0, max / 2, max].map((v) => (
-            <text key={v} x={PL - 8} y={y(v) + 4} textAnchor="end">{label(v)}</text>
-          ))}
-          {points.map((p, i) =>
-            i % every ? null : (
-              <text key={p.key} x={x(i)} y={H - 7} textAnchor="middle">{p.axis}</text>
-            ),
-          )}
-        </g>
-        {fill && <path className="uarea" d={fill} />}
-        {pts.length > 1 && <path className="uline" d={line} />}
-        {pts.length > 0 && <circle className="ucap" cx={pts[pts.length - 1][0]} cy={pts[pts.length - 1][1]} r={4} />}
-        {hover && at !== null && (
-          <>
-            <line className="ucross" x1={x(at)} x2={x(at)} y1={PT} y2={H - PB} />
-            <circle className="umark" cx={x(at)} cy={y(hover.value)} r={4.5} />
-          </>
-        )}
-        <rect
-          className="uhit" x={PL} y={0} width={W - PL - PR} height={H} data-action-pointermove="usage.chart-hover" data-action-pointerleave="usage.chart-hover"
-          onPointerMove={(e) => {
-            const box = e.currentTarget.ownerSVGElement!.getBoundingClientRect();
-            const vx = ((e.clientX - box.left) / box.width) * W;
-            let best = 0, dist = Infinity;
-            points.forEach((_, i) => {
-              const d = Math.abs(x(i) - vx);
-              if (d < dist) { dist = d; best = i; }
-            });
-            // Only when the nearest point actually changed: pointermove fires far
-            // faster than the reading can change.
-            if (best !== at) setAt(best);
-          }}
-          onPointerLeave={() => setAt(null)}
-        />
-      </svg>
-      {hover && at !== null && (
-        <div className="utip" style={{ left: `${(x(at) / W) * 100}%`, top: `${(y(hover.value) / H) * 100}%` }}>
-          <div className="d">{hover.tip}</div>
-          <div className="v">{label(hover.value)}</div>
-        </div>
-      )}
-    </div>
-  );
-}
 
 type BarRow = [key: string, name: string, value: number, note: string, color?: string];
 
@@ -392,53 +302,37 @@ export function Usage({ port }: { port: AgentPort }) {
       {err && <div className="uerr" role="alert">{err}</div>}
       {!report && !err && <div className="uwait">{t("usage.reading_the_records")}</div>}
       {report && <>
-      <section className="uhero">
-        {/* "Paid" is only honest while every folded quote came from the
-            provider and priced its call. One fallback-priced or unpriced row
-            and the label needs the caveat. */}
-        <div className="uhero-k">{report.costEstimated || report.costIncomplete ? t("usage.spend_2") : t("usage.paid")}</div>
-        <div className="uhero-fig">
-          <div className="uhero-v">{moneyList(report.cost)}</div>
-          {pricedFrom && <span className="uhero-scope">{t("usage.from_day_n_days_recorded", { day: pricedFrom.slice(5), n: priced.length })}</span>}
-          {report.costEstimated && <span className="uhero-scope">{t("usage.includes_estimates")}</span>}
+      <div className="utiles">
+        <div className="utile utile-paid">
+          {/* "Paid" is only honest while every folded quote came from the
+              provider and priced its call. One fallback-priced or unpriced row
+              and the label needs the caveat. */}
+          <div className="k">{report.costEstimated || report.costIncomplete ? t("usage.spend_2") : t("usage.paid")}</div>
+          <div className="v">{moneyList(report.cost)}</div>
+          {report.estimateCost?.length ? <div className="m uest">{t("usage.api_priced_estimate")} {moneyList(report.estimateCost)} · {t("usage.subscription_use_priced_at_api_2")}</div> : null}
+          {pricedFrom && <div className="m">{t("usage.from_day_n_days_recorded", { day: pricedFrom.slice(5), n: priced.length })}</div>}
+          {report.costEstimated && <div className="m">{t("usage.includes_estimates")}</div>}
           {report.costIncomplete && (
-            <span className="uhero-scope">
+            <div className="m">
               {t("usage.unpriced_calls_not_included")}
               {report.unpricedCalls ? ` · ${t("usage.n_calls_unpriced", { n: report.unpricedCalls })}` : null}
-            </span>
+            </div>
           )}
         </div>
-        {report.estimateCost?.length ? (
-          <div className="uhero-est">
-            <span className="uhero-estk">{t("usage.api_priced_estimate")}</span>
-            <span className="uhero-estv">{moneyList(report.estimateCost)}</span>
-            <span className="uhero-scope">{t("usage.subscription_use_priced_at_api_2")}</span>
-          </div>
-        ) : null}
-        <p className="uhero-note">
-          {t("usage.of_the_tok_input_tokens", {
-            tok: fmtTokens(input), rate: hitRate.toFixed(1),
-          })}
-        </p>
-      </section>
-
-      <div className="utiles">
         <div className="utile"><div className="k">{t("usage.input")}</div><div className="v">{fmtTokens(input)}</div>
           <div className="m">{t("usage.cache_hit_rate_note", { rate: hitRate.toFixed(1) })}</div></div>
         <div className="utile"><div className="k">{t("usage.provider_reported_total")}</div><div className="v">{fmtTokens(report.tokens)}</div>
           <div className="m">{t("usage.total_includes_output")}</div></div>
         <div className="utile"><div className="k">{t("usage.requests")}</div><div className="v">{fmtTokens(report.requests)}</div>
-          <div className="m">{t("usage.n_turns", { n: fmtTokens(report.turns) })}</div></div>
-        <div className="utile"><div className="k">{t("usage.active_days")}</div><div className="v">{report.active_days}</div>
+          <div className="m">{t("usage.n_turns", { n: fmtTokens(report.turns) })}</div>
           <div className="m">{t("usage.of_n_days_avg", { n: report.daily.length, avg: fmtTokens(report.active_days ? Math.round(report.requests / report.active_days) : 0) })}</div></div>
       </div>
 
+      <div className="ucharts">
       <section className="ucard">
         <div className="ucard-h"><h3>{hourView ? t("usage.hourly_usage") : t("usage.daily_usage")}</h3><span className="hint">{hourView ? t("usage.hover_for_an_hour") : t("usage.hover_for_a_day")}</span></div>
         <UsageStack points={usagePoints} label={(v) => fmtTokens(Math.round(v))} aria={hourView ? t("usage.hourly_tokens") : t("usage.daily_tokens")} />
       </section>
-
-      <BreakdownTable rows={hourView ? hourRows : dayRows} hourly={hourView} />
 
       {/* One chart per currency, for the same reason tokens and money get their
           own: two currencies do not share an axis either, and the panel keeping
@@ -447,10 +341,11 @@ export function Usage({ port }: { port: AgentPort }) {
         <section className="ucard" key={code}>
           <div className="ucard-h"><h3>{hourView ? t("usage.hourly_spend") : t("usage.daily_spend")}</h3><span className="hint">{code}</span></div>
           <p className="ucard-s">{t("usage.drawn_apart_from_usage_different")}</p>
-          <Plot
-            points={hourView
+          <UsageStack single
+            points={(hourView
               ? visibleHours.map((h) => ({ key: h.hour, axis: h.hour, tip: h.hour, value: Number(h.cost?.find((c) => c.currency === code)?.amount ?? 0) }))
-              : priced.filter((d) => d.cost?.some((c) => c.currency === code)).map((d) => ({ key: d.day, axis: d.day.slice(5), tip: d.day, value: Number(d.cost?.find((c) => c.currency === code)?.amount ?? 0) }))}
+              : priced.filter((d) => d.cost?.some((c) => c.currency === code)).map((d) => ({ key: d.day, axis: d.day.slice(5), tip: d.day, value: Number(d.cost?.find((c) => c.currency === code)?.amount ?? 0) })))
+              .map((p) => ({ key: p.key, axis: p.axis, tip: p.tip, hit: p.value, miss: 0, total: p.value }))}
             label={(v) => money(v, code)}
             aria={hourView ? t("usage.hourly_spend") : t("usage.daily_spend")}
           />
@@ -461,6 +356,9 @@ export function Usage({ port }: { port: AgentPort }) {
           )}
         </section>
       ))}
+      </div>
+
+      <BreakdownTable rows={hourView ? hourRows : dayRows} hourly={hourView} />
 
       <div className="utwo">
         <section className="ucard">

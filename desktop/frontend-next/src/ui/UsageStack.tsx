@@ -9,7 +9,7 @@ const W = 860, H = 176, PL = 58, PR = 12, PT = 12, PB = 24, GAP = 2;
 /** One bar per day or hour: the input side split into tokens served from the
  *  cache and tokens that were not. The provider's own total rides in the
  *  tooltip, since it is a different count and shares no axis with the split. */
-export function UsageStack({ points, label, aria }: { points: StackPoint[]; label: (v: number) => string; aria: string }) {
+export function UsageStack({ points, label, aria, single }: { points: StackPoint[]; label: (v: number) => string; aria: string; single?: boolean }) {
   const [at, setAt] = useState<number | null>(null);
   const max = niceMax(Math.max(...points.map((p) => p.hit + p.miss), 0));
   const band = (W - PL - PR) / Math.max(points.length, 1);
@@ -20,10 +20,10 @@ export function UsageStack({ points, label, aria }: { points: StackPoint[]; labe
   const hover = at === null ? null : points[at];
   return (
     <div className="uplot ustack" data-on={hover ? "" : undefined}>
-      <div className="ulegend" aria-hidden="true">
+      {!single && <div className="ulegend" aria-hidden="true">
         <span><i data-s="hit" />{t("usage.input_cache_hit")}</span>
         <span><i data-s="miss" />{t("usage.input_cache_miss")}</span>
-      </div>
+      </div>}
       <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label={aria}>
         <g className="ugrid">
           {[0, max / 2, max].map((v) => <line key={v} x1={PL} x2={W - PR} y1={H - PB - h(v)} y2={H - PB - h(v)} />)}
@@ -53,9 +53,13 @@ export function UsageStack({ points, label, aria }: { points: StackPoint[]; labe
       {hover && at !== null && (
         <div className="utip" style={{ left: `${((x(at) + bw / 2) / W) * 100}%`, top: `${((H - PB - h(hover.hit + hover.miss)) / H) * 100}%` }}>
           <div className="d">{hover.tip}</div>
-          <div className="r"><i data-s="hit" />{t("usage.input_cache_hit")} <b>{label(hover.hit)}</b></div>
-          <div className="r"><i data-s="miss" />{t("usage.input_cache_miss")} <b>{label(hover.miss)}</b></div>
-          <div className="r">{t("usage.provider_reported_total")} <b>{label(hover.total)}</b></div>
+          {single ? <div className="r"><b>{label(hover.hit)}</b></div> : (
+            <>
+              <div className="r"><i data-s="hit" />{t("usage.input_cache_hit")} <b>{label(hover.hit)}</b></div>
+              <div className="r"><i data-s="miss" />{t("usage.input_cache_miss")} <b>{label(hover.miss)}</b></div>
+              <div className="r">{t("usage.provider_reported_total")} <b>{label(hover.total)}</b></div>
+            </>
+          )}
         </div>
       )}
     </div>

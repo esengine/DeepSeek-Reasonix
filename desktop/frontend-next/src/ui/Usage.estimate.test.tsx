@@ -26,18 +26,18 @@ const REPORT: UsageReport = {
 async function open(report: UsageReport) {
   const port = { usage: vi.fn().mockResolvedValue(report), providers: vi.fn().mockResolvedValue([]), models: vi.fn().mockResolvedValue([]) } as unknown as AgentPort;
   const view = render(<Usage port={port} />);
-  await waitFor(() => expect(view.container.querySelector(".uhero")).toBeTruthy());
+  await waitFor(() => expect(view.container.querySelector(".utile-paid")).toBeTruthy());
   return view;
 }
 
 describe("a subscription's estimate on the usage page", () => {
   it("is shown on its own line, labelled as an estimate, and never inside the paid total", async () => {
     const { container } = await open(REPORT);
-    const paid = container.querySelector(".uhero-v")!;
+    const paid = container.querySelector(".utile-paid .v")!;
     expect(paid.textContent).toContain("4");
     expect(paid.textContent).not.toContain("14");
     expect(paid.textContent).not.toContain("10");
-    const est = container.querySelector(".uhero-est")!;
+    const est = container.querySelector(".uest")!;
     expect(est.textContent).toContain("10");
     expect(est.textContent).toContain("等价估算");
   });
@@ -57,7 +57,7 @@ describe("a subscription's estimate on the usage page", () => {
 
   it("shows nothing extra when there is no estimate", async () => {
     const { container } = await open({ ...REPORT, estimateCost: undefined, daily: REPORT.daily.map((d) => ({ ...d, estimateCost: undefined })) });
-    expect(container.querySelector(".uhero-est")).toBeNull();
+    expect(container.querySelector(".uest")).toBeNull();
     expect(container.querySelector(".udaily-est")).toBeNull();
   });
 });
