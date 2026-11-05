@@ -10,12 +10,12 @@
 .flow .call[data-call] > .c { margin-bottom: 7px; padding: 7px 9px 8px; border: 1px solid var(--hair); border-radius: var(--r-md); background: var(--surface); }
 .flow .call[data-call][data-running] > .c { border-color: var(--border); }
 
-.activity-group { margin: 8px 0 0; padding: 0; border: 0; border-radius: 0; overflow: clip; }
+.activity-group { margin: 8px 0 0; padding: 3px 4px; border: 1px solid var(--hair); border-radius: var(--r-md); overflow: clip; }
 .activity-group > summary {
   height: 30px; min-height: 30px; padding: 0 10px; gap: 8px; box-sizing: border-box; border-radius: var(--r-sm);
   background: transparent; color: var(--muted); font: var(--w-med) var(--fs-meta)/1 var(--ui);
 }
-.activity-group[open] > summary { background: transparent; border-bottom: 1px solid var(--hair); border-radius: 0; }
+.activity-group[open] > summary { background: transparent; border-bottom: 0; }
 .activity-group > summary:hover { color: var(--text); }
 .activity-group > summary .studio-icon { width: 12px; height: 12px; color: var(--faint); }
 .activity-group .activity-title { color: inherit; font: inherit; }
@@ -190,3 +190,4 @@
 .note[data-gone] .note-strong { text-decoration: line-through; }
 .flow .call[data-k="host"][data-light] > .c > .hl .tag { background: none; padding: 0; color: var(--faint); font: var(--w-med) var(--fs-micro) var(--ui); }
 .activity-group .activity-errors { font-size: var(--fs-micro); }
+.activity-body .hl .tag { display: none; }
