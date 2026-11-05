@@ -21,33 +21,34 @@ interface Props {
   cwd?: string;
   busy: string;
   signedIn: boolean;
+  memories?: number;
   onIsolate: () => void;
   onChanged: () => void;
   onRecovered: () => void;
 }
 
-export function DataSettings({ port, homePort, localPort, hub, workspace, cwd, busy, signedIn, onIsolate, onChanged, onRecovered }: Props) {
+export function DataSettings({ port, homePort, localPort, hub, workspace, cwd, busy, signedIn, memories, onIsolate, onChanged, onRecovered }: Props) {
   return (
     <>
       <SectionCard title={t("data.memory_and_usage")} hint={t("data.what_the_agent_remembers_and")}>
-      <Group id="memory"
+      <Group id="memory" pill={memories === undefined ? t("settings.open_memory") : `${t("settings.open_memory")}（${memories}）`}
       title={t("data.memory")}
-      hint={t("data.what_the_agent_wrote_down")}
+      hint={t("settings.what_it_remembers")}
     >
       <Memory port={localPort} />
     </Group>
       <UsageSettings port={homePort} onChanged={onChanged} />
       </SectionCard>
       <SectionCard title={t("data.session_storage")} hint={t("data.where_sessions_and_indexes_live")}>
-      <Group id="storage" title={t("common.storage")} hint={t("data.where_the_data_is_written")}><Storage port={homePort} hub={hub} workspace={workspace} onRecovered={onRecovered} /></Group>
+      <Group id="storage" pill={t("settings.manage_storage")} title={t("common.storage")} hint={t("settings.storage_hint")}><Storage port={homePort} hub={hub} workspace={workspace} onRecovered={onRecovered} /></Group>
       <AutoArchive port={port} />
       <SessionDirSettings cwd={cwd} busy={busy} onIsolate={onIsolate} />
       <LegacySessionsSection />
       </SectionCard>
       <SectionCard title={t("data.backup")} hint={t("data.take_your_configuration_to_another")}>
-      <Group id="backup-file" title={t("data.export_and_import_config")} hint={t("data.no_account_needed_export_this")}><BackupFile port={port} /></Group>
+      <Group id="backup-file" pill={t("settings.export_and_import")} title={t("data.export_and_import_config")} hint={t("settings.config_in_one_file")}><BackupFile port={port} /></Group>
       {signedIn && (
-      <Group id="backup" title={t("data.cloud_backup")} hint={t("data.encrypt_this_machines_models_extensions")}>
+      <Group id="backup" pill={t("safety.details")} title={t("data.cloud_backup")} hint={t("settings.back_up_to_the_cloud")}>
       <Backup port={port} />
     </Group>
       )}

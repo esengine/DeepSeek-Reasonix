@@ -12,14 +12,14 @@ export function UsageSettings({ port, onChanged }: { port: AgentPort; onChanged:
   const [rev, setRev] = useState(0);
   return (
     <>
-      <DisplayCurrency port={port} onChanged={() => { setRev((n) => n + 1); onChanged(); }} />
-      <Group id="usage"
+      <Group id="usage" pill={t("settings.view_usage")}
         title={t("usage.usage_cost")}
-        hint={t("usage.token_usage_and_cost_recorded")}
+        hint={t("settings.usage_hint")}
       >
         <Usage key={rev} port={port} />
       </Group>
       <UploadUsage port={port} />
+      <DisplayCurrency port={port} onChanged={() => { setRev((n) => n + 1); onChanged(); }} />
     </>
   );
 }

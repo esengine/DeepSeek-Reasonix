@@ -1,26 +1,24 @@
 import { t } from "../i18n";
-import { Group } from "./Group";
+import { SettingRow } from "./SettingRow";
 import { Path } from "./Path";
 
 export function SessionDirSettings({ cwd, busy, onIsolate }: { cwd?: string; busy: string; onIsolate: () => void }) {
   return (
-    <Group id="session-dir" title={t("session.where_this_session_writes")}>
-      <div className="kv">
-        <span className="k">{t("session.working_directory")}</span>
-        <span className="v"><Path of={cwd ?? "—"} /></span>
+    <>
+      <SettingRow id="session-dir" title={t("session.where_this_session_writes")} desc={t("settings.where_session_records_go")} more={t("session.folders_are_managed_in_the")}>
+        <span className="srow-val"><Path of={cwd ?? "—"} /></span>
+      </SettingRow>
+      <div className="srow-more">
+        <div className="lrow">
+          <span className="tx">
+            <span className="lb">{t("session.work_on_an_isolated_copy")}</span>
+            <span className="ds">{t("session.work_in_a_separate_git")}</span>
+          </span>
+          <button className="spill" data-action="workspace.isolate" disabled={!!busy} onClick={onIsolate}>
+            {t(busy === "isolate" ? "session.opening" : "session.open_one")}
+          </button>
+        </div>
       </div>
-      <p className="note">
-        {t("session.folders_are_managed_in_the")}
-      </p>
-      <div className="lrow">
-        <span className="tx">
-          <span className="lb">{t("session.work_on_an_isolated_copy")}</span>
-          <span className="ds">{t("session.work_in_a_separate_git")}</span>
-        </span>
-        <button className="act" data-action="workspace.isolate" disabled={!!busy} onClick={onIsolate}>
-          {t(busy === "isolate" ? "session.opening" : "session.open_one")}
-        </button>
-      </div>
-    </Group>
+    </>
   );
 }

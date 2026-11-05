@@ -20,21 +20,21 @@ describe("the display currency setting", () => {
     const port = portWith(async (mode) => ({ ...base, mode }));
     const changed = vi.fn();
     render(<DisplayCurrency port={port} onChanged={changed} />);
-    const auto = await screen.findByRole("button", { name: "自动" });
-    expect(auto.getAttribute("aria-pressed")).toBe("true");
-    const usd = screen.getByRole("button", { name: "美元 USD" });
+    const auto = await screen.findByRole("radio", { name: "自动" });
+    expect(auto.getAttribute("aria-checked")).toBe("true");
+    const usd = screen.getByRole("radio", { name: "美元 USD" });
     await userEvent.click(usd);
     expect(port.saveDisplayCurrency).toHaveBeenCalledTimes(1);
     expect(port.saveDisplayCurrency).toHaveBeenCalledWith("USD");
-    await waitFor(() => expect(usd.getAttribute("aria-pressed")).toBe("true"));
-    expect(auto.getAttribute("aria-pressed")).toBe("false");
+    await waitFor(() => expect(usd.getAttribute("aria-checked")).toBe("true"));
+    expect(auto.getAttribute("aria-checked")).toBe("false");
     expect(changed).toHaveBeenCalledTimes(1);
   });
 
   it("does not write when the chosen mode is already stored", async () => {
     const port = portWith(async (mode) => ({ ...base, mode }));
     render(<DisplayCurrency port={port} onChanged={() => {}} />);
-    await userEvent.click(await screen.findByRole("button", { name: "自动" }));
+    await userEvent.click(await screen.findByRole("radio", { name: "自动" }));
     expect(port.saveDisplayCurrency).not.toHaveBeenCalled();
   });
 
@@ -44,9 +44,9 @@ describe("the display currency setting", () => {
     });
     const changed = vi.fn();
     render(<DisplayCurrency port={port} onChanged={changed} />);
-    await userEvent.click(await screen.findByRole("button", { name: "人民币 CNY" }));
+    await userEvent.click(await screen.findByRole("radio", { name: "人民币 CNY" }));
     await waitFor(() => expect(document.querySelector(".why")).toBeTruthy());
-    const pressed = screen.getAllByRole("button").filter((b) => b.getAttribute("aria-pressed") === "true");
+    const pressed = screen.getAllByRole("radio").filter((b) => b.getAttribute("aria-checked") === "true");
     expect(pressed.map((b) => b.textContent)).toEqual(["自动"]);
     expect(changed).not.toHaveBeenCalled();
   });
@@ -62,7 +62,7 @@ describe("a price the pinned currency cannot be shown for", () => {
     cleanup();
     const fine = { displayCurrency: vi.fn(async () => ({ ...base, mode: "CNY" as const })), saveDisplayCurrency: vi.fn() } as unknown as AgentPort;
     render(<DisplayCurrency port={fine} onChanged={() => {}} />);
-    await screen.findByRole("button", { name: "自动" });
+    await screen.findByRole("radio", { name: "自动" });
     expect(screen.queryByText(/恢复官方价/)).toBeNull();
   });
 });

@@ -3,7 +3,7 @@ import { t } from "../i18n";
 import { reason } from "../i18n/kernel";
 import type { AgentPort } from "../port/port";
 import type { AutoArchiveSettings } from "../port/boundary";
-import { Group } from "./Group";
+import { SettingRow } from "./SettingRow";
 import { Switch } from "./Switch";
 
 const LIMIT = 3650;
@@ -44,30 +44,12 @@ export function AutoArchive({ port }: { port: AgentPort }) {
     if (n !== state.days) void save({ enabled: state.enabled, days: n });
   };
 
-  const body = !state ? (
-    <div className="empty">{t("data.could_not_read_the_auto")}</div>
-  ) : (
-    <div className="box">
-      <div className="lrow">
-        <span className="tx">
-          <span className="lb">{t("data.archive_conversations_left_idle")}</span>
-          <span className="ds">{t("data.off_by_default_when_on")}</span>
-        </span>
-        <Switch
-          data-action="auto-archive.enabled"
-          on={state.enabled}
-          busy={busy}
-          label={t("data.archive_conversations_left_idle")}
-          onClick={() => void save({ enabled: !state.enabled, days: state.days })}
-        />
-      </div>
-      <div className="lrow threshold-row">
-        <span className="tx">
-          <span className="lb">{t("data.idle_days")}</span>
-          <span className="ds">{t("data.archived_only_once_it_has", { n: state.defaultDays })}</span>
-        </span>
-        <div className="threshold-control">
-          <span className="unit-field">
+  if (!state) return <div className="empty">{t("data.could_not_read_the_auto")}</div>;
+  return (
+    <>
+      <SettingRow id="auto-archive" title={t("data.auto_archive_inactive_conversations")} desc={t("settings.days_before_archiving")}
+        more={t("data.archiving_only_moves_a_conversation")}>
+        <span className="unit-field">
             <input type="text" inputMode="numeric" aria-label={t("data.idle_days")} data-action-keydown="auto-archive.days" data-action-change="auto-archive.days"
               value={days} disabled={busy}
               onChange={(e) => setDays(e.target.value.replace(/\D/g, ""))}
@@ -75,17 +57,11 @@ export function AutoArchive({ port }: { port: AgentPort }) {
               onKeyDown={blurOnEnter} />
             <i>{t("data.days")}</i>
           </span>
-        </div>
-      </div>
+        <Switch data-action="auto-archive.enabled" on={state.enabled} busy={busy} label={t("data.archive_conversations_left_idle")}
+          onClick={() => void save({ enabled: !state.enabled, days: state.days })} />
+      </SettingRow>
       {error && <div className="why">{error}</div>}
-    </div>
-  );
-
-  return (
-    <Group id="auto-archive" title={t("data.auto_archive_inactive_conversations")}
-      hint={t("data.archiving_only_moves_a_conversation")}>
-      {body}
-    </Group>
+    </>
   );
 }
 

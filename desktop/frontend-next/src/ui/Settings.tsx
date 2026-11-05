@@ -87,7 +87,8 @@ export function Settings({ hub, onError, port, networkPort, localWorkspacePort, 
   const wide = useSyncExternalStore(onSettingsWideChange, settingsWide, settingsWide);
   const homePort = networkPort ?? port;
   const localPort = localWorkspacePort ?? homePort;
-  const [openedName, openedAnchor = ""] = (opened ?? "").split(":", 2);
+  const [openedName, namedAnchor = ""] = (opened ?? "").split(":", 2);
+  const openedAnchor = namedAnchor || (openedName === "memory" ? "memory" : "");
   // Destinations of their own: one section drawn as a page, without the rest.
   const soloSection = SOLO[openedName];
   const solo = !!soloSection;
@@ -623,7 +624,7 @@ export function Settings({ hub, onError, port, networkPort, localWorkspacePort, 
           {at === "account" && <About port={homePort} />}
           {at === "storage" && (
             <DataSettings port={port} homePort={homePort} localPort={localPort} hub={hub} workspace={workspaceRoot ?? (homePort === port ? status?.workspaceRoot ?? "" : "")} cwd={status?.cwd} busy={busy}
-              signedIn={!!acct?.signedIn && !!acct.user} onIsolate={() => run("isolate", () => port.isolateWorkspace())} onChanged={onChanged} onRecovered={() => { onChanged(); onSessionsRecovered?.(); }} />
+              signedIn={!!acct?.signedIn && !!acct.user} memories={memCount} onIsolate={() => run("isolate", () => port.isolateWorkspace())} onChanged={onChanged} onRecovered={() => { onChanged(); onSessionsRecovered?.(); }} />
           )}
 
           {at === "common" && <CommonSettings port={port} homePort={homePort} theme={theme} onTheme={onTheme} look={look} onLook={onLook} />}

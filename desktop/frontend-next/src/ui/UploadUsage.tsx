@@ -21,10 +21,11 @@ export function UploadUsage({ port }: { port: Pick<AgentPort, "uploadUsage"> }) 
   }, [port]);
   const today = report?.daily[report.daily.length - 1]?.bytes ?? 0;
   return (
-    <Group id="upload-usage"
+    <Group id="upload-usage" pill={t("safety.details")}
       title={t("usage.upload_volume")}
-      hint={t("usage.the_size_of_the_request")}
+      hint={t("settings.size_of_requests_sent")}
     >
+      <p className="note">{t("usage.the_size_of_the_request")}</p>
       {failed && <p className="note" role="alert">{failed}</p>}
       {report && report.requests === 0 && <p className="note">{t("usage.nothing_recorded_yet_counting_starts")}</p>}
       {report && report.requests > 0 && (

@@ -53,8 +53,8 @@ it("still shows one that is running", () => {
 
 it("is a choice the settings section makes and remembers", async () => {
   render(<LegacySessionsSection />);
-  expect(screen.getByRole("button", { name: "显示" }).getAttribute("aria-pressed")).toBe("true");
-  await userEvent.click(screen.getByRole("button", { name: "隐藏" }));
-  expect(screen.getByRole("button", { name: "隐藏" }).getAttribute("aria-pressed")).toBe("true");
+  expect(screen.getByRole("radio", { name: "显示" }).getAttribute("aria-checked")).toBe("true");
+  await userEvent.click(screen.getByRole("radio", { name: "隐藏" }));
+  expect(screen.getByRole("radio", { name: "隐藏" }).getAttribute("aria-checked")).toBe("true");
   expect(localStorage.getItem("rx-hide-legacy-sessions")).toBe("on");
 });

@@ -31,6 +31,7 @@ it("keeps machine reads separate from active-pane account operations", async () 
   render(<App hub={hub} />);
   await userEvent.click(await screen.findByRole("button", { name: "设置" }));
   await userEvent.click(await screen.findByRole("tab", { name: /^数据/ }, { timeout: 10000 }));
+  await userEvent.click(await screen.findByRole("button", { name: /^打开记忆/ }));
   await screen.findAllByText("This machine fact");
   expect(remoteMemories).not.toHaveBeenCalled();
   expect(localAccount).not.toHaveBeenCalled();
@@ -72,6 +73,7 @@ it.each(["second", "remote"])("uses the active local workspace, or first local f
   render(<App hub={hub} />);
   await userEvent.click(await screen.findByRole("button", { name: "设置" }));
   await userEvent.click(await screen.findByRole("tab", { name: /^数据/ }));
+  await userEvent.click(await screen.findByRole("button", { name: /^打开记忆/ }));
   await screen.findAllByText(`${expected} fact`);
   await userEvent.click(document.querySelector<HTMLButtonElement>('.memdetail [data-action="memory.forget"]')!);
   expect(forgot).toHaveBeenCalledWith(expected);
@@ -89,6 +91,7 @@ it.each(["second", "remote"])("uses the active local workspace, or first local f
     await userEvent.click(tabs[0]);
     await userEvent.click(screen.getByRole("button", { name: "设置" }));
     await userEvent.click(await screen.findByRole("tab", { name: /^数据/ }));
+    await userEvent.click(await screen.findByRole("button", { name: /^打开记忆/ }));
     await screen.findAllByText("first fact");
     expect(screen.queryByText("second fact")).toBeNull();
   }
