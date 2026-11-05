@@ -1,7 +1,7 @@
 .flow .line-row { margin: 0; padding: 4px 0 5px; border-bottom: 1px solid var(--hair); }
 .line-row .lr-main { display: flex; align-items: center; gap: 8px; min-height: 24px; }
-.line-row .sym { flex: none; width: 14px; height: 14px; margin: 0; border: 0; border-radius: 0; background: none; box-shadow: none; color: var(--faint); }
-.line-row .sym svg { width: 12px; height: 12px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+.line-row .sym, .note-hd .sym { flex: none; width: 14px; height: 14px; margin: 0; border: 0; border-radius: 0; background: none; box-shadow: none; color: var(--faint); }
+.line-row .sym svg, .note-hd .sym svg { width: 12px; height: 12px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
 .line-row[data-lvl="ok"] .sym { color: var(--ok); }
 .line-row[data-lvl="warn"] .sym { color: var(--warn-ink); }
 .line-row[data-lvl="err"] .sym { color: var(--err-ink); }

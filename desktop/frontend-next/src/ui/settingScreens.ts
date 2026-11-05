@@ -39,7 +39,6 @@ export const SETTING_SCREEN: Record<string, string> = {
   "tools.video_url_passthrough": "tools:web-access",
   "agent.subagent_claims": "tools:subagent-claims",
   "agent.write_lease": "tools:write-lease",
-  "ui.show_receipt": "session:receipt",
   "ui.show_changed_files": "session:changed-files",
   "ui.feedback_level_notices": "session:feedback-level-notices",
   "ui.fold_turn_work": "session:fold-work",

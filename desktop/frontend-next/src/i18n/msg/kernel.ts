@@ -557,7 +557,6 @@ export const KERNEL: Messages = {
   "kernel.the_queue_record_was_corrupt": { zh: "队列记录损坏，这一条是从残留文件里找回的", en: "The queue record was corrupt; this item was salvaged from leftover files" },
   "kernel.the_reasonix_installed_on_host": { zh: "安装到 {host} 上的 reasonix 无法运行。该目录可能挂载了 noexec，也可能传输中断", en: "The reasonix installed on {host} will not run. That directory may be mounted noexec, or the transfer was cut short" },
   "kernel.the_reasonix_on_host_is": { zh: "{host} 上的 reasonix 版本过旧，无法打开面板 —— 请先将该机器上的 reasonix 升级至与本机同一代", en: "The reasonix on {host} is too old to open a pane — upgrade that machine's reasonix to the same line as this one first" },
-  "kernel.the_receipt_card_setting_was": { zh: "交付验收卡片的设置未能保存：{detail}", en: "The receipt card setting was not saved: {detail}" },
   "kernel.the_recursive_delete_extent_is": { zh: "无法确定递归删除范围；请使用字面命令名、路径和解释器内容", en: "The recursive delete extent is unknown; use a literal command name, path and interpreter payload" },
   "kernel.the_recursive_delete_target_is": { zh: "递归删除目标受保护或超出授权范围；请使用工作区或授权目录内的字面路径", en: "The recursive delete target is protected or outside the granted roots; use a literal path inside the workspace or a granted directory" },
   "kernel.the_refine_request_was_malformed": { zh: "优化请求格式不正确", en: "The refine request was malformed" },

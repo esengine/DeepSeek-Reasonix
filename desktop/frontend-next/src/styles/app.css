@@ -1223,19 +1223,6 @@
   .chrome .goal[data-flash] { animation: flash 1.3s var(--ease-out) }
 .medit-r .n .r { color: var(--del) }
 
-  .guard { margin: 0; padding: 0 }
-  .enterbox[data-enter] .guard { animation: card var(--t-card) var(--ease-out) both }
-  .guard-hd { display: flex; align-items: baseline; gap: 8px }
-  .guard-hd .verdict { font: var(--w-med) var(--fs-ui) var(--ui); color: var(--text); flex: none }
-  .guard-hd .risk { margin-left: auto; font: var(--w-med) var(--fs-micro) var(--ui); color: var(--faint); white-space: nowrap }
-  .guard-hd .scope { font-size: var(--fs-ui); color: var(--muted); min-width: 0 }
-  .guard-hd .gauge { display: flex; gap: 2px; flex: none; align-self: center }
-  .guard-hd .gauge i { width: 3px; height: 9px; border-radius: var(--r-xs); background: var(--hair) }
-  .guard[data-risk="low"] .gauge i:nth-child(1) { background: var(--ok) }
-  .guard[data-risk="medium"] .gauge i:nth-child(-n+2) { background: var(--accent-ink) }
-  .guard[data-risk="high"] .gauge i { background: var(--err) }
-  .guard-why { margin-top: var(--y-close); font-size: var(--fs-ui); line-height: 1.62; color: var(--muted) }
-
   .comp { margin-top: 7px }
   .comp-bar { height: 3px; background: color-mix(in srgb, var(--accent) 20%, var(--overlay)); overflow: hidden }
   .comp-bar i { display: block; height: 100%; background: var(--ok); transition: width var(--t-live) var(--ease-out) }
@@ -2083,7 +2070,7 @@
     .call, .nest, .ask, .hits > *, .steps > *, .term-l, .dl, .plan .s, .find,
     .ag, .file, .menu, .nest-ret, .hl .cost, .sym, .pip[data-settled],
     .plan .s[data-done] .b,
-    .rmark, .rmark path, .await i, .apv, .guard, .rrow, .shot, .intake { animation: none !important }
+    .rmark, .rmark path, .await i, .apv, .rrow, .shot, .intake { animation: none !important }
     .pane[data-intake] .compose { transform: none !important }
     .rmark path { stroke-dashoffset: 0 !important }
 

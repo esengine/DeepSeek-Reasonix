@@ -5,9 +5,9 @@ import { clock, elapsed } from "../i18n/format";
 const run = (done: object) => reduce(reduce(reduce(initialState, { kind: "turn_started" }), { kind: "message", text: "答复" }), { kind: "turn_done", ...done });
 
 describe("the turn's run time", () => {
-  it("is drawn after the answer on the kernel's figure, before the receipt", () => {
-    const s = run({ workDurationMs: 65_000, receipt: { saysSomething: true, verdict: "done" } });
-    expect(s.items.map((i) => i.t)).toEqual(["say", "worked", "receipt"]);
+  it("is drawn after the answer on the kernel's figure of the turn", () => {
+    const s = run({ workDurationMs: 65_000 });
+    expect(s.items.map((i) => i.t)).toEqual(["say", "worked"]);
     expect(s.items[1]).toMatchObject({ t: "worked", ms: 65_000 });
   });
 

@@ -37,7 +37,7 @@ describe("what a settings block says about itself", () => {
   });
 
   it("carries the scope as data, not only as a sentence", () => {
-    const { container } = render(<Group id="preset" title="执行设定" />);
+    const { container } = render(<Group id="ext-runtime" title="执行设定" />);
     expect(container.querySelector(".apply")?.getAttribute("data-scope")).toBe("session");
   });
 });

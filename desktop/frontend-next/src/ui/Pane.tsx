@@ -1,7 +1,5 @@
 import { memo, useCallback, useEffect, useMemo, useReducer, useRef, useState, useSyncExternalStore } from "react";
 import { streamBudget } from "../port/streambudget";
-import { loadReceiptPref, receiptPrefOf } from "../state/receiptpref";
-import { ReceiptPrefContext } from "../state/foldpref";
 import { moneyList } from "../i18n/format";
 import { pushToast } from "../state/toasts";
 import { reason } from "../i18n/kernel";
@@ -202,8 +200,6 @@ function PaneView({ port, hub, rt, title, active, visible, sideHost, side, onFoc
 
   const [wallet, refreshWallet] = useWallet(port, accountOf(status?.modelRef));
   const hideAmounts = useHidesAmounts();
-
-  useEffect(() => { void loadReceiptPref(port, !rt.host); }, [port, rt.host]);
 
   const revalue = useCallback(() => {
     port.status().then((st) => { applyStatus(st); dispatch(totalsOf(st) as never); }).catch(() => {});
@@ -437,8 +433,7 @@ function PaneView({ port, hub, rt, title, active, visible, sideHost, side, onFoc
     onRevise: () => setAskFocus((n) => n + 1),
   });
 
-  const receiptPref = receiptPrefOf(port);
-  const find = useFind(s.items, findPulse, active, useCallback(() => showView("flow"), [showView]), receiptPref, findTogglePulse);
+  const find = useFind(s.items, findPulse, active, useCallback(() => showView("flow"), [showView]), findTogglePulse);
   useHistorySearch(historyPaging, find.open, find.query);
 
   const onRunDetail = useCallback(() => showView("analysis"), [showView]);
@@ -523,7 +518,6 @@ function PaneView({ port, hub, rt, title, active, visible, sideHost, side, onFoc
       <div className="pviews">
       <div className="worktree-stage-host" ref={setWorktreeTarget} hidden={tab !== "flow" || !worktreePhase}/>
 
-      <ReceiptPrefContext.Provider value={receiptPref}>
       <PaneShown.Provider value={shown}>
       <LiveWork.Provider value={live}>
       <NewAnswerAnchor.Provider value={marker ? newAnswerAt : null}>
@@ -567,7 +561,6 @@ function PaneView({ port, hub, rt, title, active, visible, sideHost, side, onFoc
       </NewAnswerAnchor.Provider>
       </LiveWork.Provider>
       </PaneShown.Provider>
-      </ReceiptPrefContext.Provider>
       {conversationFiles.menuView}
 
       <div className="scroll" data-pane="analysis" hidden={tab !== "analysis"}>

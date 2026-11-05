@@ -172,10 +172,6 @@ var mirroredWireTypesTail = []wireMirror{
 	{"internal/contract/eventwire/extension.go", "ExtensionView", tsWireFile, "ExtensionView"},
 	{"internal/contract/eventwire/wire.go", "StreamAttempt", tsWireFile, "StreamAttempt"},
 	{"internal/contract/eventwire/wire.go", "MemoryCitation", tsWireFile, "MemoryCitation"},
-	{"internal/contract/eventwire/receipt.go", "CompletionReceipt", tsWireFile, "Receipt"},
-	{"internal/contract/eventwire/receipt.go", "ReceiptChange", tsWireFile, "ReceiptChange"},
-	{"internal/contract/eventwire/receipt.go", "ReceiptVerification", tsWireFile, "ReceiptVerification"},
-	{"internal/contract/eventwire/receipt.go", "ReceiptGap", tsWireFile, "ReceiptGap"},
 	// workspace
 	{"internal/platform/gitstatus/gitstatus.go", "Change", tsWorkspaceFile, "WorkspaceChange"},
 	{"internal/frontend/serve/workspace_listing.go", "workspaceListing", tsWorkspaceFile, "WorkspaceFiles"},

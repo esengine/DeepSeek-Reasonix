@@ -1,7 +1,7 @@
 // What a session is made of, apart from the reducer that maintains it: the
 // rows the transcript draws and the state one turn hands the next.
 import type { StateTool } from "./outputcap";
-import type { Ask, Approval, Compaction, CostCoverage, ExtensionSurface, Guardian, Receipt, StoredAttachment, Via, WorkspaceLease } from "../port/wire";
+import type { Ask, Approval, Compaction, CostCoverage, ExtensionSurface, Guardian, StoredAttachment, Via, WorkspaceLease } from "../port/wire";
 import type { Sample } from "../port/tokens";
 import type { Executions } from "./executions";
 
@@ -53,7 +53,6 @@ export type Item =
   | { t: "ask"; id: string; ask: Ask; skipAt?: number; answered?: string[][]; answeredElsewhere?: boolean; timedOut?: boolean; by?: Via | "window"; said?: string; recorded?: string; surfaceValues?: Record<string, unknown>; surfaceExpired?: boolean }
   | { t: "compaction"; id: string; c: Compaction; done: boolean }
   | { t: "remember"; id: string; m: RememberedFact; forgotten?: boolean }
-  | { t: "receipt"; id: string; r: Receipt }
   | { t: "worked"; id: string; ms: number; startedAt?: number }
   | { t: "extension"; id: string; ext: ExtensionSurface }
   // code identifies what the kernel is reporting. text is its own English,

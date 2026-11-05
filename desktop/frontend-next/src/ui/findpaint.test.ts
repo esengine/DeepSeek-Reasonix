@@ -27,27 +27,27 @@ beforeEach(() => {
 describe("the painter draws what the counter counted", () => {
   it("paints one range per regex hit", () => {
     const text = "alpha beta gamma";
-    const hits = search([say("i1", text)], "\\w+a", false, { regex: true });
+    const hits = search([say("i1", text)], "\\w+a", { regex: true });
     expect(painted(text, "\\w+a", { regex: true })).toHaveLength(hits.length);
   });
 
   it("paints one range per case-sensitive hit", () => {
     const text = "Retry retry RETRY";
-    const hits = search([say("i1", text)], "retry", false, { caseSensitive: true });
+    const hits = search([say("i1", text)], "retry", { caseSensitive: true });
     expect(painted(text, "retry", { caseSensitive: true })).toHaveLength(hits.length);
   });
 
   it("counts a greedy match once, not once per position", () => {
-    expect(search([say("i1", "aaaa")], "a+", false, { regex: true })).toHaveLength(1);
+    expect(search([say("i1", "aaaa")], "a+", { regex: true })).toHaveLength(1);
     expect(painted("aaaa", "a+", { regex: true })).toHaveLength(1);
   });
 
   it("counts and paints nothing for an empty match", () => {
     // `^` and `a*` match the empty string; a hit with no range is one the box
     // can neither highlight nor scroll to.
-    expect(search([say("i1", "alphabet")], "^", false, { regex: true })).toHaveLength(0);
+    expect(search([say("i1", "alphabet")], "^", { regex: true })).toHaveLength(0);
     expect(painted("alphabet", "^", { regex: true })).toHaveLength(0);
-    expect(search([say("i1", "bbb")], "a*", false, { regex: true })).toHaveLength(0);
+    expect(search([say("i1", "bbb")], "a*", { regex: true })).toHaveLength(0);
     expect(painted("bbb", "a*", { regex: true })).toHaveLength(0);
   });
 

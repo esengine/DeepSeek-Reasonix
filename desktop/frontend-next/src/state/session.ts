@@ -4,7 +4,7 @@ import { foldHistoryItems } from "./fold";
 import { measureInteractions } from "./interactions";
 import { foldExtension } from "./extension";
 import { surfaceHistory } from "../ui/surface/call";
-import type { CostCoverage, Receipt, Tool, WireEvent } from "../port/wire";
+import type { CostCoverage, Tool, WireEvent } from "../port/wire";
 import { noteTool, type Executions } from "./executions";
 import { estimateTokens, sample } from "../port/tokens";
 import type { HistoryMessage } from "../port/port";
@@ -620,7 +620,7 @@ function apply(s: SessionState, ev: SessionEvent): SessionState {
         doing: ev.outcome === "no_progress" ? "app.held" : ev.cancelled ? "common.cancelled" : ev.err ? "common.interrupted" : "common.done_2",
         waiting: {},
         plan: livePlan(s.plan),
-        items: withReceipt([...sealTurn(sealSay(s.items, true, ev.cancelled ? "stopped" : ev.err && ev.outcome !== "no_progress" ? "failed" : undefined), ev.outcome === "no_progress" || ev.cancelled ? undefined : ev.err), ...worked(ev.workDurationMs, ev.workStartedAt)], ev.receipt),
+        items: [...sealTurn(sealSay(s.items, true, ev.cancelled ? "stopped" : ev.err && ev.outcome !== "no_progress" ? "failed" : undefined), ev.outcome === "no_progress" || ev.cancelled ? undefined : ev.err), ...worked(ev.workDurationMs, ev.workStartedAt)],
       };
 
     default:
@@ -639,14 +639,6 @@ function turnTerminal(ev: WireEvent): TurnTerminal {
   if (ev.err) return { kind: "failed", err: ev.err };
   if (ev.outcome) return { kind: "incomplete", outcome: ev.outcome };
   return { kind: "completed" };
-}
-
-// withReceipt appends the turn's completion record when the kernel says it has
-// something to say. Whether the card is drawn is the reader's choice, made at
-// render time, so the record stays in the transcript either way.
-function withReceipt(items: Item[], r?: Receipt): Item[] {
-  if (!r?.saysSomething) return items;
-  return [...items, { t: "receipt", id: nextId(), r }];
 }
 
 // The kernel wraps each user turn in control-plane blocks. They are

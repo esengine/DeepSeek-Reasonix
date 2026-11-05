@@ -9,7 +9,6 @@ import { NewAnswerSection } from "./NewAnswerSection";
 import { OfficePreviewSection } from "./OfficePreviewSection";
 import { PlanProgressSection } from "./PlanProgressSection";
 import { PresentFiles } from "./PresentFiles";
-import { ReceiptSetting } from "./ReceiptSetting";
 import { SectionCard } from "./SectionCard";
 import { SettingDeep } from "./SettingDeep";
 
@@ -29,7 +28,6 @@ export function ChatDisplaySettings({ port }: { port: AgentPort }) {
           <PresentFiles port={port} />
         </Group>
         <OfficePreviewSection />
-        <ReceiptSetting port={port} />
       </SectionCard>
       <SectionCard title={t("settings.notices_card")}>
         <NewAnswerSection />

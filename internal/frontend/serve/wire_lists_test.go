@@ -45,7 +45,7 @@ func TestSessionReadsNeverSendANullList(t *testing.T) {
 		"/history", "/status", "/trajectory", "/checkpoints", "/todos", "/changes", "/context", "/inbox",
 		"/mcp", "/extensions/surfaces", "/extensions/actions", "/surfaces", "/workspace/git", "/models",
 		"/rewind/undo", "/branches", "/execution-graph", "/adjudications", "/sessions", "/skills", "/hooks",
-		"/providers", "/browser/tabs", "/memory", "/workspaces", "/receipt-settings", "/fold-work-settings",
+		"/providers", "/browser/tabs", "/memory", "/workspaces", "/fold-work-settings",
 		"/changed-files-settings", "/events/replay?lastEventId=0",
 	}...)
 	for base, paths := range reads {

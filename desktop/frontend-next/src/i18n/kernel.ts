@@ -616,7 +616,6 @@ const SAID: Record<string, string> = {
   "ask_timeout.out_of_range": "kernel.that_wait_time_is_out",
   "session_ref.save_failed": "kernel.the_size_limit_for_referenced",
   "session_ref.out_of_range": "kernel.the_size_limit_is_outside",
-  "receipt.save_failed": "kernel.the_receipt_card_setting_was",
   "progress_watch.save_failed": "kernel.the_progress_settings_were_not",
   "auto_archive.save_failed": "kernel.the_auto_archive_settings_were",
   "auto_archive.out_of_range": "kernel.the_number_of_days_is",

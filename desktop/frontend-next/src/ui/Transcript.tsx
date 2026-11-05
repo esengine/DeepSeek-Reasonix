@@ -33,7 +33,6 @@ import { NewAnswerLine, useNewAnswerAnchor } from "./NewAnswerLine";
 import { WorkLanes } from "./cards/SubagentGroup";
 import { drawn, eachCall, foldStats, repeatedSpeakers, sameMembers, transcriptRows, type Shown } from "./turnrows";
 import { BroughtResults } from "./BroughtResults";
-import { ReceiptSlot } from "./ReceiptSlot";
 import { WorkFold } from "./WorkFold";
 import { opensTurn, useBlocks, useBlockKeys } from "./blocks";
 import { useHistoryAnchor, useOlderPageIntent } from "./useHistoryAnchor";
@@ -784,8 +783,6 @@ const Row = memo(function Row({
 
     case "remember":
       return <RememberCard m={it.m} forgotten={it.forgotten} onForget={(name) => onForget(it.id, name)} />;
-    case "receipt":
-      return <ReceiptSlot r={it.r} />;
     case "worked":
       return <WorkedLine ms={it.ms} startedAt={it.startedAt} />;
     case "extension":

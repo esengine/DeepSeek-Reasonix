@@ -874,7 +874,6 @@ body { background: var(--page) !important; }
 .flow .call:is([data-k="host"], [data-k="mem"], [data-k="extension"]):not([data-k="me"]):not([data-k="say"]) > .c > .out .find { padding: 0; border-left: 0; }
 .flow .call:is([data-k="host"], [data-k="mem"], [data-k="extension"]):not([data-k="me"]):not([data-k="say"]) > .c > .out .find + .find { margin-top: 8px; }
 .flow .call:is([data-k="host"], [data-k="mem"], [data-k="extension"]):not([data-k="me"]):not([data-k="say"]) > .c > .out .find .t { font-weight: var(--w-reg); }
-.flow .call:is([data-k="host"], [data-k="mem"], [data-k="extension"]):not([data-k="me"]):not([data-k="say"]) .guard-hd .verdict { font-weight: var(--w-reg); }
 .flow .call[data-prompt]:not([data-k="me"]):not([data-k="say"]) { display: block; position: relative; margin: 12px 0 !important; }
 .flow .call[data-prompt]:not([data-k="me"]):not([data-k="say"]) > .c { margin: 0 !important; }
 .flow .call:is([data-k="host"], [data-k="mem"], [data-k="extension"]):not([data-k="me"]):not([data-k="say"]) > .g, .flow .call[data-prompt]:not([data-k="me"]):not([data-k="say"]) > .g { position: absolute; top: 1px; left: 1px; z-index: 1; width: 34px; height: 38px; display: grid; place-items: center; pointer-events: none; }

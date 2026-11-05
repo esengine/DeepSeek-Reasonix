@@ -10,7 +10,6 @@ import { PlanApproval } from "./PlanApproval";
 import { ProgressWatch } from "./ProgressWatch";
 import { SectionCard } from "./SectionCard";
 import { SessionRef } from "./SessionRef";
-import { SettingRow } from "./SettingRow";
 import { SettingDeep, SettingDeepContext } from "./SettingDeep";
 import { SubagentClaims } from "./SubagentClaims";
 import { TurnNarrationSetting } from "./TurnNarrationSetting";
@@ -19,11 +18,10 @@ interface Props {
   port: AgentPort;
   hub: Pick<HubPort, "tree">;
   persona: boolean;
-  preset: string;
   onChanged: () => void;
 }
 
-export function AgentSettings({ port, hub, persona, preset, onChanged }: Props) {
+export function AgentSettings({ port, hub, persona, onChanged }: Props) {
   const deep = useContext(SettingDeepContext);
   return (
     <>
@@ -46,9 +44,6 @@ export function AgentSettings({ port, hub, persona, preset, onChanged }: Props) 
         <PlanApproval port={port} />
         <AskTimeout port={port} />
         <TurnNarrationSetting port={port} />
-        <SettingRow id="preset" title={t("settings.completion_standard")} desc={t("settings.everyday_questions_stay_lightweight_file")}>
-          <span className="now">{preset}</span>
-        </SettingRow>
         <ProgressWatch port={port} />
       </SectionCard>
       <SectionCard title={t("settings.collaboration")}>

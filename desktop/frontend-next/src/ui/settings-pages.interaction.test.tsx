@@ -46,7 +46,7 @@ describe("the permissions page", () => {
 
   it("gives a short section no pages", async () => {
     draw("session");
-    await waitFor(() => expect(shown("preset")).toBe(true));
+    await waitFor(() => expect(shown("ask-timeout")).toBe(true));
     expect(document.querySelectorAll(".prefs-page")).toHaveLength(0);
   });
 });

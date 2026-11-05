@@ -120,11 +120,11 @@ describe("the settings catalogue", () => {
     const bySection = new Map<string, Set<SettingScope>>();
     for (const e of SETTINGS) bySection.set(e.section, (bySection.get(e.section) ?? new Set()).add(e.scope));
     // Session controls and persisted machine preferences share a page.
-    expect(bySection.get("session")?.size, "the session page's scopes collapsed to one — was scope derived from the section?")
+    expect(bySection.get("ext")?.size, "the extensions page's scopes collapsed to one — was scope derived from the section?")
       .toBeGreaterThan(1);
-    // And two pages that look alike disagree: preset is not persisted at all,
+    // And two pages that look alike disagree: ext-runtime is not persisted at all,
     // approval is persisted machine-wide, and they render identically.
-    expect(SETTING_AT("preset")?.scope).toBe("session");
+    expect(SETTING_AT("ext-runtime")?.scope).toBe("session");
     expect(SETTING_AT("approval")?.scope).toBe("machine");
   });
 
@@ -143,7 +143,7 @@ describe("the settings catalogue", () => {
   // wording, the handler or the component: change the declaration and the row
   // changes, change anything else and it does not.
   it("reads what a change costs from the declaration and nowhere else", () => {
-    const now = renderToStaticMarkup(<Group id="preset" title="X" />);
+    const now = renderToStaticMarkup(<Group id="ext-runtime" title="X" />);
     const later = renderToStaticMarkup(<Group id="storage" title="X" />);
     expect(now).toContain("立即生效");
     expect(later).toContain("重启后生效");

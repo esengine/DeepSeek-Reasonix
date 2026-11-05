@@ -30,8 +30,27 @@ describe("a guardian review", () => {
     ["allow", "critical"],
   ])("stays a card for %s at %s risk", (outcome, risk) => {
     const box = render(<GuardianCard g={review({ outcome, risk_level: risk as Guardian["risk_level"] } as Partial<Guardian>)} />).container;
-    expect(box.querySelector(".call")).not.toBeNull();
+    expect(box.querySelector(".note")).not.toBeNull();
     expect(box.querySelector(".line-row")).toBeNull();
+  });
+
+  it.each([
+    ["deny", "low", "err"],
+    ["allow", "medium", "warn"],
+    ["allow", "high", "warn"],
+  ])("draws no frame and carries %s at %s risk as a %s rail", (outcome, risk, lvl) => {
+    const box = render(<GuardianCard g={review({ outcome, risk_level: risk as Guardian["risk_level"] } as Partial<Guardian>)} />).container;
+    const note = box.querySelector(".note")!;
+    expect(note.getAttribute("data-lvl")).toBe(lvl);
+    expect(box.querySelector(".call, .tag")).toBeNull();
+  });
+
+  it("says the verdict and the risk on the head, the subject and the reason under it", () => {
+    const box = render(<GuardianCard g={review({ outcome: "deny", risk_level: "high", subject: "git push --force", rationale: "rewrites remote history" })} />).container;
+    expect(box.querySelector(".note-nm")?.textContent).toContain("已拦截");
+    expect(box.querySelector(".note-meta")?.textContent).toBe("高风险");
+    expect(box.querySelector(".note-subject")?.textContent).toBe("git push --force");
+    expect(box.querySelector(".note-text")?.textContent).toBe("rewrites remote history");
   });
 });
 
@@ -41,8 +60,9 @@ describe("a remembered fact", () => {
   it("is one row with its take-back, and the take-back names the fact", () => {
     const forget = vi.fn();
     const box = render(<RememberCard m={fact} onForget={forget} />).container;
-    expect(box.querySelector(".line-row .lr-arg")?.textContent).toBe("Commits in English");
-    expect(box.querySelector(".lr-detail")?.textContent).toBe("All GitHub text is English");
+    expect(box.querySelector(".note .note-strong")?.textContent).toBe("Commits in English");
+    expect(box.querySelector(".note-text")?.textContent).toBe("All GitHub text is English");
+    expect(box.querySelector(".line-row, .call")).toBeNull();
     const button = box.querySelector<HTMLButtonElement>('[data-action="memory.forget"]')!;
     expect(button.dataset.target).toBe("commit-language");
     fireEvent.click(button);
@@ -53,6 +73,6 @@ describe("a remembered fact", () => {
   it("loses the take-back once forgotten and reads as struck through", () => {
     const box = render(<RememberCard m={fact} forgotten onForget={() => {}} />).container;
     expect(box.querySelector('[data-action="memory.forget"]')).toBeNull();
-    expect(box.querySelector(".line-row")?.hasAttribute("data-gone")).toBe(true);
+    expect(box.querySelector(".note")?.hasAttribute("data-gone")).toBe(true);
   });
 });

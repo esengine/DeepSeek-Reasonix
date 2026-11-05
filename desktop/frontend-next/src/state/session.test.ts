@@ -2,25 +2,6 @@ import { describe, expect, it, vi } from "vitest";
 import { chipLabel, fromHistory, initialState, reduce, type Item, type SessionEvent, type SessionState } from "./session";
 import type { HistoryMessage } from "../port/port";
 
-// vitest runs these in Node, where there is no localStorage. The preference
-// reader tolerates its absence by staying off, so a test that wants a receipt
-// has to supply one.
-const store = new Map<string, string>();
-(globalThis as { localStorage?: unknown }).localStorage = {
-  getItem: (k: string) => store.get(k) ?? null,
-  setItem: (k: string, v: string) => void store.set(k, v),
-  removeItem: (k: string) => void store.delete(k),
-};
-const showingReceipts = <T,>(body: () => T): T => body();
-const hidingReceipts = <T,>(body: () => T): T => {
-  store.set("rx-turn-receipt", "off");
-  try {
-    return body();
-  } finally {
-    store.delete("rx-turn-receipt");
-  }
-};
-
 const run = (evs: SessionEvent[]): SessionState => evs.reduce(reduce, initialState);
 
 describe("when this window saw the turn start", () => {
@@ -306,38 +287,10 @@ describe("rebuilding a reopened transcript", () => {
   });
 });
 
-describe("the turn's completion receipt", () => {
-  const receipts = (s: SessionState) => s.items.filter((i) => i.t === "receipt");
-  const finish = (r: unknown): SessionEvent => ({ kind: "turn_done", receipt: r }) as SessionEvent;
-
-  it("keeps the quality summary out of the transcript", () => {
+describe("the turn's quality summary", () => {
+  it("stays out of the transcript", () => {
     const s = run([{ kind: "completion_summary", completion: { verdict: "partial", mutations: 2 } } as SessionEvent]);
     expect(s.items).toHaveLength(0);
-  });
-
-  it("sources a clean verdict instead of asserting it", () => {
-    const s = showingReceipts(() => run([finish({
-      verdict: "done", saysSomething: true,
-      changes: [{ path: "parser.go", reviewed: false }],
-      verifications: [{ command: "go test ./...", passed: true }],
-    })]));
-    expect(receipts(s)).toHaveLength(1);
-  });
-
-  it("shows the turn what it could not verify", () => {
-    const s = showingReceipts(() => run([finish({
-      verdict: "partial", saysSomething: true,
-      gaps: [{ kind: "unreviewed_change", detail: "lexer.go" }],
-    })]));
-    expect(receipts(s)).toHaveLength(1);
-  });
-
-  // The kernel decides; the window does not second-guess it. A receipt with no
-  // gaps and no clean verdict says only that the host could not judge, which a
-  // transcript that already showed every step does not need repeated.
-  it("follows the kernel on what is worth a line", () => {
-    expect(receipts(run([finish({ verdict: "incomplete", saysSomething: false })]))).toHaveLength(0);
-    expect(receipts(run([done()]))).toHaveLength(0);
   });
 });
 
@@ -536,25 +489,6 @@ describe("repeated unclassified notices", () => {
     const cards = st.items.filter((i): i is Extract<Item, { t: "notice" }> => i.t === "notice");
     expect(cards).toHaveLength(1);
     expect(cards[0].count).toBe(3);
-  });
-});
-
-describe("the turn's verification receipt", () => {
-  const done = (receipt: unknown): SessionEvent => ({ kind: "turn_done", receipt }) as SessionEvent;
-  const card = { saysSomething: true, verdict: "unproven", gaps: [{ kind: "unverified_change" }] };
-  const receipts = (s: SessionState) => s.items.filter((i) => i.t === "receipt");
-
-  // The record is the transcript's; whether a card is drawn is decided at
-  // render time, so the preference never changes what the session holds.
-  it.each([["off", () => hidingReceipts(() => run([done(card)]))], ["default", () => run([done(card)])]])(
-    "closes the turn with the record when the preference is %s",
-    (_, go) => expect(receipts(go())).toHaveLength(1),
-  );
-
-  // The kernel still decides whether a receipt has content at all; the
-  // preference decides nothing about that.
-  it("still respects the kernel's own answer", () => {
-    expect(receipts(showingReceipts(() => run([done({ ...card, saysSomething: false })])))).toEqual([]);
   });
 });
 

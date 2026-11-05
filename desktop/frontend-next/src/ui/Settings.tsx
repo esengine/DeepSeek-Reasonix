@@ -444,7 +444,7 @@ export function Settings({ hub, onError, port, networkPort, localWorkspacePort, 
               <span className="why">{note.text}</span>
             </div>
           )}
-          {at === "session" && <AgentSettings port={port} hub={hub} persona={landed === "persona"} preset={preset} onChanged={onChanged} />}
+          {at === "session" && <AgentSettings port={port} hub={hub} persona={landed === "persona"} onChanged={onChanged} />}
 
           {at === "model" && (
             <ModelSettings port={port} onChanged={onChanged} onFailed={setFailed}

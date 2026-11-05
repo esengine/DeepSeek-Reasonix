@@ -32,7 +32,7 @@ it("conversation display is process, files and previews, and notices", async () 
   const port = new MockPort() as unknown as AgentPort;
   frame(<ChatDisplaySettings port={port} />);
   expect(titles()).toEqual(["过程", "文件与预览", "提示"]);
-  for (const id of ["fold-work", "folding", "plan-progress", "changed-files", "present-files", "office-preview", "receipt", "new-answer-marker", "feedback-level-notices"]) {
+  for (const id of ["fold-work", "folding", "plan-progress", "changed-files", "present-files", "office-preview", "new-answer-marker", "feedback-level-notices"]) {
     await waitFor(() => expect(has(id), id).toBe(true));
   }
 });
