@@ -884,8 +884,6 @@ body { background: var(--page) !important; }
 .flow .call:is([data-k="host"], [data-k="mem"], [data-k="extension"]):not([data-k="me"]):not([data-k="say"])[data-lvl="err"] > .g .sym { color: var(--err); }
 .flow .call[data-prompt="pending"]:not([data-k="me"]):not([data-k="say"]) > .g .sym { color: #c49b5d; }
 .flow .call[data-prompt] > .c > .hl { padding-left: 34px !important; }
-.flow .enterbox[data-enter] > .call,
-.flow .enterbox[data-enter] :is(.term-l, .dl, .plan .s),
 .flow .call[data-running] .sym { animation: none !important; }
 .flow .md h1,
 .flow .md h2,
@@ -3489,7 +3487,7 @@ button, input, textarea { font-size: var(--fs-ui); }
   background: color-mix(in srgb, var(--raised) 94%, transparent);
   box-shadow: var(--shadow-lg);
   backdrop-filter: blur(16px);
-  animation: remote-toast-in 180ms ease-out both;
+  animation: remote-toast-in var(--t-card) ease-out both;
 }
 .remote-closed > span { width: 8px; height: 8px; flex: 0 0 auto; border-radius: 50%; background: var(--err); box-shadow: 0 0 0 4px color-mix(in srgb, var(--err) 14%, transparent); }
 .remote-closed.info > span { background: var(--accent); box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 14%, transparent); }

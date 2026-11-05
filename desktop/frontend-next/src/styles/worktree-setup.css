@@ -10,7 +10,7 @@
 .worktree-setup-phase > span:first-child { display: flex; align-items: center; gap: 10px; min-width: 0 }
 .worktree-setup-elapsed { white-space: nowrap; color: var(--muted); font-size: var(--fs-micro) }
 .worktree-setup-phase .studio-icon { width: 19px; height: 19px; flex-shrink: 0 }
-.worktree-spinner { display: inline-block; width: 18px; height: 18px; flex-shrink: 0; border: 2px solid var(--hair); border-top-color: var(--brand); border-right-color: var(--brand); border-radius: 50%; animation: worktree-spin 1.2s linear infinite }
+.worktree-spinner { display: inline-block; width: 18px; height: 18px; flex-shrink: 0; border: 2px solid var(--hair); border-top-color: var(--brand); border-right-color: var(--brand); border-radius: 50%; animation: worktree-spin var(--t-live) linear infinite }
 .worktree-setup-branches { padding: 20px 0; border-bottom: 1px solid var(--hair) }
 .worktree-setup dl { display: grid; grid-template-columns: 90px minmax(0, 1fr); gap: 12px; margin: 0; font-size: var(--fs-meta) }
 .worktree-setup dt { color: var(--muted) }

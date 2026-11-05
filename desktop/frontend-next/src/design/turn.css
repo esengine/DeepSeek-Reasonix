@@ -57,7 +57,7 @@
 .think .thinking-preview { margin: 4px 0 0 16px; color: var(--faint); font: var(--w-reg) var(--fs-meta)/1.5 var(--ui); }
 .think .tk { margin-top: 8px; padding-left: 18px; color: var(--muted); font: var(--w-reg) var(--fs-ui)/1.75 var(--ui); }
 .think[open] { margin-bottom: 8px; }
-.think::details-content { transition: block-size 240ms var(--ease-out), content-visibility 240ms allow-discrete; }
+.think::details-content { transition: block-size 240ms var(--ease-out), content-visibility var(--t-panel) allow-discrete; }
 .think-sweep {
   background: linear-gradient(90deg, var(--muted) 0%, var(--muted) 40%, var(--text) 50%, var(--muted) 60%, var(--muted) 100%);
   background-size: 250% 100%; -webkit-background-clip: text; background-clip: text; color: transparent;
@@ -66,8 +66,8 @@
 @keyframes think-sweep { from { background-position: 150% 0; } to { background-position: -50% 0; } }
 .think-swap { display: inline-grid; }
 .think-swap > .think-label { grid-area: 1 / 1; }
-.think[data-settled] .think-label:not(.think-out) { animation: think-in 200ms var(--ease-out) both; }
-.think-out { animation: think-out 200ms var(--ease-out) both; pointer-events: none; }
+.think[data-settled] .think-label:not(.think-out) { animation: think-in var(--t-card) var(--ease-out) both; }
+.think-out { animation: think-out var(--t-card) var(--ease-out) both; pointer-events: none; }
 @keyframes think-in { from { opacity: 0; } }
 @keyframes think-out { to { opacity: 0; } }
 .think[data-live] .tk { max-height: calc(1.75em * 6); overflow: hidden; display: flex; flex-direction: column; justify-content: flex-end; }
@@ -110,7 +110,7 @@
   background-size: 40% 100%; animation: activity-sweep 1.8s linear infinite;
 }
 @keyframes activity-sweep { from { background-position: -40% 0; } to { background-position: 140% 0; } }
-.activity-group::details-content { transition: block-size 240ms var(--ease-out), opacity 240ms var(--ease-out), content-visibility 240ms allow-discrete; }
+.activity-group::details-content { transition: block-size 240ms var(--ease-out), opacity 240ms var(--ease-out), content-visibility var(--t-panel) allow-discrete; }
 
 .bump { display: inline-block; overflow: hidden; vertical-align: bottom; }
 .bump > span { display: block; }
@@ -118,18 +118,18 @@
 @keyframes bump-up { from { transform: translateY(100%); } }
 
 .activity-body .step-slot { display: contents; }
-.activity-body .enterbox[data-enter] > .call { animation: step-in 180ms var(--ease-out) both; animation-delay: calc(var(--i, 0) * 30ms); }
+.activity-body .enterbox[data-enter] > .call { animation: step-in var(--t-card) var(--ease-out) both; animation-delay: calc(min(var(--i, 0), 7) * var(--m-step)); }
 @keyframes step-in { from { opacity: 0; transform: translateY(4px); } }
 
 .step-spin {
   display: block; width: 11px; height: 11px; box-sizing: border-box; border: 1.5px solid currentColor; border-top-color: transparent;
-  border-radius: 50%; animation: step-spin .7s linear infinite;
+  border-radius: 50%; animation: step-spin var(--t-live) linear infinite;
 }
 @keyframes step-spin { to { transform: rotate(360deg); } }
 .activity-body .tool-state[data-state="running"] { color: var(--net-ink); }
 .activity-body .tool-state[data-pop] { animation: step-pop 160ms cubic-bezier(.34, 1.56, .64, 1); }
 @keyframes step-pop { 0% { transform: scale(0); } 70% { transform: scale(1.25); } 100% { transform: scale(1); } }
-.activity-body .call[data-shake] > .c { animation: step-shake 200ms ease; }
+.activity-body .call[data-shake] > .c { animation: step-shake var(--t-card) ease; }
 @keyframes step-shake { 25% { transform: translateX(-2px); } 50% { transform: translateX(2px); } 75% { transform: translateX(-1px); } }
 
 .step-wait { margin: -2px 10px 6px 32px; color: var(--faint); font: var(--w-med) var(--fs-meta)/1.5 var(--ui); }

@@ -92,3 +92,6 @@
 .chrome-context-card section small { color: var(--faint); font: var(--w-reg) var(--fs-meta) var(--ui); }
 .studio-overview-card header b { font: var(--w-semi) var(--fs-lead)/1.3 var(--ui); }
 .chrome-context-card :is(.btn, .kbtn, .act) { font: var(--w-reg) var(--fs-meta) var(--ui); }
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; animation-delay: 0s !important; transition-duration: .01ms !important; transition-delay: 0s !important; scroll-behavior: auto !important; }
+}

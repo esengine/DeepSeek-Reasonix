@@ -173,7 +173,7 @@
 .workbench-diff:has(> .wb-diff) { padding: 0; }
 
 .workbench-tab { transition: background-color var(--t-line) ease, border-color var(--t-line) ease, color var(--t-line) ease; }
-.workbench-tab[data-enter] { animation: workbench-tab-in 180ms var(--ease-out) both; }
+.workbench-tab[data-enter] { animation: workbench-tab-in var(--t-card) var(--ease-out) both; }
 @keyframes workbench-tab-in { from { max-width: 0; opacity: 0; } }
 .workbench-tab[data-live] .workbench-tab-pick::before { order: 2; background: var(--net); animation-duration: 1.6s; }
 .workbench-tab[data-dirty] .workbench-tab-close { opacity: 1; }

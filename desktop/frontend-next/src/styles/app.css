@@ -1946,7 +1946,7 @@
   }
   .plan .s[data-now] .b {
     border: 1.5px solid var(--hair); border-top-color: var(--accent); border-right-color: var(--accent);
-    animation: plan-turn 820ms linear infinite;
+    animation: plan-turn var(--t-live) linear infinite;
   }
   @keyframes plan-turn { to { transform: rotate(360deg) } }
   .plan .s[data-done] { color: var(--faint) }
@@ -2055,7 +2055,7 @@
   .file .n .a { color: var(--add) } .file .n .r { color: var(--del) }
   .file .n .mk { margin-right: 6px; color: var(--faint); font-size: var(--fs-micro) }
 
-  .file[data-fresh] { animation: card var(--t-card) var(--ease-out) both, flash 1s var(--ease-out) .12s }
+  .file[data-fresh] { animation: card var(--t-card) var(--ease-out) both, flash 1s var(--ease-out) var(--t-line) }
   @keyframes flash {
     from { background: color-mix(in srgb, var(--accent) 22%, transparent) }
     to { background: transparent }
@@ -3970,7 +3970,7 @@
   }
   .oobe[data-play] .oobe-mark {
     opacity: 0;
-    animation: oobebrand .9s var(--ease-out) .25s forwards,
+    animation: oobebrand .9s var(--ease-out) var(--t-panel) forwards,
                oobelume 1.6s ease-in-out 1.25s forwards;
   }
   @keyframes oobelume {
@@ -4681,7 +4681,7 @@
   .machpick svg { width: 12px; height: 12px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round }
   .machacts { grid-area: 1 / 4; display: flex; gap: 2px }
   .machacts .machpick { grid-area: auto }
-  .machpick[data-busy] svg { animation: machspin .9s linear infinite }
+  .machpick[data-busy] svg { animation: machspin var(--t-live) linear infinite }
   @keyframes machspin { to { transform: rotate(360deg) } }
   @media (prefers-reduced-motion: reduce) { .machpick[data-busy] svg { animation: none } }
   .machpick:hover:not(:disabled) { background: var(--raised); color: var(--text) }
