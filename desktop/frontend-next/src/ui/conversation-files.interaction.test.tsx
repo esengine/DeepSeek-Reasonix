@@ -52,7 +52,7 @@ it("opens a restored reply's file in the right column and reuses its tab on repe
   expect(screen.getAllByRole("tab", { name: "report.md" })).toHaveLength(1);
   expect(browser).not.toHaveBeenCalled();
   fireEvent.click(screen.getByText("/work/docs/missing.md"));
-  await screen.findByText("找不到该文件，它可能已被移动或删除");
+  expect((await screen.findByRole("alert")).textContent).toContain("文件已不在原处");
 });
 
 it("offers file actions on right-click and restores focus to the link", async () => {

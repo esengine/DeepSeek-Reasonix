@@ -23,6 +23,7 @@ export const LOOK: Messages = {
   "look.code_appearance": { zh: "代码外观", en: "Code appearance" },
   "look.code_blocks_commands_diffs_and": { zh: "代码块、命令、差异与工具输出共用这一等宽字体，不跟随界面主题改变。", en: "Code blocks, commands, diffs and tool output share this monospace font and do not change with the interface theme." },
   "look.conversation_width": { zh: "对话区域宽度", en: "Conversation width" },
+  "look.full_width": { zh: "铺满窗口", en: "Full width" },
   "look.custom_percentage": { zh: "自定义比例", en: "Custom percentage" },
   "look.custom_percentage_resizes_both_the": { zh: "自定义比例同时调整对话和输入框；窄窗口会优先保证可用空间。", en: "Custom percentage resizes both the conversation and composer; narrow windows prioritize usable space." },
   "look.dark": { zh: "深色", en: "Dark" },

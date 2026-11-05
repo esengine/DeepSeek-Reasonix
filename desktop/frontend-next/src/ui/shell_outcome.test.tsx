@@ -86,7 +86,7 @@ describe("a shell call's class is the host's, not the shape of its execution rec
     ]);
     const group = chunk.querySelector(".activity-group")!;
     expect(group.querySelector(".activity-errors")?.textContent).toBe("2 项失败");
-    expect([...group.querySelectorAll(".fail")].map((e) => e.textContent)).toEqual(["exit 2", "timed_out"]);
+    expect([...group.querySelectorAll(".fail, .step-sum")].map((e) => e.textContent)).toEqual(["退出 2", "timed_out"]);
   });
 
   it("keeps the wait row running and its later failure visible", () => {

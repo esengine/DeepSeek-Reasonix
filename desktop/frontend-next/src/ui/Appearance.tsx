@@ -71,7 +71,7 @@ const WEIGHTS: [string, string, string][] = [
 
 const MEASURES: [string, string, string][] = [
   ["standard", "look.reading", "look.keeps_a_line_short_enough"],
-  ["full", "feedback.full_width", "look.prose_follows_the_window_with"],
+  ["full", "look.full_width", "look.prose_follows_the_window_with"],
   ["full-all", "look.full_width_composer_too", "look.prose_and_the_composer_both"],
   ["custom", "look.custom_percentage", "look.set_the_conversation_and_composer"],
 ];

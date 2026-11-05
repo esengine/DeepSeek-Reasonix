@@ -193,9 +193,9 @@ export function ToolCard({
   }, [nestMounted, children]);
   const changes = changeCounts(tool);
   const sum = activity && !running ? stepSummary(tool, verb, bad) : "";
-  // A host refusal says why in its own words; otherwise the command's last line
-  // of output says more than the generic error that it exited.
-  const failLine = activity && bad ? (refusal || (tool.refusalCode && errorDetail) || lastLine(tool.output) || errorDetail || tool.err || "") : "";
+  // A host refusal says why in its own words; a command's last line of output says
+  // more than the generic error that it exited; any other tool's output is not about its failure.
+  const failLine = activity && bad ? (refusal || (tool.refusalCode && errorDetail) || (tool.execution ? lastLine(tool.output) : "") || errorDetail || tool.err || lastLine(tool.output) || "") : "";
   const activityArgs = activity ? prettyArgs(tool.args) : "";
   // A call being watched in the activity group opens to its input even with no
   // output yet: a row that cannot open is the one that looks stuck.
