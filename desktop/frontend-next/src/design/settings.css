@@ -333,8 +333,8 @@
 .mkt-card-ft .mkt-n { color: var(--faint); font: var(--w-med) var(--fs-micro) var(--ui); }
 .mkt-fill { flex: 1; }
 .mkt-get {
-  position: absolute; top: 15px; inset-inline-end: 14px; height: 30px; padding: 0 12px; border: 1px solid var(--border); border-radius: var(--r-md);
-  background: var(--raised); color: var(--text); font: var(--w-med) var(--fs-ui) var(--ui); cursor: pointer;
+  position: absolute; top: 15px; inset-inline-end: 14px; height: 28px; padding: 0 11px; border: 1px solid var(--border); border-radius: var(--r-md);
+  background: var(--raised); color: var(--text); font: var(--w-reg) var(--fs-meta) var(--ui); cursor: pointer;
 }
 .mkt-get:hover { background: var(--overlay); }
 .mkt-vote { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
@@ -413,3 +413,8 @@
 .ext-md-list .srv-main > .nm { font-weight: var(--w-med); }
 .ext-detail-pane .peek .row > span:first-child { font: var(--w-reg) var(--fs-meta) var(--mono); }
 .mkt-card .act { font: var(--w-reg) var(--fs-meta) var(--ui); }
+.contributions > .kind { font: var(--w-med) var(--fs-meta) var(--ui); }
+.contributions .row { font: var(--w-reg) var(--fs-meta) var(--mono); }
+.contributions .row .sc { font-family: var(--ui); }
+.mkt-bar .seg button { font: var(--w-reg) var(--fs-meta) var(--ui); }
+.mkt-bar .seg button:is([aria-pressed="true"], [aria-checked="true"]) { font-weight: var(--w-med); }
