@@ -72,6 +72,7 @@
 - 命令面板按稿：输入框下加「> 操作 / # 会话 / , 设置」范围标签（点一下切换范围）；输入后每组带条数；运行中 / 等你确认的会话前有蓝 / 橙点并写出状态词，其余显示距今多久；说明文字紧跟名称，快捷键靠右；底部左边是按键提示、右边是范围符号。稿里的「@ 文件」范围没做：接口里没有列出工作区文件的能力（41a943b4a）。
 - 用量页按稿排版：「实付」是四个指标块里的第一块（订阅等价估算和覆盖范围说明写在它下面），不再是单独的大卡片；「每日用量」和「每日支出」左右并排，支出改成柱状；去掉页面上方重复的块标题。内核只给总量、没有单独的输出量，所以仍没有「输出」块（1a677e9cc）。
 - 对话里压缩之后收起较早内容（按「压缩后收起较早内容」稿）：第二次压缩起，把「上上次压缩」之前的内容收成顶部一条分隔线「较早的 N 条消息已折叠为简报 · 查看被折叠的内容」，最近一次压缩前后的两段始终保留；只是显示，每次打开都是收起，点一下就地展开（3daea2db7）。
+- 对话里的卡片轻量化（按「卡片轻量化」稿）：压缩卡改成左侧细线加一行标题「较早的内容已折叠为简报 · 自动/手动」，原因和前后大小写在一行里，去掉进度条和外框；执行过程去掉外框，失败数改成红字，失败的步骤原因用左侧 2px 红线标出、不再套红底框；文件交付卡改成一张清单，行间细线，「打开」是文字链接（47cbbfafc）。
 
 
 ---
@@ -151,3 +152,4 @@
 - The command palette follows the board: scope chips under the input (actions, sessions, settings; each toggles its scope), a count on each group once something is typed, a coloured dot and status word on running or waiting sessions with the rest showing their age, notes beside the name and shortcuts on the right, and the foot's keys left and scope symbols right. The board's files scope is not drawn: the port has no way to list a workspace's files (41a943b4a).
 - The usage page lays out as the board does: the paid figure is the first of four tiles with its estimate and coverage notes under it, daily usage and daily spend sit side by side with spend as bars, and the duplicate block heading goes; there is still no output tile because the kernel reports only a total (1a677e9cc).
 - The transcript folds what an earlier compaction replaced, as the Chat-Compaction board draws it: from the second compaction on, everything before the second-latest compaction folds behind one divider line at the top (N earlier messages folded into a digest · show the folded content), the two stretches around the latest compaction stay, and the fold is display only, starts folded each time and opens in place (3daea2db7).
+- Cards in the conversation are lighter, as the Chat-Cards-Light board draws: the compaction card is a left rail with one title line (earlier content folded into a digest, auto or manual) and its reason and sizes on one line, no bar and no frame; the execution group loses its frame, shows its failure count as red text and marks a failed step's reason with a 2px red rail instead of a tinted box; delivered files are one hairline list with a text-link open action (47cbbfafc).
