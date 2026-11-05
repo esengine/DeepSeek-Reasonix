@@ -93,9 +93,10 @@ describe("a saved WSL machine", () => {
     expect((hub.saveRemoteHost as ReturnType<typeof vi.fn>).mock.calls[0][0]).toMatchObject({ name: "dev", kind: "wsl", distro: "Ubuntu-24.04" });
   });
 
-  it("keeps its row when the switch turns it off, sending the whole row back", async () => {
+  it("keeps its row when the menu turns it off, sending the whole row back", async () => {
     const { hub } = draw({}, [dev]);
-    await userEvent.click(await screen.findByRole("switch", { name: /停用这台主机/ }));
+    await userEvent.click(await screen.findByRole("button", { name: /^更多：/ }));
+    await userEvent.click(screen.getByRole("menuitem", { name: /停用这台主机/ }));
     await waitFor(() => expect(hub.saveRemoteHost).toHaveBeenCalledOnce());
     expect((hub.saveRemoteHost as ReturnType<typeof vi.fn>).mock.calls[0][0]).toMatchObject({ name: "dev", kind: "wsl", distro: "Ubuntu-24.04", disabled: true });
   });

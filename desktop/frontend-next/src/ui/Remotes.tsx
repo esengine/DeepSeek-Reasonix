@@ -5,7 +5,6 @@ import type { RemoteHost, RemoteHostEdit, RemoteProbe, WSLDistros } from "../por
 import { say } from "../i18n/kernel";
 import { toggleHiddenHost, useHiddenHosts } from "../state/remotehide";
 import { RemoteDirs } from "./RemoteDirs";
-import { Switch } from "./Switch";
 import { useDismiss } from "./dismiss";
 import { StudioIcon } from "./StudioIcon";
 
@@ -154,30 +153,45 @@ export function Remotes({ hub, onError }: Props) {
 
   return (
     <div className="rmtbook">
+      {!draft && (
+        <div className="rmthead">
+          <button className="rmtadd" onClick={() => setDraft(draftOf(null))}>
+            <StudioIcon name="plus" />{t("remote.add_a_machine")}
+          </button>
+        </div>
+      )}
       {hosts.map((host) => (
-        <div className="rmtrow" key={host.name} data-state={host.status}>
+        <div className="rmtrow" key={host.name} data-state={host.status} data-off={host.disabled ? "" : undefined}>
+          <span className="rmticon" aria-hidden="true"><StudioIcon name="server" /></span>
+          <div className="rmtmain">
           <div className="hd">
-            <i className="rmtpip" aria-hidden="true" />
             <b>{host.name}</b>
             <span className="tg">{host.target}</span>
-            <span className="st">{t(STATUS_LABEL[host.status] ?? host.status)}</span>
-            {host.disabled ? <span className="st">{t("common.suspended")}</span> : null}
-            <span className="rmtfill" />
+            <span className="st" data-state={host.disabled ? "off" : host.status}>{t(host.disabled ? "common.suspended" : (STATUS_LABEL[host.status] ?? host.status))}</span>
+          </div>
+          <div className="sub">
+            {host.workspace ? <span dir="ltr">{host.workspace}</span> : <span className="dim">{t("remote.no_default_workspace")}</span>}
+            {workspacesOf(host).length > 1 ? (
+              <span className="tag">{t("remote.n_more_projects", { n: workspacesOf(host).length - 1 })}</span>
+            ) : null}
+            {host.kind === "wsl" ? <span className="tag">{t("remote.wsl_distribution")}</span> : null}
+            {host.useSSHConfig ? <span className="tag">{t("remote.follows_ssh_config")}</span> : null}
+            {host.forwards ? <span className="tag">{t("remote.n_forwards", { n: host.forwards })}</span> : null}
+            {host.panes ? <span className="tag">{t("remote.n_panes", { n: host.panes })}</span> : null}
+          </div>
+          </div>
+          <div className="rmtside">
             {host.status !== "connected" && !host.disabled && (
               <button className="rmtnext" data-action="remote.probe" data-target={host.name} disabled={probing === host.name} onClick={() => probe(host.name)}>
                 {t(probing === host.name ? "remote.asking" : "common.test_it")}
               </button>
             )}
-            <Switch
-              data-action="remote.enable"
-              data-target={host.name}
-              on={!host.disabled}
-              busy={busy === host.name}
-              label={t(host.disabled ? "remote.turn_this_machine_on" : "remote.turn_this_machine_off")}
-              onClick={() => void save({ ...draftOf(host), disabled: !host.disabled })}
-            />
             <RemoteMore name={host.name}>
               {(close) => <>
+                <button role="menuitem" data-action="remote.enable" data-target={host.name} disabled={busy === host.name}
+                  onClick={() => { close(); void save({ ...draftOf(host), disabled: !host.disabled }); }}>
+                  {t(host.disabled ? "remote.turn_this_machine_on" : "remote.turn_this_machine_off")}
+                </button>
                 <button role="menuitem" data-action="remote.edit" data-target={host.name} onClick={() => { close(); setEditing(host.name); setDraft(draftOf(host)); }}>
                   {t("common.edit")}
                 </button>
@@ -194,16 +208,6 @@ export function Remotes({ hub, onError }: Props) {
                 </button>
               </>}
             </RemoteMore>
-          </div>
-          <div className="sub">
-            {host.workspace ? <span dir="ltr">{host.workspace}</span> : <span className="dim">{t("remote.no_default_workspace")}</span>}
-            {workspacesOf(host).length > 1 ? (
-              <span className="tag">{t("remote.n_more_projects", { n: workspacesOf(host).length - 1 })}</span>
-            ) : null}
-            {host.kind === "wsl" ? <span className="tag">{t("remote.wsl_distribution")}</span> : null}
-            {host.useSSHConfig ? <span className="tag">{t("remote.follows_ssh_config")}</span> : null}
-            {host.forwards ? <span className="tag">{t("remote.n_forwards", { n: host.forwards })}</span> : null}
-            {host.panes ? <span className="tag">{t("remote.n_panes", { n: host.panes })}</span> : null}
           </div>
           {probes[host.name] ? <ProbeCard probe={probes[host.name]} host={host.name} /> : null}
           {confirm === host.name && (
@@ -427,11 +431,7 @@ export function Remotes({ hub, onError }: Props) {
             </button>
           </div>
         </div>
-      ) : (
-        <button className="rmtadd" onClick={() => setDraft(draftOf(null))}>
-          + {t("remote.add_a_machine")}
-        </button>
-      )}
+      ) : null}
     </div>
   );
 }

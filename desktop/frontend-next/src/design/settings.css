@@ -197,17 +197,28 @@
 .skupd > .acts { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; margin: 4px -16px -14px; padding: 10px 16px; border-top: 1px solid var(--hair); }
 .skupd > .acts .note { flex: 1; min-width: 0; color: var(--faint); font: var(--w-med) var(--fs-meta) var(--ui); }
 .rmtbook { display: flex; flex-direction: column; gap: 8px; }
-.rmtbook > .rmtrow { padding: 12px 14px; border: 1px solid var(--border); border-radius: var(--r-md); background: var(--raised); }
-.rmtrow > .hd { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; }
-.rmtrow > .hd > b { color: var(--text); font: var(--w-semi) var(--fs-ui) var(--ui); }
-.rmtrow > .hd > .tg { color: var(--faint); font: var(--w-med) var(--fs-meta) var(--mono); }
-.rmtrow > .hd > .st { flex: none; min-width: 0; padding: 0 7px; border-radius: var(--r-pill); background: var(--overlay); color: var(--muted); font: var(--w-med) var(--fs-micro)/1.8 var(--ui); }
-.rmtrow[data-state="connected"] > .hd > .st { background: color-mix(in srgb, var(--ok) 12%, transparent); color: var(--ok-ink); }
-.rmtrow[data-state="stopped"] > .hd > .st { background: color-mix(in srgb, var(--err) 10%, transparent); color: var(--err-ink); }
-.rmtfill { flex: 1; }
+.rmthead { display: flex; justify-content: flex-end; }
+.rmthead .rmtadd { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 12px; border: 1px solid var(--border); border-radius: var(--r-sm); background: var(--surface); color: var(--text); font: var(--w-med) var(--fs-meta) var(--ui); cursor: pointer; }
+.rmthead .rmtadd .studio-icon { width: 13px; height: 13px; }
+.rmtbook > .rmtrow { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 4px 12px; padding: 12px 14px; border: 1px solid var(--border); border-radius: var(--r-md); background: var(--raised); }
+.rmtbook > .rmtrow > :not(.rmticon, .rmtmain, .rmtside) { grid-column: 1 / -1; }
+.rmticon { display: grid; place-items: center; width: 32px; height: 32px; border-radius: var(--r-sm); background: var(--overlay); color: var(--muted); }
+.rmticon .studio-icon { width: 15px; height: 15px; }
+.rmtmain { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.rmtrow > .rmtmain > .hd { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; }
+.rmtrow .hd > b { color: var(--text); font: var(--w-semi) var(--fs-ui) var(--ui); }
+.rmtrow .hd > .tg { color: var(--faint); font: var(--w-med) var(--fs-meta) var(--mono); }
+.rmtrow .hd > .st { display: inline-flex; flex: none; align-items: center; gap: 5px; min-width: 0; padding: 0 8px; border-radius: var(--r-pill); background: var(--overlay); color: var(--muted); font: var(--w-med) var(--fs-micro)/1.8 var(--ui); }
+.rmtrow .hd > .st::before { content: ""; width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
+.rmtrow .hd > .st[data-state="connected"] { background: color-mix(in srgb, var(--ok) 12%, transparent); color: var(--ok-ink); }
+.rmtrow .hd > .st:is([data-state="connecting"], [data-state="reconnecting"]) { background: color-mix(in srgb, var(--accent) 12%, transparent); color: var(--accent-ink); }
+.rmtrow .hd > .st:is([data-state="degraded"], [data-state="idle"]) { background: color-mix(in srgb, var(--warn) 12%, transparent); color: var(--warn-ink); }
+.rmtrow .hd > .st[data-state="stopped"] { background: color-mix(in srgb, var(--err) 10%, transparent); color: var(--err-ink); }
+.rmtrow[data-off] .rmtmain { opacity: .6; }
+.rmtside { display: flex; align-items: center; gap: 6px; }
 .rmtnext { height: 28px; padding: 0 12px; border: 1px solid var(--border); border-radius: var(--r-sm); background: var(--surface); color: var(--text); font: var(--w-med) var(--fs-meta) var(--ui); cursor: pointer; }
 .rmtnext:disabled { opacity: .5; cursor: default; }
-.rmtrow > .sub { margin-top: 4px; color: var(--faint); font: var(--w-med) var(--fs-meta) var(--ui); }
+.rmtrow .sub { padding: 0; color: var(--faint); font: var(--w-med) var(--fs-meta) var(--ui); }
 .rmthost-more { position: relative; display: inline-flex; }
 .rmthost-btn { display: inline-grid; place-items: center; width: 28px; height: 28px; padding: 0; border: 0; border-radius: var(--r-sm); background: transparent; color: var(--muted); cursor: pointer; }
 .rmthost-btn:hover, .rmthost-btn[aria-expanded="true"] { background: var(--overlay); color: var(--text); }
