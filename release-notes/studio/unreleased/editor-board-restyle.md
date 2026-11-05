@@ -64,6 +64,7 @@
 - 外观设置里对话宽度的「铺满窗口」又显示正常文字了（之前误删了它借用的文案，显示成了 key）；执行过程中非命令类工具失败时，失败行显示内核给的原因，而不是工具输出的最后一行（aad0f1bf6）。
 - 设置 › 模型页按稿重做：「服务」「用途与上下文」两张卡、四行短说明（模型服务、自动检测连接与余额、按用途选择模型、上下文维护），各带「本机 · 生效时机」；原来铺开的长内容收进「管理服务」「按用途设置」和压缩比例这三个页面，点药丸进入；发送快捷键显示 Ctrl+Enter；选中的设置分类不再加粗（54fe6d1ef）。
 - 设置 › 权限与安全按稿重做：「批准」「沙箱与执行」「联网」三张卡，每项一行短说明；工具批准、外部文字、内置浏览器直接在行上操作，规则（带条数）、可用工具（带数量）、沙箱、命令执行程序、会话并发、子代理写入范围、联网搜索与抓取收进药丸进入的页面；「外部文字」的覆盖范围说明改为悬停提示（6e0b53e11）。
+- 设置 › Agent 行为按稿重做：「人设与预设」「计划与提问」「协作」三张卡，每项一行；计划批准、回合间叙述、子代理写入范围改为分段选择，提问等待、引用长度把数值放在行尾，会话间消息收进药丸；原来长段说明里「会放行什么、要付出什么」留作悬停提示；去掉「仅生成计划」开关（新对话起始模式已覆盖），文件改动 / 折叠中间过程 / 交付验收 / 等级提示移到「对话显示」（81495d1b9）。
 
 
 ---
@@ -135,3 +136,4 @@
 - Appearance's full-width option reads as words again (it had borrowed a removed message key); in the activity group a failed non-command tool's line shows the host's reason rather than its output's last line (aad0f1bf6).
 - Settings › Models follows the board: Services and Uses-and-context cards of four short rows, each with its scope and when it takes effect; the long content moves to pages opened from a pill (manage services, set by use, context maintenance); the send shortcut reads Ctrl+Enter; the selected settings category stays regular weight (54fe6d1ef).
 - Settings › Permissions follows the board: Approval, Sandbox and execution, and Web cards of one short row each; tool approval, outside text and the built-in browser act on the row, while rules (with their count), tools (with theirs), sandbox, command program, session concurrency, sub-agent write scope and web search sit behind a pill; what outside text covers is hover text on its row (6e0b53e11).
+- Settings › Agent behaviour follows the board: Persona and presets, Plans and questions, and Collaboration cards of single rows; plan approval, narration and sub-agent write scope are segmented, question wait and reference size keep their value on the row, messages between sessions sit behind a pill; what the old long text said a switch releases or costs is hover text; the plan-mode switch goes (the start mode covers it) and file changes, fold work, receipt and level notices move to Conversation display (81495d1b9).
