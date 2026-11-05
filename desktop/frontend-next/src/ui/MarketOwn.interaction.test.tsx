@@ -21,6 +21,15 @@ async function openMine(port: AgentPort, onInstalled = () => {}, onViewInstalled
 }
 
 describe("the account's own packages", () => {
+  it("lists each version as a row of its own, not as a market card", async () => {
+    const port = new MockPort() as unknown as AgentPort;
+    const { container } = render(<MyPackages port={port} onInstalled={() => {}} />);
+    await screen.findByText("ship-notes");
+    const list = container.querySelector("ul.mkt-list")!;
+    expect(list.hasAttribute("data-rows")).toBe(true);
+    expect(list.querySelector(".mkt-card")).toBeNull();
+  });
+
   it.each(["success", "failure"])("ignores a stale list %s after replacing the port", async (outcome) => {
     const port = new MockPort() as unknown as AgentPort;
     const next = new MockPort() as unknown as AgentPort;

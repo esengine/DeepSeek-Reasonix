@@ -2798,9 +2798,9 @@ button, input, textarea { font-size: var(--fs-ui); }
 }
 .grp { border: 1px solid var(--hair); }
 @media (hover: hover) {
-  .grp:hover { background: color-mix(in srgb, var(--float) 84%, var(--surface)) !important; }
+  .grp:hover:not(.ext-md-list .grp, [data-setting="market"]) { background: color-mix(in srgb, var(--float) 84%, var(--surface)) !important; }
 }
-.grp:focus-within {
+.grp:focus-within:not(.ext-md-list .grp, [data-setting="market"]) {
   background: color-mix(in srgb, var(--float) 94%, var(--accent-wash)) !important;
 }
 .advset:not(.appearance-advanced) > .grp { background: transparent !important; box-shadow: none; }
@@ -3001,7 +3001,7 @@ button, input, textarea { font-size: var(--fs-ui); }
   background: color-mix(in srgb, var(--raised) 90%, var(--surface)) !important;
   border-color: var(--hair) !important;
 }
-:root[data-theme="dark"] .grp:focus-within {
+:root[data-theme="dark"] .grp:focus-within:not(.ext-md-list .grp, [data-setting="market"]) {
   background: color-mix(in srgb, var(--raised) 94%, var(--accent-wash)) !important;
 }
 

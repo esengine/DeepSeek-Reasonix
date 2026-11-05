@@ -271,7 +271,7 @@ function PackageList({ port, onInstalled, onViewInstalled, onApplying, onPublish
       )}
       {rows === null && <div className="empty" role="status">{t("common.loading")}</div>}
       {rows?.length === 0 && !error && <div className="empty">{t("ext.nothing_published_yet")}</div>}
-      <ul className="mkt-list">
+      <ul className="mkt-list" data-rows="">
         {rows?.map((p) => {
           const [label, tone] = STATUS[p.status] ?? [p.status, undefined];
           const current = !!p.installed && p.installed.version === p.latestVersion;
