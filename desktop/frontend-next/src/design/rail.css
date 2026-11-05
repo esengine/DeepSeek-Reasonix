@@ -75,3 +75,4 @@
   .srail-band, .srail-m > i, .srail-tip { transition: none; }
   .srail-peek { animation: none; }
 }
+.ds-row .sessword { font-weight: var(--w-med); }

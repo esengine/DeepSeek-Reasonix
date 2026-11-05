@@ -66,7 +66,7 @@
 .studio-feedback > span:first-child { display: flex; flex: none; color: inherit; }
 .studio-feedback .studio-icon { width: 16px; height: 16px; }
 .studio-feedback b { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: inherit; }
-.studio-feedback .fbk-badge { position: static; flex: none; min-width: 16px; height: 16px; padding: 0 5px; box-sizing: border-box; border: 0; border-radius: var(--r-pill); background: var(--text); color: var(--page); font: var(--w-semi) var(--fs-micro)/calc(16px * var(--fs-scale, 1)) var(--ui); font-style: normal; text-align: center; box-shadow: none; }
+.studio-feedback .fbk-badge { position: static; flex: none; min-width: 16px; height: 16px; padding: 0 5px; box-sizing: border-box; border: 0; border-radius: var(--r-pill); background: var(--text); color: var(--page); font: var(--w-med) var(--fs-micro)/calc(16px * var(--fs-scale, 1)) var(--ui); font-style: normal; text-align: center; box-shadow: none; }
 
 .hero { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; min-height: 420px; padding: 20px 24px 40px; text-align: center; }
 .hero .sym-mark { width: 44px; height: 44px; padding: 8px; box-sizing: border-box; display: block; border-radius: var(--r-md); background: var(--accent); color: var(--accent-fg); opacity: 1; filter: none; }
@@ -82,3 +82,13 @@
 .phonecard .pc-code > img { flex: none; width: 112px; height: 112px; }
 .phonecard .pc-code > .pc-mint { margin: 0 auto; }
 .phonecard .pc-side { display: grid; min-width: 0; gap: 6px; }
+.chrome-context-card header b { font: var(--w-semi) var(--fs-ui)/1.3 var(--ui); }
+.chrome-context-card header small { color: var(--faint); font: var(--w-reg) var(--fs-meta)/1.3 var(--ui); }
+.chrome-context-parts { grid-template-columns: 1fr; gap: 6px; }
+.chrome-context-parts > div { grid-template-columns: 8px minmax(0, 1fr) auto; gap: 8px; color: var(--muted); font: var(--w-reg) var(--fs-meta)/1.3 var(--ui); }
+.chrome-context-parts i { width: 8px; height: 8px; }
+.chrome-context-parts b { color: var(--text); font: var(--w-med) var(--fs-meta)/1.3 var(--mono); }
+.chrome-context-card section > div:first-child b { font-size: var(--fs-meta); }
+.chrome-context-card section small { color: var(--faint); font: var(--w-reg) var(--fs-meta) var(--ui); }
+.studio-overview-card header b { font: var(--w-semi) var(--fs-lead)/1.3 var(--ui); }
+.chrome-context-card :is(.btn, .kbtn, .act) { font: var(--w-reg) var(--fs-meta) var(--ui); }

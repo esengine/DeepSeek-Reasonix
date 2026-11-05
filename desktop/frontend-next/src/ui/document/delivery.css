@@ -53,7 +53,7 @@
   border: 0;
   border-radius: var(--r-pill);
   color: var(--text);
-  font: var(--w-semi) var(--fs-meta)/1 var(--ui);
+  font: var(--w-med) var(--fs-meta)/1 var(--ui);
   white-space: nowrap;
 }
 .delivery-open:focus-visible, .delivery-more:focus-visible {

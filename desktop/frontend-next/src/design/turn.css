@@ -37,7 +37,7 @@
 .activity-body .hl .arg { order: -8; flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); font: var(--w-reg) var(--fs-meta)/1.3 var(--mono); }
 .activity-body .hl :is(.src, .who, .tag) { order: -7; flex: none; }
 .activity-body .hl .tag { padding: 0 5px; border-radius: var(--r-xs); background: var(--overlay); color: var(--faint); font: var(--w-reg) var(--fs-micro)/calc(16px * var(--fs-scale, 1)) var(--mono); letter-spacing: 0; text-transform: none; }
-.activity-body :is(.cost, .step-sum) { order: -6; margin-left: auto; color: var(--faint); font: var(--w-med) var(--fs-meta)/1 var(--ui); white-space: nowrap; }
+.activity-body :is(.cost, .step-sum) { order: -6; margin-left: auto; color: var(--faint); font: var(--w-reg) var(--fs-meta)/1 var(--ui); white-space: nowrap; }
 .activity-body .tool-delta { order: -6; margin-left: auto; color: var(--faint); font: var(--w-med) var(--fs-meta)/1 var(--ui); }
 .activity-body .tool-delta b { color: inherit; font-weight: inherit; }
 .activity-body .tool-delta i { margin-left: 3px; color: inherit; font-style: normal; }
@@ -50,7 +50,7 @@
 .activity-body .tool-disclosure > .out { margin: 2px 10px 6px 32px; padding: 6px 10px 8px; border: 1px solid var(--hair); border-radius: var(--r-sm); }
 
 .think { margin-top: 6px; }
-.think > summary .fold { gap: 6px; color: var(--muted); font: var(--w-semi) var(--fs-ui)/1.4 var(--ui); }
+.think > summary .fold { gap: 6px; color: var(--muted); font: var(--w-med) var(--fs-ui)/1.4 var(--ui); }
 .think[open] > summary .fold { color: var(--muted); }
 .think > summary .fold::before { width: 10px; height: 10px; color: var(--faint); }
 .think > summary:hover .fold { color: var(--text); }
@@ -97,14 +97,14 @@
 .activity-group > summary { font: var(--w-semi) var(--fs-ui)/1 var(--ui); }
 .activity-group > summary .activity-fold-icon { order: -1; margin: 0; transform: rotate(-90deg); transition: transform var(--t-line) ease; }
 .activity-group[open] > summary .activity-fold-icon { transform: none; }
-.activity-group .activity-title { font: inherit; }
+.activity-group .activity-title { font-weight: var(--w-med); }
 .activity-now { display: inline-flex; align-items: center; gap: 5px; min-width: 0; overflow: hidden; color: var(--net-ink); font-weight: var(--w-med); white-space: nowrap; }
 .activity-now code { min-width: 0; overflow: hidden; text-overflow: ellipsis; font: var(--w-med) var(--fs-meta)/1 var(--mono); }
 .activity-fill { flex: 1; }
 .activity-group > summary .activity-ok { color: var(--ok-ink); }
-.activity-group .activity-errors { color: var(--err-ink); font: var(--w-semi) var(--fs-meta)/1 var(--ui); white-space: nowrap; }
-.activity-group .activity-running { font-weight: var(--w-semi); }
-.activity-group .activity-count { font: var(--w-med) var(--fs-meta)/1 var(--ui); white-space: nowrap; }
+.activity-group .activity-errors { color: var(--err-ink); font: var(--w-med) var(--fs-meta)/1 var(--ui); white-space: nowrap; }
+.activity-group .activity-running { font-weight: var(--w-med); }
+.activity-group .activity-count { font: var(--w-reg) var(--fs-meta)/1 var(--ui); white-space: nowrap; }
 .activity-group[data-running]:not([open]) > summary {
   background: linear-gradient(90deg, transparent 0%, color-mix(in srgb, var(--net) 12%, transparent) 50%, transparent 100%) no-repeat;
   background-size: 40% 100%; animation: activity-sweep 1.8s linear infinite;
@@ -133,7 +133,7 @@
 @keyframes step-shake { 25% { transform: translateX(-2px); } 50% { transform: translateX(2px); } 75% { transform: translateX(-1px); } }
 
 .step-wait { margin: -2px 10px 6px 32px; color: var(--faint); font: var(--w-med) var(--fs-meta)/1.5 var(--ui); }
-.step-stop { padding: 0; border: 0; background: none; color: var(--text); font: var(--w-semi) var(--fs-meta)/1.5 var(--ui); cursor: pointer; }
+.step-stop { padding: 0; border: 0; background: none; color: var(--text); font: var(--w-med) var(--fs-meta)/1.5 var(--ui); cursor: pointer; }
 .step-stop:hover { text-decoration: underline; text-underline-offset: 2px; }
 .pane[data-off] :is(.step-spin, .activity-group > summary) { animation-play-state: paused; }
 
@@ -189,3 +189,4 @@
 .note[data-gone] { opacity: .6; }
 .note[data-gone] .note-strong { text-decoration: line-through; }
 .flow .call[data-k="host"][data-light] > .c > .hl .tag { background: none; padding: 0; color: var(--faint); font: var(--w-med) var(--fs-micro) var(--ui); }
+.activity-group .activity-errors { font-size: var(--fs-micro); }

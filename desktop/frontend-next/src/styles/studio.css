@@ -374,7 +374,7 @@ body { background: var(--page); }
 
 :root[data-theme="light"]:not([data-pack]):not([data-weight]),
 :root[data-theme="light"]:not([data-bg]):not([data-weight]) {
-  --w-read: 400;
+  --w-read: var(--w-reg);
 }
 
 body { background: var(--page) !important; }
