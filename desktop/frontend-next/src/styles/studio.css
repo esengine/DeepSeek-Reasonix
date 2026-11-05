@@ -2789,7 +2789,7 @@ button, input, textarea { font-size: var(--fs-ui); }
   background: color-mix(in srgb, var(--page) 82%, var(--float)) !important;
   scrollbar-color: color-mix(in srgb, var(--muted) 34%, transparent) transparent;
 }
-.grp,
+.grp:not(.ext-md-list .grp, [data-setting="market"]),
 .advset,
 .setting {
   background: color-mix(in srgb, var(--float) 90%, var(--surface)) !important;
@@ -2975,7 +2975,7 @@ button, input, textarea { font-size: var(--fs-ui); }
   .run-analysis { --ra-columns: 26px minmax(100px, 1fr); }
   .run-round-copy { display: none; }
 }
-:root[data-theme="light"] .grp,
+:root[data-theme="light"] .grp:not(.ext-md-list .grp, [data-setting="market"]),
 :root[data-theme="light"] .advset,
 :root[data-theme="light"] .setting {
   background: color-mix(in srgb, var(--float) 96%, var(--surface)) !important;
@@ -2995,7 +2995,7 @@ button, input, textarea { font-size: var(--fs-ui); }
 :root[data-theme="dark"] .prefs-nav {
   background: color-mix(in srgb, var(--page) 84%, var(--surface)) !important;
 }
-:root[data-theme="dark"] .grp,
+:root[data-theme="dark"] .grp:not(.ext-md-list .grp, [data-setting="market"]),
 :root[data-theme="dark"] .setting,
 :root[data-theme="dark"] .addp {
   background: color-mix(in srgb, var(--raised) 90%, var(--surface)) !important;

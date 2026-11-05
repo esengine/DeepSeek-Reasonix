@@ -355,3 +355,4 @@
 .usage .ucharts { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr); gap: 14px; align-items: start; }
 @container prefsmain (max-width: 900px) { .usage .ucharts, .usage .utiles { grid-template-columns: minmax(0, 1fr); } }
 .prefs-sheet[data-solo="usage"] #set-usage > :is(.grp-hd, .hint, .apply) { display: none; }
+.grp[data-setting="market"], .grp[data-setting="market"]:hover { margin: 0; padding: 4px 0 0; border: 0; border-radius: 0; background: none; box-shadow: none; }
