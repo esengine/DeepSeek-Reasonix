@@ -7,6 +7,7 @@ export const PERSONA: Messages = {
   "persona.advanced_enter_a_module_id": { zh: "高级：手动输入模块 ID", en: "Advanced: enter a module ID" },
   "persona.agent_composition": { zh: "Agent 组合", en: "Agent composition" },
   "persona.agent_presets": { zh: "Agent 预设", en: "Agent presets" },
+  "persona.presets_decide_what_new_tasks": { zh: "预设决定新任务能用哪些能力。已开始的会话保持原来的预设。", en: "A preset decides what a new task may use. Conversations already started keep theirs." },
   "persona.agent_presets_unavailable": { zh: "Agent 预设暂不可用", en: "Agent presets unavailable" },
   "persona.answer_briefly_and_directly_skip": { zh: "回答简短直接，不铺垫，优先代码与要点。", en: "Answer briefly and directly, skip the preamble, prefer code and bullets." },
   "persona.applies_to_new_conversations_and": { zh: "新会话及现有会话下一次构建时生效。", en: "Applies to new conversations and when existing conversations are next rebuilt." },

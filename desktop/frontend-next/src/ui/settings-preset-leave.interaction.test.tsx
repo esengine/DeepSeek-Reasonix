@@ -14,7 +14,7 @@ function draw(port = new MockPort()) {
   render(<Settings hub={new MockHub()} port={port} status={null} theme="light"
     onTheme={() => {}} contrast="" onContrast={() => {}} weight="" onWeight={() => {}}
     look={{}} onLook={() => {}} reloadThemes={() => {}} onClose={onClose}
-    onChanged={() => {}} onError={() => {}} at="persona" account={null}
+    onChanged={() => {}} onError={() => {}} at="persona:agent-presets" account={null}
     accountUnread="" reloadAccount={() => {}} />);
   return { onClose, port };
 }

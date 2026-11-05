@@ -41,3 +41,11 @@ it("draws the block in place outside the settings screen", () => {
   render(<SettingDeep id="rules" title="明确的规则"><p>规则内容</p></SettingDeep>);
   expect(screen.getByText("规则内容")).toBeTruthy();
 });
+
+it("opens the page a landing belongs to: the block's own, or the one it is drawn on", async () => {
+  const { pageFor } = await import("./prefsnav");
+  expect(pageFor("rules")).toBe("rules");
+  expect(pageFor("persona")).toBe("agent-presets");
+  expect(pageFor("composition-picker")).toBe("agent-presets");
+  expect(pageFor("approval")).toBeNull();
+});

@@ -169,6 +169,8 @@ export interface SettingEntry {
   /** A list or an editor rather than a value: the section shows it as one row
    *  that opens a page of its own. */
   page?: boolean;
+  /** Drawn on another block's page, so landing here opens that page. */
+  within?: string;
 }
 
 // One row per block the settings screen renders, checked both ways against
@@ -194,10 +196,10 @@ export const SETTINGS: SettingEntry[] = [
   { section: "session", anchor: "fold-work", title: "settings.fold_the_work_in_between", scope: "machine", apply: "immediate", keywords: ["折叠", "中间过程", "工具调用", "思考", "最后一句", "收起", "摘要"] },
   // Written to the user file only; the kernel's background sweep reads it on each pass.
   { section: "storage", anchor: "auto-archive", title: "data.auto_archive_inactive_conversations", scope: "machine", apply: "immediate", keywords: ["归档", "过期", "清理", "闲置", "天数"] },
-  { section: "persona", anchor: "composition-picker", title: "persona.show_mode_picker", scope: "machine", apply: "immediate", keywords: ["预设", "模式", "picker", "Agent"] },
+  { section: "persona", anchor: "composition-picker", within: "agent-presets", title: "persona.show_mode_picker", scope: "machine", apply: "immediate", keywords: ["预设", "模式", "picker", "Agent"] },
   // Explicit selections bind immutable versions; catalog saves do not rebuild.
-  { section: "persona", anchor: "agent-presets", title: "persona.agent_presets", scope: "machine", apply: "on-open", keywords: ["预设", "组合", "Agent"] },
-  { section: "persona", anchor: "persona", title: "persona.system_persona", scope: "machine", apply: "next-rebuild", keywords: ["人设", "persona", "身份", "提示词", "系统提示词", "前缀", "后缀"] },
+  { section: "persona", anchor: "agent-presets", page: true, title: "persona.agent_presets", scope: "machine", apply: "on-open", keywords: ["预设", "组合", "Agent"] },
+  { section: "persona", anchor: "persona", within: "agent-presets", title: "persona.system_persona", scope: "machine", apply: "next-rebuild", keywords: ["人设", "persona", "身份", "提示词", "系统提示词", "前缀", "后缀"] },
   { section: "storage", anchor: "session-dir", title: "session.where_this_session_writes", scope: "workspace", apply: "none", keywords: ["工作目录", "路径"] },
 
   { section: "model", anchor: "model", page: true, title: "settings.models_by_use", scope: "machine", apply: "runtime-rebuild", keywords: ["主模型", "默认模型", "模型", "切换", "端点", "按任务指定模型", "角色分工", "子代理", "规划", "看图", "复核", "决策", "网页搜索", "web search", "system one", "typesafe", "laya", "自动命名", "思考强度", "推理", "reasoning", "档位"] },
@@ -308,6 +310,12 @@ export const SETTINGS: SettingEntry[] = [
 ];
 
 export const SETTING_AT = (anchor: string) => SETTINGS.find((s) => s.anchor === anchor);
+
+/** The page a landing on this anchor opens, if it is on one. */
+export const pageFor = (anchor: string): string | null => {
+  const entry = SETTING_AT(anchor);
+  return entry?.page ? anchor : entry?.within ?? null;
+};
 
 export const FOLDS_INTO: Partial<Record<Section, Section>> = { providers: "model", remote: "network", memory: "storage", persona: "session", hooks: "ext", peers: "session", usage: "storage", versions: "account" };
 

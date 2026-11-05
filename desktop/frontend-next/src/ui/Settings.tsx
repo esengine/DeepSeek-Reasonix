@@ -12,7 +12,7 @@ import { useSettingsSearch } from "./useSettingsSearch";
 import { useSettingLanding } from "./useSettingLanding";
 import { bytes, tokens as fmtTokens } from "../i18n/format";
 import { STORAGE_TALLY_DELAY, cachedStorageTotal, storageTotal } from "./storageTally";
-import { LOOK_FAMILY, SECTION_NAME, SETTING_AT, pageHome } from "./prefsnav";
+import { LOOK_FAMILY, SECTION_NAME, SETTING_AT, pageFor, pageHome } from "./prefsnav";
 import { SettingsNav, SettingsTitle } from "./SettingsNav";
 import { SettingsPageStyle } from "./SettingsPageStyle";
 import { firstPage, pageOf } from "./settingPages";
@@ -59,7 +59,7 @@ import { DisplaySettings } from "./DisplaySettings";
 import { SectionCard } from "./SectionCard";
 import { DataSettings } from "./DataSettings";
 import { AgentPresets } from "./AgentPresets";
-import { SettingDeepContext } from "./SettingDeep";
+import { SettingDeep, SettingDeepContext } from "./SettingDeep";
 import { Account } from "./Account";
 import { Providers } from "./Providers";
 import { activeKind, groupVendors } from "./Models";
@@ -110,7 +110,7 @@ export function Settings({ hub, onError, port, networkPort, localWorkspacePort, 
   // 当前这一页，而为了搜索把每一页都挂起来会让隐藏页面开始发请求。
   const [query, setQuery] = useState("");
   const [landed, setLanded] = useState(openedAnchor);
-  const [deepAt, setDeep] = useState<string | null>(() => (SETTING_AT(openedAnchor)?.page ? openedAnchor : null));
+  const [deepAt, setDeep] = useState<string | null>(() => pageFor(openedAnchor));
   // Opened from the composer's effort menu: the running source's editor opens
   // on its reasoning fields. The model ref's first segment is the source name.
   const declare = openedAnchor === "effort-declare" ? status?.modelRef?.split("/")[0] : undefined;
@@ -339,7 +339,7 @@ export function Settings({ hub, onError, port, networkPort, localWorkspacePort, 
     const section = homeFor(requested, anchor);
     navigation.leave(() => {
       setAt(section);
-      setDeep(SETTING_AT(anchor)?.page ? anchor : null);
+      setDeep(pageFor(anchor));
       const target = pageOf(section, anchor);
       if (target) setPages((p) => ({ ...p, [section]: target }));
       setQuery("");
@@ -458,7 +458,9 @@ export function Settings({ hub, onError, port, networkPort, localWorkspacePort, 
           )}
           {at === "session" && (
             <>
-              <AgentPresets port={port} focusPersona={landed === "persona"} />
+              <SettingDeep id="agent-presets" title={t("persona.agent_presets")} hint={t("persona.presets_decide_what_new_tasks")}>
+                <AgentPresets port={port} focusPersona={landed === "persona"} />
+              </SettingDeep>
               <SectionCard title={t("settings.plans_and_questions")} hint={t("settings.how_plans_are_approved_how")}>
               {/* An on/off that reverses by clicking again is a switch, not two
                   options — the same control the recipes and the sandbox's
