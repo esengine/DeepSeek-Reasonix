@@ -60,6 +60,7 @@
 - 「用量」改为独立页面：侧栏、命令面板、计量条直接打开，只显示用量相关的块（显示币种、用量与成本、上传量）。每日图改为按「输入 · 命中缓存 / 未命中」分层的柱状图，带图例，悬停时另外写出服务商报告的合计。数字卡改为：输入（含缓存命中率）、服务商报告的合计、请求（含对话轮数）、活跃天数（含日均请求）；输出没有单独画，因为内核只报告合计。新增「导出 CSV」，按天一行，每种币种一列（2365cdb81）。
 - 开关按规范改为 34×20 描边轨道、12px 圆点：关时灰色，开时强调色描边 + 浅色底、圆点为强调色；公共按钮的文字改为规范的中等字重（467f15411）。
 - 设置窗口按设计稿铺满主窗口（四周留 24px），不再是居中的小窗；内容栏保持 760px。「常用」页标题补上「这里是常用项的快捷入口，每项的完整位置在各自分类里」（1ceac1746）。
+- 侧栏按「会话列表 · 行状态」稿：项目行不再显示会话数（折叠和展开都不显示，没加载完的条数由下面的「显示更多」交代）；远程项目有折叠箭头，主机名后直接写「连接中…」（橙）或「离线」（红），连接中时下面的会话变灰；未读行同时显示左侧黑点和时间，黑点带「未读」读屏标签；输入框「自动」前补上稿里的图标（e417818a9）。
 
 
 ---
@@ -127,3 +128,4 @@
 - Usage opens as its own page from the rail, the palette and the meter, holding only the usage blocks. The daily chart stacks input into cache hits and misses with a legend, the tooltip adding the provider's total; tiles read input with cache rate, provider total, requests and active days. Output is not drawn: the kernel reports only the total. Export CSV writes one row a day and one money column per currency (2365cdb81).
 - The shared switch follows the spec: a 34×20 outlined track with a 12px knob, grey when off and accent outline, wash and knob when on; kit buttons use the spec's medium label weight (467f15411).
 - Settings fills the window inside a 24px margin as the board draws it, rather than a smaller centred box; the Common page header adds the board's note that it is a shortcut (1ceac1746).
+- The sidebar follows the session-row board: project rows carry no session count, folded or open (what is left to load stays on the show-more row); remote projects get their chevron and an inline state word after the host, connecting in orange and offline in red, greying the sessions while connecting; an unread row keeps its time beside the left dot, which now carries the accessible name; the composer's effort reading gets the board's icon (e417818a9).
