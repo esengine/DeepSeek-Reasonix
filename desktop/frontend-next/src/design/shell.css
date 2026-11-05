@@ -73,3 +73,8 @@
 .hero .t { margin: 8px 0 0; color: var(--text); font: var(--w-semi) var(--fs-display)/1.3 var(--ui); letter-spacing: var(--track-display); }
 .hero .s { margin: 0; max-width: 380px; color: var(--muted); font: var(--w-reg) var(--fs-ui)/1.65 var(--ui); }
 .pane:has([data-pane="flow"] .flow[data-empty]) { background-color: var(--surface); background-image: none; }
+.phonecard .pc-cap { margin: 4px 0 0; color: var(--faint); font: var(--w-semi) var(--fs-micro) var(--ui); }
+.phonecard .pc-route { padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--r-md); }
+.phonecard .pc-route[data-on] { border-color: color-mix(in srgb, var(--accent) 40%, var(--border)); }
+.phonecard .pc-route + .pc-route { margin-top: 6px; }
+.phonecard .pc-route .pc-note, .phonecard .pc-route .pc-none { margin: 6px 0 0; color: var(--faint); font: var(--w-med) var(--fs-micro)/1.6 var(--ui); }
