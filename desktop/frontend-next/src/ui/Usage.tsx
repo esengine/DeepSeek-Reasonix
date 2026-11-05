@@ -1,4 +1,7 @@
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
+import { UsageStack, type StackPoint } from "./UsageStack";
+import { niceMax } from "./usagescale";
+import { usageCsv } from "./usagecsv";
 import { t } from "../i18n";
 import { count, money, tokens as fmtTokens } from "../i18n/format";
 import { reason } from "../i18n/kernel";
@@ -61,11 +64,6 @@ function moneyList(list?: Money[]): string {
 
 // A tick ladder a person reads: round the top up to a 1/2/5-ish step. An empty
 // series still needs two distinct halves, or both upper ticks label as 1.
-function niceMax(raw: number): number {
-  if (raw <= 0) return 2;
-  const pow = Math.pow(10, Math.floor(Math.log10(raw)));
-  return [1, 1.2, 1.5, 2, 2.5, 3, 4, 5, 6, 8, 10].map((m) => m * pow).find((v) => v >= raw) ?? raw;
-}
 
 interface PlotPoint {
   key: string;
@@ -130,7 +128,7 @@ function Plot({ points, label, aria }: PlotProps) {
           </>
         )}
         <rect
-          className="uhit" x={PL} y={0} width={W - PL - PR} height={H}
+          className="uhit" x={PL} y={0} width={W - PL - PR} height={H} data-action-pointermove="usage.chart-hover" data-action-pointerleave="usage.chart-hover"
           onPointerMove={(e) => {
             const box = e.currentTarget.ownerSVGElement!.getBoundingClientRect();
             const vx = ((e.clientX - box.left) / box.width) * W;
@@ -327,9 +325,9 @@ export function Usage({ port }: { port: AgentPort }) {
   const visibleHours = hourView && report!.to === localDay()
     ? hours.slice(0, new Date().getHours() + 1)
     : hours;
-  const usagePoints: PlotPoint[] = hourView
-    ? visibleHours.map((h) => ({ key: h.hour, axis: h.hour, tip: h.hour, value: h.total }))
-    : (report?.daily ?? []).map((d) => ({ key: d.day, axis: d.day.slice(5), tip: d.day, value: d.total }));
+  const usagePoints: StackPoint[] = hourView
+    ? visibleHours.map((h) => ({ key: h.hour, axis: h.hour, tip: h.hour, hit: h.cacheHit, miss: h.cacheMiss, total: h.total }))
+    : (report?.daily ?? []).map((d) => ({ key: d.day, axis: d.day.slice(5), tip: d.day, hit: d.cacheHit, miss: d.cacheMiss, total: d.total }));
   const dayRows: BreakdownRow[] = (report?.daily ?? [])
     .slice()
     .sort((a, b) => b.day.localeCompare(a.day))
@@ -350,6 +348,16 @@ export function Usage({ port }: { port: AgentPort }) {
           <button type="button" aria-pressed={range.kind === "month"} onClick={openMonth}>{t("usage.calendar_month")}</button>
         </div>
         {report && <span className="uspan">{report.from} → {report.to}</span>}
+        {report && (
+          <button type="button" className="uexport" data-action="usage.export" onClick={() => {
+            const url = URL.createObjectURL(new Blob([usageCsv(report)], { type: "text/csv;charset=utf-8" }));
+            const link = document.createElement("a");
+            link.href = url;
+            link.download = `reasonix-usage-${report.from}-${report.to}.csv`;
+            link.click();
+            URL.revokeObjectURL(url);
+          }}>{t("usage.export_csv")}</button>
+        )}
       </div>
 
       {range.kind === "custom" && (
@@ -415,19 +423,19 @@ export function Usage({ port }: { port: AgentPort }) {
       </section>
 
       <div className="utiles">
-        <div className="utile"><div className="k">Tokens</div><div className="v">{fmtTokens(report.tokens)}</div>
-          <div className="m">{t("usage.of_which_n_input_a", { n: fmtTokens(input), a: fmtTokens(report.cache_hit), b: fmtTokens(report.cache_miss) })}</div></div>
-        <div className="utile"><div className="k">{t("usage.cache_hit_rate")}</div><div className="v">{hitRate.toFixed(1)}%</div>
-          <div className="m">{t("usage.higher_is_cheaper_keep_the")}</div></div>
-        <div className="utile"><div className="k">Turns</div><div className="v">{fmtTokens(report.turns)}</div>
-          <div className="m">{t("usage.n_api_requests", { n: fmtTokens(report.requests) })}</div></div>
+        <div className="utile"><div className="k">{t("usage.input")}</div><div className="v">{fmtTokens(input)}</div>
+          <div className="m">{t("usage.cache_hit_rate_note", { rate: hitRate.toFixed(1) })}</div></div>
+        <div className="utile"><div className="k">{t("usage.provider_reported_total")}</div><div className="v">{fmtTokens(report.tokens)}</div>
+          <div className="m">{t("usage.total_includes_output")}</div></div>
+        <div className="utile"><div className="k">{t("usage.requests")}</div><div className="v">{fmtTokens(report.requests)}</div>
+          <div className="m">{t("usage.n_turns", { n: fmtTokens(report.turns) })}</div></div>
         <div className="utile"><div className="k">{t("usage.active_days")}</div><div className="v">{report.active_days}</div>
-          <div className="m">{t("usage.of_n_days", { n: report.daily.length })}</div></div>
+          <div className="m">{t("usage.of_n_days_avg", { n: report.daily.length, avg: fmtTokens(report.active_days ? Math.round(report.requests / report.active_days) : 0) })}</div></div>
       </div>
 
       <section className="ucard">
         <div className="ucard-h"><h3>{hourView ? t("usage.hourly_usage") : t("usage.daily_usage")}</h3><span className="hint">{hourView ? t("usage.hover_for_an_hour") : t("usage.hover_for_a_day")}</span></div>
-        <Plot points={usagePoints} label={(v) => fmtTokens(Math.round(v))} aria={hourView ? t("usage.hourly_tokens") : t("usage.daily_tokens")} />
+        <UsageStack points={usagePoints} label={(v) => fmtTokens(Math.round(v))} aria={hourView ? t("usage.hourly_tokens") : t("usage.daily_tokens")} />
       </section>
 
       <BreakdownTable rows={hourView ? hourRows : dayRows} hourly={hourView} />

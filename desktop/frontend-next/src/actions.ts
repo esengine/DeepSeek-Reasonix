@@ -587,6 +587,8 @@ export const ACTIONS: UIAction[] = [
 
   // Usage changes what report is read, not canonical session state.
   { id: "usage.range.today", kind: "view", target: "none", proof: "interaction" },
+  { id: "usage.chart-hover", kind: "view", target: "none", proof: "interaction" },
+  { id: "usage.export", kind: "shell-native", target: "none", proof: "interaction" },
   { id: "usage.range.start", kind: "view", target: "none", proof: "interaction" },
   { id: "usage.range.end", kind: "view", target: "none", proof: "interaction" },
   { id: "usage.range.month", kind: "view", target: "none", proof: "interaction" },

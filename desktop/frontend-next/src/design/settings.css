@@ -312,3 +312,13 @@
 .mkt-vote { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
 .mkt-vote-bar { flex: 0 1 160px; height: 6px; overflow: hidden; border-radius: var(--r-pill); background: color-mix(in srgb, var(--err) 18%, var(--overlay)); }
 .mkt-vote-bar > i { display: block; height: 100%; border-radius: inherit; background: var(--ok); }
+.ustack .useg[data-s="hit"] { fill: var(--chart-hit); }
+.ustack .useg[data-s="miss"] { fill: var(--chart-miss); }
+.ustack g[data-on] .useg { opacity: .82; }
+.ulegend { display: flex; gap: 14px; margin-bottom: 6px; color: var(--muted); font: var(--w-med) var(--fs-micro) var(--ui); }
+.ulegend span, .ustack .utip .r { display: inline-flex; align-items: center; gap: 6px; }
+.ulegend i, .ustack .utip i { width: 8px; height: 8px; border-radius: 2px; }
+.ulegend i[data-s="hit"], .ustack .utip i[data-s="hit"] { background: var(--chart-hit); }
+.ulegend i[data-s="miss"], .ustack .utip i[data-s="miss"] { background: var(--chart-miss); }
+.ustack .utip .r { display: flex; justify-content: space-between; gap: 12px; color: var(--muted); font: var(--w-med) var(--fs-micro) var(--ui); }
+.ustack .utip .r b { color: var(--text); font-weight: var(--w-semi); }

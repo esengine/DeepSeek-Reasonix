@@ -14,7 +14,7 @@ import { bytes, tokens as fmtTokens } from "../i18n/format";
 import { STORAGE_TALLY_DELAY, cachedStorageTotal, storageTotal } from "./storageTally";
 import { LOOK_FAMILY, SECTION_NAME, SETTING_AT, pageFor, pageHome } from "./prefsnav";
 import { SettingsNav, SettingsTitle } from "./SettingsNav";
-import { SettingsPageStyle } from "./SettingsPageStyle";
+import { SettingsPageStyle, SoloStyle } from "./SettingsPageStyle";
 import { firstPage, pageOf } from "./settingPages";
 import { Group, SCOPE_SAID } from "./Group";
 import { PlanApproval } from "./PlanApproval";
@@ -94,6 +94,9 @@ const homeFor = (section: Section, anchor: string): Section => {
   return pageHome(entry ? entry.section : section);
 };
 
+const SOLO: Record<string, Section | undefined> = { extensions: "ext", spend: "usage" };
+const SOLO_TITLE: Record<string, string> = { ext: "ext.extension", usage: "app.usage" };
+
 export function Settings({ hub, onError, port, networkPort, localWorkspacePort, networkHost, status, theme, onTheme, contrast, onContrast, weight, onWeight, look, onLook, onClose, onChanged, onSessionsRecovered, reloadThemes, at: opened, account: acct, accountUnread, reloadAccount, workspaceRoot }: Props) {
   const navigation = useSettingsLeave();
   const close = useCallback(() => navigation.leave(onClose), [navigation.leave, onClose]);
@@ -101,9 +104,10 @@ export function Settings({ hub, onError, port, networkPort, localWorkspacePort, 
   const homePort = networkPort ?? port;
   const localPort = localWorkspacePort ?? homePort;
   const [openedName, openedAnchor = ""] = (opened ?? "").split(":", 2);
-  // "extensions" is a destination of its own: the ext section drawn as a page.
-  const solo = openedName === "extensions";
-  const openedSection = solo ? "ext" : openedName;
+  // Destinations of their own: one section drawn as a page, without the rest.
+  const soloSection = SOLO[openedName];
+  const solo = !!soloSection;
+  const openedSection = soloSection ?? openedName;
   const [picked, setPicked] = useState<ExtPicked | null>(null);
   const [at, setAt] = useState<Section>(homeFor((openedSection as Section) || "session", openedAnchor));
   const [pages, setPages] = useState<Partial<Record<Section, string>>>(() => {
@@ -366,9 +370,9 @@ export function Settings({ hub, onError, port, networkPort, localWorkspacePort, 
       onMouseUp={(e) => { if (veiled.current && e.target === e.currentTarget && !updatingPkg.applying) close(); }}
       data-action-mouseup="settings.close"
     >
-      <div className="prefs-sheet" role="dialog" aria-modal="true" aria-labelledby="prefs-title" data-wide={wide || undefined} data-solo={solo ? "ext" : undefined}>
+      <div className="prefs-sheet" role="dialog" aria-modal="true" aria-labelledby="prefs-title" data-wide={wide || undefined} data-solo={soloSection}>
       <div className="prefs-hd">
-        <h1 id="prefs-title">{t(solo ? "ext.extension" : "common.settings")}</h1>
+        <h1 id="prefs-title">{t(solo ? SOLO_TITLE[soloSection] : "common.settings")}</h1>
         {/* 原来这里挂着一句「改动立刻生效；需要重建运行时的……」。它对三档里的
             两档说了话，而且要读的人自己判断手上这一项属于哪一档 —— 那句话现在
             落在每一个设置块自己身上。 */}
@@ -449,9 +453,9 @@ export function Settings({ hub, onError, port, networkPort, localWorkspacePort, 
           >
           {/* Keyed on the section: replacing this column is the navigation,
               and it is the one thing here whose mount really is the cause. */}
-          <SettingDeepContext.Provider value={{ pages: true, open: deepAt, section: t(SECTION_NAME[at] ?? at), go: (id) => navigation.leave(() => { setLanded(""); setDeep(id); }) }}>
+          <SettingDeepContext.Provider value={{ pages: !solo, open: deepAt, section: t(SECTION_NAME[at] ?? at), go: (id) => navigation.leave(() => { setLanded(""); setDeep(id); }) }}>
           <div className="prefs-col" key={`${at}:${deepAt ?? ""}`} data-cols={TWO_COLUMN.includes(at) && !deepAt && !solo ? 2 : undefined} data-deep={deepAt ?? undefined}>
-          <SettingsPageStyle section={at} page={pageNow} />
+          {solo ? <SoloStyle section={soloSection} /> : <SettingsPageStyle section={at} page={pageNow} />}
           {/* Every refused write on every page lands in one state, so it is
               said in one place. Copied onto the pages somebody remembered, it
               was missing from the third that writes it: 创建隔离副本 was
@@ -621,7 +625,7 @@ export function Settings({ hub, onError, port, networkPort, localWorkspacePort, 
               {extTab === "market" && <MarketGroup port={port} onApplying={applyingChanged} onInstalled={afterExtChange} onViewInstalled={(kind, name) => { setInstalledTarget({ kind, name }); setExtTab("installed"); }} account={acct} onSignIn={() => go("account", "account")} />}
               {extTab === "installed" && (
               <>
-              <ExtSplit on={solo} picked={picked ?? firstPick(packages, looseMcp, looseSkills)} onPick={setPicked} detail={
+              <ExtSplit on={soloSection === "ext"} picked={picked ?? firstPick(packages, looseMcp, looseSkills)} onPick={setPicked} detail={
                 <ExtDetail picked={picked ?? firstPick(packages, looseMcp, looseSkills)} packages={packages} mcp={mcp} skills={skills} port={port} root={scopeAt} live={live} implicit={implicit}
                   updating={updatingPkg.name} onChanged={afterExtChange} onReloadError={reload.report} onReloaded={reload.applied}
                   onUpdate={(name) => setUpdatingPkg((p) => ({ ...p, name, applying: false }))} onFailed={setFailed} />

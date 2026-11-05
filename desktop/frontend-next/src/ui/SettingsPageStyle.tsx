@@ -17,3 +17,10 @@ export function SettingsPageStyle({ section, page }: { section: Section; page: s
   const wrappers = hidden.map((id) => `.prefs-col details:has(> [data-setting="${id}"])`).join(",");
   return <style ref={style}>{`${blocks}{display:none}${wrappers}{display:none}`}</style>;
 }
+
+/** A section drawn as a page of its own keeps only its own blocks out of the
+ *  page it shares, and drops the cards left with none of them. */
+export function SoloStyle({ section }: { section: Section }) {
+  const own = SETTINGS.filter((e) => e.section === section).map((e) => `[data-setting="${e.anchor}"]`).join(",");
+  return <style>{`.prefs-col [data-setting]:not(${own}){display:none}.prefs-col .prefs-card:not(:has(${own})){display:none}.prefs-col .prefs-card > header{display:none}`}</style>;
+}

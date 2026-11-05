@@ -48,3 +48,10 @@ it("keeps the extensions section of Settings as it was, unfolding rows in place"
   await screen.findAllByText("review-kit");
   expect(screen.queryByRole("complementary", { name: "详情" })).toBeNull();
 });
+
+it("opens usage as a page of its own, with what it spent and the export", async () => {
+  draw("spend");
+  expect(screen.getByRole("heading", { level: 1, name: "用量" })).toBeTruthy();
+  expect(await screen.findByRole("button", { name: "导出 CSV" })).toBeTruthy();
+  expect(screen.queryByRole("button", { name: /用量与成本/ })).toBeNull();
+});

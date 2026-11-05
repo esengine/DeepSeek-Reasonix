@@ -5350,3 +5350,6 @@
 .prefs-card > .grp { padding: 11px 20px; }
 .prefs-card > .grp > .grp-hd { margin: 0; }
 .prefs-card > .grp .lrow { padding-top: 0; padding-bottom: 0; }
+.usage { --chart-hit: #3555C4; --chart-miss: #C8742A }
+[data-theme="dark"] .usage { --chart-hit: #6B87F0; --chart-miss: #C27A38 }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .usage { --chart-hit: #6B87F0; --chart-miss: #C27A38 } }

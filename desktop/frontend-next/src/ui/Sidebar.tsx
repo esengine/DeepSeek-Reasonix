@@ -230,7 +230,7 @@ export function Sidebar({
       { id: "providers", label: t("common.model_services"), icon: "layers", keywords: "model provider 模型 来源 服务",
         run: () => onSettings("providers") },
       { id: "usage", label: t("session.wallet_and_usage"), icon: "wallet", keywords: "usage cost token 用量 费用",
-        run: () => onSettings("usage:usage") },
+        run: () => onSettings("spend") },
       { id: "feedback", label: t("common.send_feedback"), icon: "feedback", keywords: "feedback report bug idea suggestion 反馈 报告 问题 建议 意见",
         run: () => onFeedback("send") },
       { id: "feedback-mine", label: t("session.my_feedback"), icon: "feedback", keywords: "feedback receipt status my reply 反馈 回执 进展 我的 回复",
@@ -409,7 +409,7 @@ export function Sidebar({
                 data-value={opensFiles ? undefined : section}
                 aria-label={name}
                 title={name}
-                onClick={() => (opensFiles ? onFiles() : onSettings(mark === "usage" ? "usage:usage" : mark === "ext" ? "extensions" : section))}
+                onClick={() => (opensFiles ? onFiles() : onSettings(mark === "usage" ? "spend" : mark === "ext" ? "extensions" : section))}
               >
                 {mark === "files" ? <StudioIcon name="file" aria-hidden="true" />
                   : <svg viewBox="0 0 16 16" width={16} height={16} fill="none" stroke="currentColor" strokeWidth={1.45} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{ICON[mark as Section]}</svg>}
