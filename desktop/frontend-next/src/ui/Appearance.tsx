@@ -1,4 +1,5 @@
 import { ApplyNote } from "./Group";
+import { SettingDeep } from "./SettingDeep";
 import { useCallback, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from "react";
 import { effectsMode, onEffectsChange, setEffectsMode, type EffectsMode } from "../state/prefs";
 import type { AgentPort, Appearance as Look, ThemePack } from "../port/port";
@@ -210,6 +211,8 @@ export function Appearance({ port, theme, contrast, onContrast, weight, onWeight
           <span className="t">{failed || unread}</span>
         </div>
       )}
+      <SettingDeep id="scheme" title={t("look.interface_theme")} hint={t("look.choose_the_workbench_surfaces_and")}
+        now={packs.find((p) => p.active)?.name ?? t("common.default")}>
       <section className="grp" id="set-scheme" data-setting="scheme">
         <div className="grp-hd">
           <h3>{t("look.interface_theme")}</h3>
@@ -252,6 +255,7 @@ export function Appearance({ port, theme, contrast, onContrast, weight, onWeight
         </div>
         <ApplyNote id="scheme" />
       </section>
+      </SettingDeep>
 
       <section className="grp" id="set-code-appearance" data-setting="font">
         <div className="grp-hd">

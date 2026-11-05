@@ -43,6 +43,7 @@ it.each(["completed", "pending"])("keeps the %s machine theme inventory when the
   await waitFor(() => expect(sessionStorage.getItem("rx-active-pane")).toBe(remote.id));
   await userEvent.click(document.querySelector<HTMLElement>('[data-action="chrome.settings"]')!);
   await userEvent.click(await screen.findByRole("tab", { name: /外观/ }));
+  await userEvent.click(await waitFor(() => document.querySelector<HTMLButtonElement>('[data-action="settings.open-page"][data-target="scheme"]')!));
   const sheet = document.querySelector(".prefs")!;
   if (state === "completed") await act(async () => finishLocal(packs));
   await userEvent.keyboard("{Control>}k{/Control}");
