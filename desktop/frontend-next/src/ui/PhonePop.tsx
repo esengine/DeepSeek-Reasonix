@@ -263,11 +263,13 @@ function PhoneCard({ share, failure }: { share: Share; failure: string }) {
             {offer ? (
               <>
                 <img src={`data:image/svg+xml;charset=utf-8,${encodeURIComponent(offer.qr)}`} alt={t("remote.pairing_qr_code")} width={148} height={148} />
-                <span className="pc-when">{t("remote.local_pairing_valid_until_time", { time: clock(offer.expires) })}</span>
-                <span className="pc-acts">
-                  <button data-action="share.copy" onClick={() => void copy(offer.url)}>{copied ? t("common.copied") : t("remote.copy_link")}</button>
-                  <i aria-hidden="true" />
-                  <button data-action="share.offer" disabled={busy} onClick={() => void newCode()}>{t("common.new_code")}</button>
+                <span className="pc-side">
+                  <span className="pc-when">{t("remote.local_pairing_valid_until_time", { time: clock(offer.expires) })}</span>
+                  <span className="pc-acts">
+                    <button data-action="share.copy" onClick={() => void copy(offer.url)}>{copied ? t("common.copied") : t("remote.copy_link")}</button>
+                    <i aria-hidden="true" />
+                    <button data-action="share.offer" disabled={busy} onClick={() => void newCode()}>{t("common.new_code")}</button>
+                  </span>
                 </span>
               </>
             ) : (
@@ -305,11 +307,13 @@ function PhoneCard({ share, failure }: { share: Share; failure: string }) {
             {cloudOffer ? (
               <>
                 <img src={`data:image/svg+xml;charset=utf-8,${encodeURIComponent(cloudOffer.qr)}`} alt={t("remote.internet_connection_qr_code")} width={148} height={148} />
-                <span className="pc-when">{t("remote.scan_with_your_phone_works")}</span>
-                <span className="pc-acts">
-                  <button data-action="share.cloud-copy" onClick={() => void copy(cloudOffer.url)}>{copied ? t("common.copied") : t("remote.copy_link")}</button>
-                  <i aria-hidden="true" />
-                  <button data-action="share.cloud-offer" disabled={busy} onClick={() => void newCloudCode()}>{t("remote.refresh_qr_code")}</button>
+                <span className="pc-side">
+                  <span className="pc-when">{t("remote.scan_with_your_phone_works")}</span>
+                  <span className="pc-acts">
+                    <button data-action="share.cloud-copy" onClick={() => void copy(cloudOffer.url)}>{copied ? t("common.copied") : t("remote.copy_link")}</button>
+                    <i aria-hidden="true" />
+                    <button data-action="share.cloud-offer" disabled={busy} onClick={() => void newCloudCode()}>{t("remote.refresh_qr_code")}</button>
+                  </span>
                 </span>
               </>
             ) : (

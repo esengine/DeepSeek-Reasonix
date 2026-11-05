@@ -78,3 +78,7 @@
 .phonecard .pc-route[data-on] { border-color: color-mix(in srgb, var(--accent) 40%, var(--border)); }
 .phonecard .pc-route + .pc-route { margin-top: 6px; }
 .phonecard .pc-route .pc-note, .phonecard .pc-route .pc-none { margin: 6px 0 0; color: var(--faint); font: var(--w-med) var(--fs-micro)/1.6 var(--ui); }
+.phonecard .pc-code { display: flex; align-items: center; justify-items: initial; gap: 14px; }
+.phonecard .pc-code > img { flex: none; width: 112px; height: 112px; }
+.phonecard .pc-code > .pc-mint { margin: 0 auto; }
+.phonecard .pc-side { display: grid; min-width: 0; gap: 6px; }

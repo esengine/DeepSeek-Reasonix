@@ -94,6 +94,10 @@ it("shows the account-gated Internet QR before the optional LAN pairing code", a
   await userEvent.click(await screen.findByRole("button", { name: "设备访问" }));
   expect(await screen.findByRole("img", { name: "互联网连接二维码" })).toBeTruthy();
   expect(screen.getByText("手机扫码 · 不在同一网络也能连接")).toBeTruthy();
+  const code = document.querySelector(".pc-code")!;
+  expect(code.querySelector(":scope > img")).not.toBeNull();
+  expect(code.querySelector(":scope > .pc-side .pc-when")).not.toBeNull();
+  expect(code.querySelector(":scope > .pc-side .pc-acts")).not.toBeNull();
   expect(offerCloudShare).toHaveBeenCalledTimes(1);
   expect(offerShare).not.toHaveBeenCalled();
 });
