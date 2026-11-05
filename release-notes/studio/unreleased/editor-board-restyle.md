@@ -55,6 +55,7 @@
 - 外观里的「界面主题」改为二级页：分区里一行写明当前用的主题，点进去是配色、已安装主题和导入（e2f9876b1）。
 - 「用量与成本」改为数据下的二级页，侧栏的「用量」按钮和底部计量条的余额直接打开这一页，不再落到「数据」分区、排在记忆下面；直达这类页面时滚到页面顶部，面包屑可见（6fee912c7）。
 - 扩展改为独立页面：侧栏、命令面板、计量条和运行时提示都直接打开「扩展」页，不再是设置里的一个分区；页面没有设置的导航和搜索，「已安装」改为左边列表、右边详情：在列表里选插件包、外部服务或技能，右边完整显示状态、说明、来源与位置、它提供的内容和全部操作；列表行只留名字一行和开关；打开时默认选中第一项；详情底部写明改动何时生效。从设置打开时，扩展分区保持原样（c860dc996）。
+- 「发现」改为卡片网格：类型图标、名字（管理员标记可信时带对勾）、发布者和版本、两行摘要，底部是类型、是否固定、安装量和好评。已安装的在右上角写明；已固定且未安装的右上角直接有「安装」，点了直接进入安装确认。未固定的包不给捷径，信任发布者仍要在包详情里决定（3eafaaf33）。
 
 
 ---
@@ -117,3 +118,4 @@
 - Interface theme becomes a page under Appearance: one row naming the theme in effect, opening to the palettes, installed themes and theme import (e2f9876b1).
 - Usage and cost becomes its own page under Data; the rail's usage button and the meter's wallet open straight onto it. Landing on a block that is its own page scrolls to the page's top so the breadcrumb shows (6fee912c7).
 - Extensions is now a page of its own, opened from the rail, the palette, the meter and the runtime notice: no settings navigation or search, and the Installed tab as a list beside a detail pane that draws the chosen package, service or skill whole, with its state, facts, contents and actions; the first item is chosen on open. Settings opened directly keeps the Extensions section as before (c860dc996).
+- Discover lays packages out as cards: kind icon, name with a trust check, publisher and version, two lines of summary, and kind, pinning, installs and approval along the foot. Installed packages say so in the corner; a pinned one not yet installed has Install there, which opens straight onto what it would install. Unpinned packages get no shortcut (3eafaaf33).
