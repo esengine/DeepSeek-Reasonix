@@ -6,7 +6,8 @@
 .delivery-grid {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
-  gap: 8px;
+  gap: 0;
+  border-top: 1px solid var(--hair);
 }
 .delivery-file {
   display: grid;
@@ -14,17 +15,18 @@
   align-items: center;
   gap: 0 4px;
   min-width: 0;
-  padding-right: 8px;
-  border: 1px solid var(--border);
-  border-radius: var(--r-md);
-  background: var(--raised);
+  padding-right: 4px;
+  border: 0;
+  border-bottom: 1px solid var(--hair);
+  border-radius: 0;
+  background: transparent;
   color: var(--text);
 }
 .delivery-file:hover {
-  background: var(--raised);
+  background: var(--overlay);
 }
 .delivery-file[data-current] {
-  border-color: var(--accent);
+  box-shadow: inset 2px 0 0 var(--accent);
 }
 .delivery-open {
   display: flex;
@@ -44,17 +46,16 @@
 .delivery-cta {
   flex: none;
   height: 24px;
-  padding: 0 10px;
+  padding: 0 6px;
   box-sizing: border-box;
   display: inline-flex;
   align-items: center;
-  border: 1px solid var(--border);
+  border: 0;
   border-radius: var(--r-pill);
   color: var(--text);
-  font: var(--w-reg) var(--fs-meta)/1 var(--ui);
+  font: var(--w-semi) var(--fs-meta)/1 var(--ui);
   white-space: nowrap;
 }
-.delivery-open:hover .delivery-cta { background: var(--overlay); }
 .delivery-open:focus-visible, .delivery-more:focus-visible {
   outline: 2px solid var(--focus);
   outline-offset: -3px;

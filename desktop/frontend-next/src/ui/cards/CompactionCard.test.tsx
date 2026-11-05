@@ -108,3 +108,14 @@ describe("what a fold leaves behind", () => {
     expect(html).toContain("折叠动不了它");
   });
 });
+
+describe("the lighter card the board draws", () => {
+  it("is titled by what it did, tagged auto or manual, and carries no frame of its own", () => {
+    const html = draw({ trigger: "auto", boundary: "capacity", triggerTokens: 108_800, messages: 40, sourceTokens: 117_000, projectionTokens: 24_000 });
+    expect(html).toContain("较早的内容已折叠为简报");
+    expect(html).toContain("· 自动");
+    expect(html).toContain('data-light=""');
+    expect(html).not.toContain("comp-bar");
+    expect(draw({ trigger: "manual", messages: 4 })).toContain("· 手动");
+  });
+});

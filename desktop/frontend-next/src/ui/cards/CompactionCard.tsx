@@ -107,15 +107,14 @@ export function CompactionCard({ c, done }: { c: Compaction; done: boolean }) {
   const aborted = done && !c.messages;
   const cause = aborted && c.code ? FOLD_WHY[c.code] : undefined;
   return (
-    <div className="call" data-k="host">
+    <div className="call" data-k="host" data-light="">
       <div className="g">
         <Sym glyph="⊘" />
       </div>
       <div className="c">
         <div className="hl">
-          <span className={done ? "nm" : "nm shim"}>{t(!done ? "common.compacting" : aborted ? "chat.compaction_did_not_complete" : "chat.compaction_done")}</span>
-          <span className="tag">{t("chat.host")}</span>
-          {c.trigger && <span className="arg" title={why(c)}>{why(c)}</span>}
+          <span className={done ? "nm" : "nm shim"}>{t(!done ? "common.compacting" : aborted ? "chat.compaction_did_not_complete" : "chat.earlier_folded_into_digest")}</span>
+          {c.trigger && <span className="tag">· {t(c.trigger === "manual" ? "chat.compaction_manual" : "chat.compaction_auto")}</span>}
         </div>
         {/* While it runs, the digest's own last line is the progress bar: a
             fold can take a minute, and a placeholder that says nothing for a
@@ -151,12 +150,8 @@ export function CompactionCard({ c, done }: { c: Compaction; done: boolean }) {
               {/* The filled part is what the fold gave back, not what it kept:
                   the bar's fill is the ok colour, and more of it has to mean
                   more room. */}
-              {shrank && (
-                <div className="comp-bar" title={`${before} → ${after} tokens`}>
-                  <i style={{ width: `${Math.max(2, Math.round((1 - after / before) * 100))}%` }} />
-                </div>
-              )}
               <div className="comp-n">
+                {c.trigger && <>{why(c)}{" · "}</>}
                 {c.messages ? (
                   <>{tx("chat.folded_n_messages", { n: <b>{c.messages}</b> })}</>
                 ) : (

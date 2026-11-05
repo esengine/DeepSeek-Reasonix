@@ -10,12 +10,12 @@
 .flow .call[data-call] > .c { margin-bottom: 7px; padding: 7px 9px 8px; border: 1px solid var(--hair); border-radius: var(--r-md); background: var(--surface); }
 .flow .call[data-call][data-running] > .c { border-color: var(--border); }
 
-.activity-group { margin: 8px 0 0; padding: 3px 4px; border: 1px solid var(--hair); border-radius: var(--r-md); overflow: clip; }
+.activity-group { margin: 8px 0 0; padding: 0; border: 0; border-radius: 0; overflow: clip; }
 .activity-group > summary {
   height: 30px; min-height: 30px; padding: 0 10px; gap: 8px; box-sizing: border-box; border-radius: var(--r-sm);
   background: transparent; color: var(--muted); font: var(--w-med) var(--fs-meta)/1 var(--ui);
 }
-.activity-group[open] > summary { background: var(--surface); }
+.activity-group[open] > summary { background: transparent; border-bottom: 1px solid var(--hair); border-radius: 0; }
 .activity-group > summary:hover { color: var(--text); }
 .activity-group > summary .studio-icon { width: 12px; height: 12px; color: var(--faint); }
 .activity-group .activity-title { color: inherit; font: inherit; }
@@ -102,10 +102,7 @@
 .activity-now code { min-width: 0; overflow: hidden; text-overflow: ellipsis; font: var(--w-med) var(--fs-meta)/1 var(--mono); }
 .activity-fill { flex: 1; }
 .activity-group > summary .activity-ok { color: var(--ok-ink); }
-.activity-group .activity-errors {
-  display: inline-flex; align-items: center; height: 20px; padding: 0 8px; box-sizing: border-box; border-radius: var(--r-pill);
-  background: color-mix(in srgb, var(--err) 14%, transparent); color: var(--err-ink); font: var(--w-semi) var(--fs-micro)/1 var(--ui); white-space: nowrap;
-}
+.activity-group .activity-errors { color: var(--err-ink); font: var(--w-semi) var(--fs-meta)/1 var(--ui); white-space: nowrap; }
 .activity-group .activity-running { font-weight: var(--w-semi); }
 .activity-group .activity-count { font: var(--w-med) var(--fs-meta)/1 var(--ui); white-space: nowrap; }
 .activity-group[data-running]:not([open]) > summary {
@@ -145,10 +142,7 @@
   .bump > [data-moved], .activity-body .enterbox[data-enter] > .call, .activity-body .tool-state[data-pop], .activity-body .call[data-shake] > .c, .step-spin { animation: none; }
   .activity-group::details-content, .activity-group > summary .activity-fold-icon { transition: none; }
 }
-.step-err {
-  margin: 0 10px 6px 32px; padding: 7px 9px; border-radius: var(--r-sm); background: color-mix(in srgb, var(--err) 8%, transparent);
-  color: var(--err-ink); font: var(--w-med) var(--fs-meta)/1.6 var(--mono);
-}
+.step-err { margin: 2px 0 6px 10px; padding: 0 0 0 10px; border: 0; border-left: 2px solid var(--err); border-radius: 0; background: transparent; color: var(--err-ink); font: var(--w-reg) var(--fs-meta)/1.6 var(--mono); }
 .step-err code { display: block; overflow-wrap: anywhere; white-space: pre-wrap; font: inherit; }
 .step-err .step-stop { font-family: var(--ui); }
 .flow .fold-earlier { display: flex; align-items: center; gap: 8px; width: 100%; max-width: var(--column); margin: 10px auto 6px; padding: 0; border: 0; background: none; color: var(--faint); font: var(--w-reg) var(--fs-meta)/1.4 var(--ui); cursor: pointer; }
@@ -158,3 +152,13 @@
 .flow .fold-earlier b::before { content: "· "; }
 .flow .fold-earlier:hover span { color: var(--muted); }
 .flow .fold-earlier[aria-expanded="true"] .studio-icon { transform: rotate(180deg); }
+.flow .call[data-k="host"][data-light] { margin: 14px 0; }
+.flow .call[data-k="host"][data-light] > .c { border: 0; border-left: 2px solid var(--hair); border-radius: 0; background: transparent; padding: 2px 0 2px 14px; overflow: visible; }
+.flow .call[data-k="host"][data-light] > .c > .hl { min-height: 0; padding: 0; gap: 6px; }
+.flow .call[data-k="host"][data-light] > .c > .hl .nm { color: var(--text); font: var(--w-semi) var(--fs-ui)/1.5 var(--ui); }
+.flow .call[data-k="host"][data-light] > .g { display: none; }
+.flow .call[data-k="host"][data-light] .comp { margin-top: 4px; }
+.flow .call[data-k="host"][data-light] .comp-n { margin-top: 2px; line-height: 1.6; }
+.flow .call[data-k="host"][data-light] .comp details > summary { color: var(--text); font: var(--w-med) var(--fs-meta)/1.5 var(--ui); cursor: pointer; }
+.flow .call[data-k="host"][data-light] > .c > .hl { border: 0; }
+.flow .call[data-k="host"][data-light] > .c > .out { margin: 0; padding: 0; }
