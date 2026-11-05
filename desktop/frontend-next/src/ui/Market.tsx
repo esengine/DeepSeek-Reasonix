@@ -10,11 +10,13 @@ import { PlanConfirm } from "./MarketConfirm";
 import { MyPackages, PublishForm } from "./MarketPublish";
 import { MarketVote, approvalLabel } from "./MarketVote";
 import { arrowRadios, arrowTabs } from "./tablist";
+import { StudioIcon, type StudioIconName } from "./StudioIcon";
 
 const KINDS: [MarketKind | "", string][] = [["", "common.all"], ["skill", "settings.skills"], ["plugin", "ext.plugins"], ["mcp", "persona.mcp_servers"], ["theme", "ext.theme"]];
 type Sort = "recommended" | "trending" | "installs" | "new";
 const SORTS: [Sort, string][] = [["recommended", "composer.recommended"], ["trending", "ext.trending"], ["installs", "ext.most_installed"], ["new", "ext.newest"]];
 const KIND_NAME: Record<string, string> = { skill: "settings.skills", plugin: "ext.plugins", mcp: "persona.mcp_servers", theme: "ext.theme" };
+const KIND_ICON: Record<string, StudioIconName> = { skill: "spark", plugin: "layers", mcp: "plug", theme: "eye" };
 
 interface Props {
   port: AgentPort;
@@ -42,6 +44,7 @@ export function Market({ port, account, onInstalled, onViewInstalled, onSignIn }
   const [filterUnsupported, setFilterUnsupported] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [open, setOpen] = useState("");
+  const [inspecting, setInspecting] = useState(false);
   const asked = useRef(0);
   const nextOffset = useRef(0);
   const panel = useRef<HTMLDivElement>(null);
@@ -105,9 +108,10 @@ export function Market({ port, account, onInstalled, onViewInstalled, onSignIn }
         port={port}
         account={account}
         slug={open}
+        inspect={inspecting}
         onSignIn={onSignIn}
         onViewInstalled={onViewInstalled}
-        onBack={() => setOpen("")}
+        onBack={() => { setOpen(""); setInspecting(false); }}
         onInstalled={() => {
           if (currentConnection.current !== connection) return;
           onInstalled();
@@ -163,29 +167,37 @@ export function Market({ port, account, onInstalled, onViewInstalled, onSignIn }
       {rows?.length === 0 && !error && <div className="empty">{t(pinned ? "ext.no_pinned_packages_found_turn" : "ext.no_matching_packages")}</div>}
       <ul className="mkt-list">
         {rows?.map((p) => (
-          <li key={p.slug}>
+          <li key={p.slug} className="mkt-card">
             <button className="mkt-row" data-action="market.open" data-value={p.slug} onClick={() => setOpen(p.slug)}>
-              <span className="mkt-line">
-                <span className="nm">{p.name}</span>
-                <span className="mkt-kind">{t(KIND_NAME[p.kind] ?? p.kind)}</span>
-                {p.verified && <span className="mkt-badge" data-tone="ok">{t("ext.admin_marked_trusted")}</span>}
+              <span className="mkt-card-hd">
+                <span className="mkt-ico" aria-hidden="true"><StudioIcon name={KIND_ICON[p.kind] ?? "plug"} /></span>
+                <span className="mkt-who">
+                  <span className="nm">{p.name}{p.verified && <StudioIcon name="check" className="mkt-verified" aria-label={t("ext.admin_marked_trusted")} />}</span>
+                  <span className="mkt-id">{`@${p.handle} · v${p.latestVersion}`}</span>
+                </span>
                 {p.installed && (
-                  <span className="mkt-badge">
+                  <span className="mkt-state">
                     {p.installed.version === p.latestVersion ? t("ext.installed") : t("ext.update_available")}
                   </span>
                 )}
-                <span className="mkt-n">{t("ext.n_installs", { n: p.installCount })}</span>
-                <span className="mkt-n mkt-rate">{approvalLabel(p)}</span>
               </span>
-              <span className="mkt-line">
-                <span className="mkt-sum">{p.summary}</span>
-                <span className="mkt-meta mkt-id">{`@${p.handle} · v${p.latestVersion}`}</span>
-                {/* Outside the truncating meta so a narrow row loses the handle, never this. */}
+              <span className="mkt-sum">{p.summary}</span>
+              <span className="mkt-card-ft">
+                <span className="mkt-kind">{t(KIND_NAME[p.kind] ?? p.kind)}</span>
                 <span className="mkt-pinned" data-on={p.pinned ? "" : undefined} title={p.pinned === false ? t("ext.no_content_digest_was_recorded_2") : undefined}>
                   {t(p.pinned === undefined ? "ext.pin_status_unknown" : p.pinned ? "common.pinned" : "ext.not_pinned")}
                 </span>
+                <span className="mkt-fill" />
+                <span className="mkt-n">{t("ext.n_installs", { n: p.installCount })}</span>
+                <span className="mkt-n mkt-rate">{approvalLabel(p)}</span>
               </span>
             </button>
+            {!p.installed && p.pinned && !cached && (
+              <button className="mkt-get" data-action="market.inspect" data-value={p.slug} title={t("ext.install")}
+                onClick={() => { setInspecting(true); setOpen(p.slug); }}>
+                {t("ext.install")}
+              </button>
+            )}
           </li>
         ))}
       </ul>
@@ -198,7 +210,7 @@ export function Market({ port, account, onInstalled, onViewInstalled, onSignIn }
   );
 }
 
-function Entry({ port, account, slug, onBack, onInstalled, onViewInstalled, onSignIn }: { port: AgentPort; account?: AccountState | null; slug: string; onBack: () => void; onInstalled: () => void; onViewInstalled?: (kind: string, name: string) => void; onSignIn?: () => void }) {
+function Entry({ port, account, slug, inspect = false, onBack, onInstalled, onViewInstalled, onSignIn }: { port: AgentPort; account?: AccountState | null; slug: string; inspect?: boolean; onBack: () => void; onInstalled: () => void; onViewInstalled?: (kind: string, name: string) => void; onSignIn?: () => void }) {
   const [d, setD] = useState<MarketDetail | null>(null);
   const [plan, setPlan] = useState<MarketPlan | null>(null);
   const [result, setResult] = useState<{ plan: MarketPlan; stage: "done" | "retry" } | null>(null);
@@ -233,6 +245,14 @@ function Entry({ port, account, slug, onBack, onInstalled, onViewInstalled, onSi
       setBusy(false);
     }
   };
+  // Install on a card asks for the plan as soon as the entry is read; a version
+  // nobody pinned still waits on the entry, where trusting it is a choice.
+  const inspected = useRef(false);
+  useEffect(() => {
+    if (!inspect || inspected.current || !d || !d.pinned || d.cache || (d.installed && !update)) return;
+    inspected.current = true;
+    void look();
+  });
   const install = async () => {
     if (!plan) return;
     setBusy(true);
