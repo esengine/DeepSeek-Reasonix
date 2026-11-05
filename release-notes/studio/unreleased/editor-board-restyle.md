@@ -52,6 +52,7 @@
 - 设置里属于「列表或编辑器」的项改为点进去的二级页：在分区里只显示一行（标题、说明、当前状态、›），点开后整列只显示这一项，顶部有面包屑「分区 / 项名」可以返回；内容点开时才加载。搜索或链接直达这类项时会直接打开它的页面，换分区时自动收起。第一批：按用途选择模型、明确的规则、模型可用的工具、会话间消息（5309e264c）。
 - 第二批二级页：扩展里的「自动化」「定时运行」、连接里的「网络」、数据里的「存储」「导出与导入配置」、账号与关于里的「版本与更新」，在分区里各显示一行，点进去带面包屑（8609e3881）。
 - 「Agent 预设」（连同预设编辑、系统人设和「显示模式选择器」）改为 Agent 行为下的二级页；搜索或链接直达系统人设、模式选择器开关时，会直接打开这个页面（28320c9e3）。
+- 外观里的「界面主题」改为二级页：分区里一行写明当前用的主题，点进去是配色、已安装主题和导入（e2f9876b1）。
 
 
 ---
@@ -111,3 +112,4 @@
 - Settings blocks that are lists or editors now open as pages: on the section they show as one row (title, hint, current state, chevron), and opening one gives the column to it under a breadcrumb back to the section; contents load only when opened. Search and links that land on one open its page. First batch: models by use, explicit rules, the model's tools, messages between sessions (5309e264c).
 - Second batch of settings pages: automation and scheduled runs under Extensions, the network under Connections, storage and export/import under Data, and versions and updates under Account and About each show as one row and open under a breadcrumb (8609e3881).
 - Agent presets, with the preset editor, system persona and mode picker switch on them, move to a page of their own under Agent behaviour; a search hit on the persona or the picker switch opens that page (28320c9e3).
+- Interface theme becomes a page under Appearance: one row naming the theme in effect, opening to the palettes, installed themes and theme import (e2f9876b1).
