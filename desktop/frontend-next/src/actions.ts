@@ -159,6 +159,7 @@ export const ACTIONS: UIAction[] = [
   { id: "composer.send-shortcut", kind: "view", target: "none", proof: "interaction" },
   { id: "composer.running-message-intent", kind: "view", target: "none", proof: "interaction" },
   { id: "transcript.fold", kind: "view", target: "none", proof: "interaction" },
+  { id: "transcript.unfold-compacted", kind: "view", target: "none", proof: "interaction" },
   { id: "transcript.fold-preset", kind: "view", target: "none", proof: "interaction" },
   { id: "transcript.fold-preview", kind: "view", target: "none", proof: "interaction" },
   { id: "transcript.thinking-preview", kind: "view", target: "none", proof: "interaction" },

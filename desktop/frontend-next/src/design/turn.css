@@ -151,3 +151,10 @@
 }
 .step-err code { display: block; overflow-wrap: anywhere; white-space: pre-wrap; font: inherit; }
 .step-err .step-stop { font-family: var(--ui); }
+.flow .fold-earlier { display: flex; align-items: center; gap: 8px; width: 100%; max-width: var(--column); margin: 10px auto 6px; padding: 0; border: 0; background: none; color: var(--faint); font: var(--w-reg) var(--fs-meta)/1.4 var(--ui); cursor: pointer; }
+.flow .fold-earlier > i { flex: 1; height: 1px; background: var(--hair); }
+.flow .fold-earlier .studio-icon { width: 13px; height: 13px; flex: none; }
+.flow .fold-earlier b { color: var(--text); font-weight: var(--w-med); }
+.flow .fold-earlier b::before { content: "· "; }
+.flow .fold-earlier:hover span { color: var(--muted); }
+.flow .fold-earlier[aria-expanded="true"] .studio-icon { transform: rotate(180deg); }

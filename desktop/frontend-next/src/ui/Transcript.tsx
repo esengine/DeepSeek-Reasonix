@@ -1,5 +1,6 @@
 import { Fragment, memo, useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type Dispatch, type ReactNode, type RefObject, type SetStateAction } from "react";
 import { t } from "../i18n";
+import { useEarlierFold } from "./EarlierFold";
 import type { Item, Waiting } from "../state/session";
 import type { ExtensionSurface } from "../port/wire";
 import type { AgentPort, ApprovalVerdict, Checkpoint, RewindPlan, RewindResult, RewindScope } from "../port/port";
@@ -103,7 +104,7 @@ interface Props {
   brought?: { ids: string[]; bring: (id: string) => void; dismiss: (id: string) => void };
 }
 
-export function Transcript({ items, port, historyPaging, entering, onEntered, brought, revision, waiting, scroll, hidden, focus, find, query, onApprove, onFullAccess, onPlan, onAnswer, onForget, onSettings, onExtInvoke, onExtSubmit, reply, onResend, takeovers = {}, checkpoints, onPrepareRewind, onCommitRewind, onPrepareFileRevert, onCommitFileRevert, needsProject, onOpenProject, onKeepHere, foldWork = false, turnRunning = false, scope = "" }: Props) {
+export function Transcript({ items: every, port, historyPaging, entering, onEntered, brought, revision, waiting, scroll, hidden, focus, find, query, onApprove, onFullAccess, onPlan, onAnswer, onForget, onSettings, onExtInvoke, onExtSubmit, reply, onResend, takeovers = {}, checkpoints, onPrepareRewind, onCommitRewind, onPrepareFileRevert, onCommitFileRevert, needsProject, onOpenProject, onKeepHere, foldWork = false, turnRunning = false, scope = "" }: Props) {
   // A block the selection touches must not leave the DOM. Unmounting the node a
   // selection is anchored to makes the browser remap that selection onto
   // whatever is still mounted — which reads as "I selected up there and the
@@ -111,6 +112,7 @@ export function Transcript({ items, port, historyPaging, entering, onEntered, br
   // neither end inside it, is held as plain text from the data: mounting its
   // cards in one synchronous render is what made a long drag freeze.
   const [held, setHeld] = useState<Map<number, Held>>(new Map());
+  const { items, bar: earlierBar } = useEarlierFold(every);
 
   // Stick to the bottom only while the reader is already there; scrolling up
   // must not be yanked back by incoming frames.
@@ -487,6 +489,7 @@ export function Transcript({ items, port, historyPaging, entering, onEntered, br
       {/* 空转录是「窗口的空白」，壁纸该在那儿；一有内容它就是内容了。 */}
       <div className="flow" ref={flow} data-empty={items.length === 0 && !historyPaging?.hasMore && !historyPaging?.busy && !historyPaging?.failed ? "" : undefined}>
         <HistoryPageControl paging={historyPaging} load={loadOlder} />
+        {earlierBar}
         {items.length === 0 && !historyPaging?.hasMore && !historyPaging?.busy && !historyPaging?.failed && (
           <Hero needsProject={needsProject} onOpen={onOpenProject} onKeep={onKeepHere} />
         )}

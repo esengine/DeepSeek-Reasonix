@@ -537,4 +537,7 @@ export const CHAT: Messages = {
   "chat.page_number": { zh: "页码", en: "Page number" },
   "chat.zoom_in": { zh: "放大", en: "Zoom in" },
   "chat.zoom_out": { zh: "缩小", en: "Zoom out" },
+  "chat.n_earlier_messages_folded": { zh: "较早的 {n} 条消息已折叠为简报", en: "{n} earlier messages folded into a digest" },
+  "chat.show_the_folded_content": { zh: "查看被折叠的内容", en: "Show the folded content" },
+  "chat.hide_the_folded_content": { zh: "收起较早的内容", en: "Fold the earlier content again" },
 };
