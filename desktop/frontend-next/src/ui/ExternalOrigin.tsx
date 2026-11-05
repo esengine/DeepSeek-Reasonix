@@ -3,6 +3,7 @@ import { t } from "../i18n";
 import { reason, savedNotApplied } from "../i18n/kernel";
 import type { AgentPort } from "../port/port";
 import { SaveNote, type SaveNoteState } from "./SaveNote";
+import { SettingRow } from "./SettingRow";
 import { Switch } from "./Switch";
 
 // One switch over asking before a call that copies text an external result
@@ -35,15 +36,11 @@ export function ExternalOrigin({ port, onChanged }: { port: AgentPort; onChanged
   };
 
   return (
-    <div className="box">
-      <div className="lrow">
-        <span className="tx">
-          <span className="lb">{t("safety.ask_about_text_from_outside")}</span>
-          <span className="ds">{t("safety.when_a_call_copies_text")}</span>
-        </span>
-        <Switch data-action="permissions.ask-on-external-origin" on={on} busy={busy} label={t("safety.ask_about_text_from_outside")} onClick={() => void flip()} />
-      </div>
+    <>
+      <SettingRow id="external-origin" title={t("settings.outside_text")} desc={t("safety.ask_before_copied_text")} more={t("safety.what_outside_text_covers")}>
+        <Switch data-action="permissions.ask-on-external-origin" on={on} busy={busy} label={t("settings.outside_text")} onClick={() => void flip()} />
+      </SettingRow>
       <SaveNote note={note} />
-    </div>
+    </>
   );
 }

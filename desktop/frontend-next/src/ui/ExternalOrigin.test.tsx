@@ -9,7 +9,7 @@ import type { AgentPort } from "../port/port";
 
 afterEach(cleanup);
 
-const toggle = () => screen.findByRole("switch", { name: "询问来自外部的文字" });
+const toggle = () => screen.findByRole("switch", { name: "外部文字" });
 
 describe("the ask-on-external-text switch", () => {
   it("starts off, says what it covers and what it does not, and saves the opposite of what it shows", async () => {
@@ -19,8 +19,9 @@ describe("the ask-on-external-text switch", () => {
     render(<ExternalOrigin port={p} onChanged={changed} />);
     const sw = await toggle();
     expect(sw.getAttribute("aria-checked")).toBe("false");
-    expect(screen.getByText(/已授权的 MCP 服务器、改写过或编码过的文字不在其内/)).toBeTruthy();
-    expect(screen.getByText(/无人可问时（无头 YOLO），这类调用会被拒绝而不是执行/)).toBeTruthy();
+    const why = screen.getByText("照抄网页或工具结果里的文字去调用工具前先问你").getAttribute("title") ?? "";
+    expect(why).toMatch(/已授权的 MCP 服务器、改写过或编码过的文字不在其内/);
+    expect(why).toMatch(/无人可问时（无头 YOLO），这类调用会被拒绝而不是执行/);
     await userEvent.click(sw);
     expect(save).toHaveBeenCalledWith(expect.objectContaining({ askOnExternalOrigin: true }));
     await waitFor(() => expect(sw.getAttribute("aria-checked")).toBe("true"));

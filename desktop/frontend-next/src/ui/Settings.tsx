@@ -20,7 +20,7 @@ import { Group, SCOPE_SAID } from "./Group";
 import { PlanApproval } from "./PlanApproval";
 import { CommonSettings } from "./CommonSettings";
 import { PeersSection } from "./PeersSection";
-import { SessionCoordination } from "./SessionCoordination";
+import { SafetySettings } from "./SafetySettings";
 import type { Section } from "./prefsnav";
 import { AddServer } from "./AddServer";
 import { PhoneAccess } from "./PhoneAccess";
@@ -43,18 +43,12 @@ import { SkillGroups } from "./SkillRow";
 import { Hooks } from "./Hooks";
 import { ScheduledRuns } from "./ScheduledRuns";
 import { Network } from "./Network";
-import { Shell as ShellPicker } from "./Shell";
-import { ExternalOrigin } from "./ExternalOrigin";
-import { Rules, ToolList } from "./Rules";
 import { ConfigTrouble } from "./ConfigTrouble";
-import { Sandbox } from "./Sandbox";
-import { BrowserTools } from "./BrowserTools";
 import { PresentFiles } from "./PresentFiles";
 import { AskTimeout } from "./AskTimeout";
 import { SessionRef } from "./SessionRef";
 import { TraceExport } from "./TraceExport";
 import { ModHost } from "./ModHost";
-import { WebAccess } from "./WebAccess";
 import { ProgressWatch } from "./ProgressWatch";
 import { DisplaySettings } from "./DisplaySettings";
 import { SectionCard } from "./SectionCard";
@@ -74,7 +68,7 @@ import { Appearance, SCHEMES } from "./Appearance";
 import { ScopeBar } from "./CapabilityScope";
 import { savedNotApplied, reason } from "../i18n/kernel";
 import type { SettingsProps as Props } from "./SettingsProps";
-import { APPROVALS, approvalName, approvalNote } from "./approvals";
+import { approvalName } from "./approvals";
 
 // An empty list hides Advanced. Only features available in the legacy app
 // without a settings page here belong in this list.
@@ -529,63 +523,8 @@ export function Settings({ hub, onError, port, networkPort, localWorkspacePort, 
           )}
 
           {at === "tools" && (
-            <>
-              <SectionCard title={t("settings.approval")} hint={t("settings.when_it_stops_to_ask")}>
-              <Group id="approval" title={t("settings.tool_approvals")} now={approval} hint={t("settings.this_is_the_only_approval")}>
-                {/* Four rows of label-and-description was 190px for one choice,
-                    and it was the only choice in this pane shaped that way. The
-                    description follows the selection instead: what a档 does is
-                    read when it is picked, not compared four at a time. */}
-                <div className="seg" data-text data-danger={status?.toolApprovalMode === "yolo" ? "" : undefined}
-                  role="radiogroup" aria-label={t("settings.tool_approvals")}>
-                  {APPROVALS.map(([id, name]) => (
-                    <button key={id} role="radio" data-action="tool-approval.mode" data-value={id}
-                      aria-checked={status?.toolApprovalMode === id} disabled={!!busy}
-                      onClick={() => run(id, () => port.setApprovalMode(id))}>
-                      {t(name)}
-                    </button>
-                  ))}
-                </div>
-                <p className="note">{approvalNote(status?.toolApprovalMode)}</p>
-              </Group>
-              <Group id="external-origin"
-                title={t("settings.outside_text")}
-                hint={t("settings.text_in_web_pages_and")}
-              >
-                <ExternalOrigin port={port} onChanged={onChanged} />
-              </Group>
-              <Group id="rules"
-                title={t("settings.rules_you_spell_out")}
-                hint={t("settings.the_setting_above_decides_whether")}
-              >
-                <Rules port={port} onChanged={onChanged} />
-              </Group><ToolList port={port} />
-              </SectionCard>
-              <SectionCard title={t("settings.sandbox_and_execution")} hint={t("settings.where_its_commands_can_write")}>
-              <Group id="sandbox"
-                title={t("settings.sandbox")}
-                hint={t("settings.how_far_an_approved_action")}
-              >
-                <Sandbox port={port} onChanged={onChanged} />
-              </Group>
-              <Group id="shell"
-                title={t("common.which_program_runs_commands")}
-                hint={t("settings.every_command_the_agent_runs")}
-              >
-                <ShellPicker port={port} onChanged={onChanged} />
-              </Group>
-              </SectionCard>
-              <SectionCard title={t("settings.web_and_browser")} hint={t("settings.search_page_fetching_and_the")}>
-              <Group id="browser-tools"
-                title={t("common.built_in_browser")}
-                hint={t("settings.the_tools_the_agent_uses")}
-              >
-                <BrowserTools port={port} onChanged={onChanged} />
-              </Group>
-              <WebAccess port={port} />
-              <SessionCoordination port={port} onChanged={onChanged} />
-              </SectionCard>
-            </>
+            <SafetySettings port={port} mode={status?.toolApprovalMode} busy={busy} onChanged={onChanged}
+              onMode={(id) => run(id, () => port.setApprovalMode(id))} />
           )}
 
           {at === "display" && (

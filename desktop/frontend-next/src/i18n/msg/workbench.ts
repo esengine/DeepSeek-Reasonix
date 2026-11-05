@@ -128,7 +128,7 @@ export const WORKBENCH: Messages = {
   "workbench.still_searching_some_historical_conversations": { zh: "仍在搜索部分历史会话…", en: "Still searching some historical conversations…" },
   "workbench.terminal": { zh: "终端", en: "Terminal" },
   "workbench.text_actions": { zh: "文本操作", en: "Text actions" },
-  "workbench.the_agent_can_open_web": { zh: "agent 可以打开网页、读取内容并操作页面；浏览器在第一次使用时才启动。关闭后这些工具不会出现在工具列表中", en: "The agent can open web pages, read them and operate them; the browser only starts the first time it is used. When off, these tools are not in the tool list" },
+  "workbench.let_it_open_pages_in_the_browser": { zh: "让它在内置浏览器里打开网页、点按钮、截图", en: "Let it open pages, click and take screenshots in the built-in browser" },
   "workbench.the_connection_timed_out_or": { zh: "连接超时或地址不可达。请确认已连上公司网络或 VPN。", en: "The connection timed out or the address is unreachable. Check that you are on the company network or VPN." },
   "workbench.the_connection_was_refused_check": { zh: "对方拒绝了连接。请确认端口正确、服务已经启动。", en: "The connection was refused. Check the port and that the service is running." },
   "workbench.the_file_changed_on_disk": { zh: "磁盘内容已变化，未保存的编辑已保留", en: "The file changed on disk. Your unsaved edits have been preserved." },

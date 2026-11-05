@@ -50,7 +50,7 @@ describe("the built-in browser switch", () => {
   it("says what this workspace runs with when a project file outranks the switch", async () => {
     render(<BrowserTools port={port({ enabled: true, effective: false })} onChanged={() => {}} />);
     await toggle();
-    expect(screen.getByText("当前项目的配置文件关闭了它，此工作区不会提供内置浏览器。")).toBeTruthy();
+    expect(screen.getByText(/当前项目的配置文件关闭了它，此工作区不会提供内置浏览器。/)).toBeTruthy();
   });
 
   it("adds nothing when the switch is what runs", async () => {

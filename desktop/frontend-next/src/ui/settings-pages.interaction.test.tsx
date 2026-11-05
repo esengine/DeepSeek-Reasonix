@@ -35,7 +35,7 @@ describe("the permissions page", () => {
     await waitFor(() => expect(shown("approval")).toBe(true));
     expect(shown("sandbox")).toBe(true);
     expect(shown("browser-tools")).toBe(true);
-    expect([...document.querySelectorAll(".prefs-card > header h3")].map((h) => h.textContent)).toEqual(["批准", "沙箱与执行", "联网与浏览器"]);
+    expect([...document.querySelectorAll(".prefs-card > header h3")].map((h) => h.textContent)).toEqual(["批准", "沙箱与执行", "联网"]);
     expect(document.querySelectorAll(".prefs-page")).toHaveLength(0);
   });
 

@@ -1,12 +1,12 @@
 import type { ReactNode } from "react";
 import { ApplyNote } from "./Group";
 
-export function SettingRow({ id, title, desc, children }: { id: string; title: string; desc?: string; children?: ReactNode }) {
+export function SettingRow({ id, title, desc, more, children }: { id: string; title: string; desc?: string; more?: string; children?: ReactNode }) {
   return (
     <div className="srow" data-setting={id}>
       <div className="srow-meta">
         <span className="srow-name">{title}</span>
-        {desc && <span className="srow-desc">{desc}</span>}
+        {desc && <span className="srow-desc" title={more}>{desc}</span>}
         <ApplyNote id={id} />
       </div>
       {children && <div className="srow-ctl">{children}</div>}

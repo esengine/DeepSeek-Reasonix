@@ -48,7 +48,7 @@ export function SettingDeep({ id, title, now, hint, act, children }: { id: strin
     );
   }
   return (
-    <div className="deep-page" data-deep-open={id}>
+    <div className="deep-page" data-deep-open={id} data-setting={id}>
       <nav className="deep-crumb" aria-label={t("settings.where_you_are")}>
         <button type="button" data-action="settings.close-page" onClick={() => deep.go(null)}>{deep.section}</button>
         <span aria-hidden="true">/</span>
