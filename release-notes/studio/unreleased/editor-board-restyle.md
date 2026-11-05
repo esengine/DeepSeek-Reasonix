@@ -61,6 +61,7 @@
 - 开关按规范改为 34×20 描边轨道、12px 圆点：关时灰色，开时强调色描边 + 浅色底、圆点为强调色；公共按钮的文字改为规范的中等字重（467f15411）。
 - 设置窗口按设计稿铺满主窗口（四周留 24px），不再是居中的小窗；内容栏保持 760px。「常用」页标题补上「这里是常用项的快捷入口，每项的完整位置在各自分类里」（1ceac1746）。
 - 侧栏按「会话列表 · 行状态」稿：项目行不再显示会话数（折叠和展开都不显示，没加载完的条数由下面的「显示更多」交代）；远程项目有折叠箭头，主机名后直接写「连接中…」（橙）或「离线」（红），连接中时下面的会话变灰；未读行同时显示左侧黑点和时间，黑点带「未读」读屏标签；输入框「自动」前补上稿里的图标（e417818a9）。
+- 外观设置里对话宽度的「铺满窗口」又显示正常文字了（之前误删了它借用的文案，显示成了 key）；执行过程中非命令类工具失败时，失败行显示内核给的原因，而不是工具输出的最后一行（aad0f1bf6）。
 
 
 ---
@@ -129,3 +130,4 @@
 - The shared switch follows the spec: a 34×20 outlined track with a 12px knob, grey when off and accent outline, wash and knob when on; kit buttons use the spec's medium label weight (467f15411).
 - Settings fills the window inside a 24px margin as the board draws it, rather than a smaller centred box; the Common page header adds the board's note that it is a shortcut (1ceac1746).
 - The sidebar follows the session-row board: project rows carry no session count, folded or open (what is left to load stays on the show-more row); remote projects get their chevron and an inline state word after the host, connecting in orange and offline in red, greying the sessions while connecting; an unread row keeps its time beside the left dot, which now carries the accessible name; the composer's effort reading gets the board's icon (e417818a9).
+- Appearance's full-width option reads as words again (it had borrowed a removed message key); in the activity group a failed non-command tool's line shows the host's reason rather than its output's last line (aad0f1bf6).
