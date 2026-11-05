@@ -69,6 +69,7 @@
 - 设置 › 连接和账号与关于按稿重做：连接是「网络」「其他机器」两张卡（网络、远程、手机访问各一行，进药丸看详情）；账号与关于是「账号」「版本与诊断」「关于」三张卡（账号、版本、日志、追踪导出各一行，社区与赞助收进药丸）；直接定位到某个页面型设置时落在该页面顶部，分类的项数不再把页内的块重复计算（676fbd010）。
 - 设置 › 外观、对话显示、操作与性能拆成三个各自独立的页面并按稿重做：外观是「主题」「文字」「窗口」三张卡（壁纸、字体、大小、窗口进药丸，明暗、视觉效果、文字粗细、对比度直接在行上）；对话显示是「过程」「文件与预览」「提示」；操作与性能是「快捷键」「标签与导航」「运行中」「性能」；单控件的块统一成一行；去掉「高级外观」折叠，其中的粗细、对比度、效果成为行（d6a43b8fd）。
 - 首次引导的欢迎步按稿居中：大标志、标题、说明、「开始设置」按钮、底部提示；「稍后再说」放在按钮下方（fd5f5d06c）。稿里的「从备份文件导入」没做：引导里还没有可调用的导入流程。
+- 命令面板按稿：输入框下加「> 操作 / # 会话 / , 设置」范围标签（点一下切换范围）；输入后每组带条数；运行中 / 等你确认的会话前有蓝 / 橙点并写出状态词，其余显示距今多久；说明文字紧跟名称，快捷键靠右；底部左边是按键提示、右边是范围符号。稿里的「@ 文件」范围没做：接口里没有列出工作区文件的能力（41a943b4a）。
 
 
 ---
@@ -145,3 +146,4 @@
 - Settings › Connection and Account & About follow the board: Connection is Network and Other machines cards (network, remote and phone access one row each behind a pill); Account & About is Account, Version and diagnostics, and About cards (account, version, logs and trace export one row each, community and sponsorship behind pills); landing on a page-type setting lands at the page's top, and section counts no longer count blocks drawn inside another page (676fbd010).
 - Settings › Appearance, Conversation display and Operation & performance are now three pages of their own, composed as the boards draw them: Appearance as Theme, Text and Window cards (wallpaper, typeface, size and window behind pills; light/dark, effects, weight and contrast on the row), Conversation display as Process, Files and previews, and Notices, and Operation & performance as Shortcuts, Tabs and navigation, While running, and Performance; a single-control block draws as one row; the advanced-appearance disclosure goes and its weight, contrast and effects are rows (d6a43b8fd).
 - The onboarding welcome step is centred as the board draws it: large wordmark, headline, body, the primary button and the note, with the skip under the button (fd5f5d06c). The board's import-from-backup link is not drawn: onboarding has no import flow to call.
+- The command palette follows the board: scope chips under the input (actions, sessions, settings; each toggles its scope), a count on each group once something is typed, a coloured dot and status word on running or waiting sessions with the rest showing their age, notes beside the name and shortcuts on the right, and the foot's keys left and scope symbols right. The board's files scope is not drawn: the port has no way to list a workspace's files (41a943b4a).
