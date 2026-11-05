@@ -131,7 +131,6 @@ describe("mount is not a cause", () => {
       ".enterbox[data-enter] .nest-bd .call",
       ".enterbox[data-enter] .find",
       ".enterbox[data-enter] .nest-ret",
-      ".enterbox[data-enter] .guard",
       ".enterbox[data-enter] .apv",
       ".enterbox[data-enter] .hl .cost",
     ]) {

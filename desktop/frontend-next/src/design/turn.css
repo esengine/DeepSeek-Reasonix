@@ -66,10 +66,8 @@
 @keyframes think-sweep { from { background-position: 150% 0; } to { background-position: -50% 0; } }
 .think-swap { display: inline-grid; }
 .think-swap > .think-label { grid-area: 1 / 1; }
-.think[data-settled] .think-label:not(.think-out) { animation: think-in var(--t-card) var(--ease-out) both; }
-.think-out { animation: think-out var(--t-card) var(--ease-out) both; pointer-events: none; }
-@keyframes think-in { from { opacity: 0; } }
-@keyframes think-out { to { opacity: 0; } }
+.think[data-settled] .think-label:not(.think-out) { animation: m-fade var(--t-card) var(--ease-out) both; }
+.think-out { animation: m-exit var(--t-card) var(--ease-out) both; pointer-events: none; }
 .think[data-live] .tk { max-height: calc(1.75em * 6); overflow: hidden; display: flex; flex-direction: column; justify-content: flex-end; }
 .think[data-live] .tk-in { flex: none; }
 .think[data-cut] > summary .fold, .think[data-cut] > summary:hover .fold { color: var(--warn-ink); }
@@ -123,9 +121,8 @@
 
 .step-spin {
   display: block; width: 11px; height: 11px; box-sizing: border-box; border: 1.5px solid currentColor; border-top-color: transparent;
-  border-radius: 50%; animation: step-spin var(--t-live) linear infinite;
+  border-radius: 50%; animation: m-spin var(--t-live) linear infinite;
 }
-@keyframes step-spin { to { transform: rotate(360deg); } }
 .activity-body .tool-state[data-state="running"] { color: var(--net-ink); }
 .activity-body .tool-state[data-pop] { animation: step-pop 160ms cubic-bezier(.34, 1.56, .64, 1); }
 @keyframes step-pop { 0% { transform: scale(0); } 70% { transform: scale(1.25); } 100% { transform: scale(1); } }

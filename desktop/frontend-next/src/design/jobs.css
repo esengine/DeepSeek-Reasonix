@@ -17,13 +17,12 @@
 .job-deck-acts { display: flex; align-items: center; justify-content: flex-end; gap: 4px; margin-top: 2px; }
 .job-deck-exit { margin-right: auto; color: var(--err-ink); font: var(--w-reg) var(--fs-micro)/1 var(--mono); }
 .job-deck-exit[data-ok] { color: var(--faint); }
-.job-deck-confirm { display: inline-flex; align-items: center; gap: 6px; color: var(--err-ink); font: var(--w-reg) var(--fs-meta)/1 var(--ui); animation: job-confirm-in var(--t-card) var(--ease-out) both; }
+.job-deck-confirm { display: inline-flex; align-items: center; gap: 6px; color: var(--err-ink); font: var(--w-reg) var(--fs-meta)/1 var(--ui); animation: m-panel var(--t-card) var(--ease-out) both; }
 .job-deck-sure {
   height: 24px; padding: 0 10px; border: 0; border-radius: var(--r-pill); background: var(--err); color: var(--err-fg);
   font: var(--w-med) var(--fs-meta)/1 var(--ui); cursor: pointer;
 }
 .job-deck-sure:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
-@keyframes job-confirm-in { from { opacity: 0; transform: translateX(6px); } to { opacity: 1; transform: none; } }
 @media (prefers-reduced-motion: reduce) { .job-deck-confirm { animation: none; } }
 :root[data-effects="reduced"] .job-deck-confirm { animation: none; }
 .job-deck-note { margin: 4px 8px 2px; color: var(--faint); font: var(--w-reg) var(--fs-micro)/1.5 var(--ui); }

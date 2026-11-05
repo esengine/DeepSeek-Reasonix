@@ -1,0 +1,6 @@
+@keyframes m-fade { from { opacity: 0; } }
+@keyframes m-card { from { opacity: 0; transform: translateY(6px); } }
+@keyframes m-panel { from { opacity: 0; transform: translateX(14px); } }
+@keyframes m-exit { to { opacity: 0; transform: translateY(4px); } }
+@keyframes m-spin { to { transform: rotate(360deg); } }
+@keyframes m-pulse { 50% { opacity: .4; } }

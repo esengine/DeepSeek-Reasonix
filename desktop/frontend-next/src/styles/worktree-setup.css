@@ -10,7 +10,7 @@
 .worktree-setup-phase > span:first-child { display: flex; align-items: center; gap: 10px; min-width: 0 }
 .worktree-setup-elapsed { white-space: nowrap; color: var(--muted); font-size: var(--fs-micro) }
 .worktree-setup-phase .studio-icon { width: 19px; height: 19px; flex-shrink: 0 }
-.worktree-spinner { display: inline-block; width: 18px; height: 18px; flex-shrink: 0; border: 2px solid var(--hair); border-top-color: var(--brand); border-right-color: var(--brand); border-radius: 50%; animation: worktree-spin var(--t-live) linear infinite }
+.worktree-spinner { display: inline-block; width: 18px; height: 18px; flex-shrink: 0; border: 2px solid var(--hair); border-top-color: var(--brand); border-right-color: var(--brand); border-radius: 50%; animation: m-spin var(--t-live) linear infinite }
 .worktree-setup-branches { padding: 20px 0; border-bottom: 1px solid var(--hair) }
 .worktree-setup dl { display: grid; grid-template-columns: 90px minmax(0, 1fr); gap: 12px; margin: 0; font-size: var(--fs-meta) }
 .worktree-setup dt { color: var(--muted) }
@@ -44,7 +44,6 @@
 .worktree-setup :is(button, summary):focus-visible { outline: 2px solid var(--focus); outline-offset: 2px }
 .dropzone[data-worktree-setup] .fmain, .dropzone[data-worktree-setup] .shots, .dropzone[data-worktree-setup] .composeguide { display: none }
 .dropzone[data-worktree-setup] { opacity: .65 }
-@keyframes worktree-spin { to { transform: rotate(360deg) } }
 @media (max-height: 800px) { .worktree-setup { padding-top: 20px } .worktree-setup-context { margin-bottom: 15px } .worktree-setup-description { margin-bottom: 16px } .worktree-setup-branches, .worktree-setup-draft { padding-block: 15px } }
 @media (max-width: 600px) { .worktree-setup { width: calc(100% - 28px); padding-top: 22px } .worktree-setup-description { font-size: var(--fs-ui) } .worktree-setup-phase { flex-wrap: wrap; gap: 8px; font-size: var(--fs-meta) } .worktree-setup dl { grid-template-columns: 70px minmax(0, 1fr); gap: 10px } .worktree-setup-actions { flex-wrap: wrap } .worktree-setup-actions > div { margin-left: auto } }
 @media (prefers-reduced-motion: reduce) { .worktree-spinner { animation: none } }

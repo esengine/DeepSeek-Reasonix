@@ -103,9 +103,8 @@
     overflow: clip; display: flex; flex-direction: column; height: calc(100dvh / var(--zoom, 1));
   }
 
-  :root[data-boot] .app { animation: appin 1.2s cubic-bezier(.4, 0, .2, 1) both }
-  @keyframes appin { from { opacity: 0; transform: scale(.99) } to { opacity: 1; transform: none } }
-
+  :root[data-boot] .app { animation: m-card 1.2s cubic-bezier(.4, 0, .2, 1) both }
+  
   :root[data-boot] .chrome::after {
     content: ""; position: absolute; inset: 0; z-index: 2; pointer-events: none;
     background: linear-gradient(105deg, transparent 34%,
@@ -328,28 +327,22 @@
   .mode .lb { color: var(--faint); font: var(--w-reg) var(--fs-meta) var(--ui); transition: color var(--m-line) }
   .mode .vl {
     color: var(--muted); font: var(--w-med) var(--fs-ui) var(--mono);
-    transition: color var(--m-line); animation: modeval var(--t-panel) var(--ease-spring);
+    transition: color var(--m-line); animation: m-card var(--t-panel) var(--ease-spring);
   }
   .mode:hover .lb, .mode[aria-expanded="true"] .lb { color: var(--muted) }
   .mode:hover .vl, .mode[aria-expanded="true"] .vl { color: var(--text) }
-  @keyframes modeval { from { opacity: 0; transform: translateY(2.5px) } to { opacity: 1; transform: none } }
-
+  
   .mode .ic { display: grid; place-items: center; width: 12px; height: 12px; flex: none }
   .mode .ic svg { width: 12px; height: 12px; fill: none; stroke: currentColor; stroke-width: 1.4; stroke-linecap: round; stroke-linejoin: round }
-  @keyframes plandraw {
-    from { stroke-dasharray: 1; stroke-dashoffset: 1 }
-    to { stroke-dasharray: 1; stroke-dashoffset: 0 }
-  }
-  .mode.danger { color: var(--err-ink); border-color: color-mix(in srgb, var(--err) 45%, var(--border)) }
+    .mode.danger { color: var(--err-ink); border-color: color-mix(in srgb, var(--err) 45%, var(--border)) }
   .mode.danger .lb, .mode.danger .vl { color: var(--err-ink) }
 
   .mode.danger::before {
     content: ""; position: absolute; inset: 0; z-index: -1; border-radius: inherit;
     background: color-mix(in srgb, var(--err) 12%, transparent);
-    animation: gatepulse 2.6s var(--ease) infinite;
+    animation: m-pulse 2.6s var(--ease) infinite;
   }
-  @keyframes gatepulse { 0%, 100% { opacity: .45 } 50% { opacity: 1 } }
-
+  
   .sep { width: 1px; height: 14px; flex: none; margin-inline: -1px; background: var(--border); opacity: .75 }
 
   .side .block { transition: opacity var(--m-panel) , filter var(--m-panel) }
@@ -369,8 +362,7 @@
   .thbtn svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.4; stroke-linecap: round; stroke-linejoin: round }
 
   .pip { width: 6px; height: 6px; border-radius: 50%; background: var(--ghost); flex: none }
-  @keyframes tick { 0%, 100% { opacity: .3 } 50% { opacity: 1 } }
-
+  
   .rmark { width: 15px; height: 15px; flex: none; display: block; color: var(--ghost); transition: color var(--m-panel) }
   .rmark path {
     fill: none; stroke: currentColor; stroke-width: 1.7;
@@ -382,18 +374,16 @@
   .pane[data-run="running"] .rmark path { stroke-dashoffset: 0 }
 
   .pane[data-run="halt"] .rmark { color: var(--accent-ink) }
-  @keyframes breathe { 0%, 100% { opacity: .45 } 50% { opacity: 1 } }
-
+  
   .pane[data-run="done"] .rmark { color: var(--ok) }
 
   .queue {
     display: flex; flex-direction: column; gap: 6px; margin-bottom: 10px;
     min-height: 0; padding-bottom: 10px; border-bottom: 1px solid var(--hair);
     font: var(--w-reg) var(--fs-meta) var(--mono);
-    animation: qin var(--m-card) both;
+    animation: m-card var(--m-card) both;
   }
-  @keyframes qin { from { opacity: 0; transform: translateY(3px) } to { opacity: 1; transform: none } }
-  .qhd { display: flex; align-items: center; gap: 7px; min-width: 0 }
+    .qhd { display: flex; align-items: center; gap: 7px; min-width: 0 }
   .qhd .lb {
     flex: none; font: var(--w-med) var(--fs-micro) var(--ui); letter-spacing: var(--track-cap);
     text-transform: uppercase; color: var(--faint);
@@ -435,7 +425,7 @@
   .qi {
     display: flex; align-items: center; gap: 6px; min-width: 0; min-height: 38px; padding: 4px 12px;
     border: 0; border-radius: var(--r-sm); background: transparent;
-    color: var(--text); animation: qstep var(--t-card) var(--ease-out) both;
+    color: var(--text); animation: m-card var(--t-card) var(--ease-out) both;
     transition: opacity var(--t-card) var(--ease-out), background var(--t-card) var(--ease-out);
   }
   .qi:hover, .qi:focus-within { background: var(--overlay) }
@@ -443,8 +433,7 @@
     width: 5px; height: 5px; flex: none; border-radius: 50%;
     background: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 11%, transparent);
   }
-  @keyframes qstep { from { opacity: 0; transform: translateY(6px) } to { opacity: 1; transform: none } }
-
+  
   .qi .pill {
     margin-left: 0; padding: 2px 7px; border-radius: var(--r-xs);
     font: var(--w-med) var(--fs-micro) var(--mono); letter-spacing: .03em;
@@ -484,8 +473,7 @@
   }
   .qi .x:hover, .qi .x:focus-visible { color: var(--text); background: var(--overlay) }
 
-  @keyframes bumpup { 0% { transform: translateY(2px); opacity: .5 } 100% { transform: none; opacity: 1 } }
-
+  
             .call[data-pending] > .c { opacity: .7 }
 
   .app {
@@ -576,7 +564,7 @@
     font: var(--w-reg) var(--fs-ui)/1.65 var(--mono);
     overflow: auto; overscroll-behavior: contain;
     white-space: pre-wrap; overflow-wrap: anywhere; user-select: text;
-    animation: card var(--m-line) both;
+    animation: m-card var(--m-line) both;
   }
 
   [data-cut] { cursor: help }
@@ -759,12 +747,11 @@
 
   @supports (animation-timeline: scroll()) {
     .flow-edge::before {
-      animation: edgein linear both;
+      animation: m-fade linear both;
       animation-timeline: scroll(nearest block);
       animation-range: 0 44px;
     }
-    @keyframes edgein { to { opacity: 1 } }
-  }
+      }
 
   .pane { --srail-w: 54px; --flow-pad: 20px }
   .railhost { position: sticky; top: 0; height: 0; z-index: 4; pointer-events: none }
@@ -885,29 +872,22 @@
 
   .call:not([data-k="me"], [data-k="say"], [data-k="ask"]) > .c > .hl { flex-wrap: nowrap }
 
-  .enterbox[data-enter] :is(.term-l, .dl, .plan .s) { animation: line var(--m-line) both }
-  .enterbox[data-enter] :is(.hits > *, .steps > *) { animation: card var(--m-card) both }
+  .enterbox[data-enter] :is(.term-l, .dl, .plan .s) { animation: m-fade var(--m-line) both }
+  .enterbox[data-enter] :is(.hits > *, .steps > *) { animation: m-card var(--m-card) both }
 
   .enterbox { display: contents }
-  .enterbox[data-enter] > .call { animation: card var(--m-card) both }
+  .enterbox[data-enter] > .call { animation: m-card var(--m-card) both }
 
-  .enterbox[data-enter] .nest-bd .call { animation: card var(--m-card) both }
+  .enterbox[data-enter] .nest-bd .call { animation: m-card var(--m-card) both }
 
-  .enterbox[data-enter] :is(.nest, .ask) { animation: panel var(--m-panel) both }
+  .enterbox[data-enter] :is(.nest, .ask) { animation: m-panel var(--m-panel) both }
 
-  @keyframes line { from { opacity: 0 } to { opacity: 1 } }
-  @keyframes card { from { opacity: 0; transform: translateY(6px) } to { opacity: 1; transform: none } }
-  @keyframes panel {
-    from { opacity: 0; transform: translateY(-4px) scaleY(.985) }
-    to { opacity: 1; transform: none }
-  }
-  .nest, .ask { transform-origin: top }
+        .nest, .ask { transform-origin: top }
 
   .hl { display: flex; align-items: baseline; gap: 9px; flex-wrap: wrap; transition: opacity var(--m-exit) }
   .hl[data-swap] { opacity: 0 }
-  .enterbox[data-enter] .hl .cost { animation: costin var(--t-card) var(--ease-out) both }
-  @keyframes costin { from { opacity: 0; transform: translateX(5px) } to { opacity: 1; transform: none } }
-
+  .enterbox[data-enter] .hl .cost { animation: m-panel var(--t-card) var(--ease-out) both }
+  
   .call > .g .sym {
     transition: opacity var(--t-card) var(--ease-out),
                 box-shadow var(--t-card) var(--ease-out);
@@ -976,7 +956,7 @@
 
   .rewindmenu {
     position: fixed; z-index: 60; min-width: 208px;
-    animation: card var(--m-line) both;
+    animation: m-card var(--m-line) both;
   }
 
   .await { display: flex; align-items: center; gap: 5px; padding: 4px 0; font: var(--w-reg) var(--fs-meta) var(--mono); color: var(--ghost) }
@@ -1041,17 +1021,15 @@
 
   .out .txt code { font: var(--w-reg) var(--fs-ui) var(--mono); color: var(--text) }
 
-  .caret { display: inline-block; width: 6px; height: 13px; background: var(--net); vertical-align: -2px; animation: blink 1.1s var(--ease) infinite }
-  @keyframes blink { 0%, 100% { opacity: 1 } 55% { opacity: .15 } }
-  .tk .caret { width: 5px; height: 11px; background: var(--faint); margin-left: 2px }
-  @keyframes settle { from { opacity: 0 } to { opacity: 1 } }
-  .rgroup { display: flex; flex-direction: column; gap: 4px }
+  .caret { display: inline-block; width: 6px; height: 13px; background: var(--net); vertical-align: -2px; animation: m-pulse 1.1s var(--ease) infinite }
+    .tk .caret { width: 5px; height: 11px; background: var(--faint); margin-left: 2px }
+    .rgroup { display: flex; flex-direction: column; gap: 4px }
   .rgroup .hd { font: var(--w-med) var(--fs-micro) var(--mono); letter-spacing: var(--track-cap); color: var(--warn-ink) }
   .rgroup[data-declared] .hd { color: var(--faint) }
 
   .rrow {
     padding: 5px 0 5px 10px; border-left: 2px solid var(--warn);
-    animation: card var(--t-card) var(--ease-out) both;
+    animation: m-card var(--t-card) var(--ease-out) both;
     animation-delay: calc(var(--i, 0) * 40ms);
   }
   .rgroup[data-declared] .rrow { border-left-color: var(--hair) }
@@ -1069,7 +1047,7 @@
 
   .finds { margin-top: 7px; display: flex; flex-direction: column; gap: 5px }
   .find { padding: 6px 0 6px 10px; border-left: 2px solid var(--ghost) }
-  .enterbox[data-enter] .find { animation: card var(--t-card) var(--ease-out) both }
+  .enterbox[data-enter] .find { animation: m-card var(--t-card) var(--ease-out) both }
   .find[data-lvl="ok"] { border-left-color: var(--ok) }
   .find[data-lvl="warn"] { border-left-color: var(--warn) }
   .find[data-lvl="err"] { border-left-color: var(--err) }
@@ -1173,7 +1151,7 @@
   .nest-bd .call > .c { padding: 6px 0 6px }
   .nest-bd .hl .nm { font-size: var(--fs-ui) }
   .nest-ret { margin: 0 11px 10px; padding: 6px 0 6px 11px; border-left: 1px solid var(--border); font-size: var(--fs-ui); line-height: 1.6; color: var(--muted) }
-  .enterbox[data-enter] .nest-ret { animation: card var(--t-card) var(--ease-out) both }
+  .enterbox[data-enter] .nest-ret { animation: m-card var(--t-card) var(--ease-out) both }
 
   .pip[data-settled] { background: var(--ok) !important }
   .pip[data-failed] { background: var(--err) !important }
@@ -1252,7 +1230,7 @@
   .apv {
     margin-top: 8px; overflow: hidden; background: none;
   }
-  .enterbox[data-enter] .apv { animation: panel var(--t-panel) var(--ease-out) both }
+  .enterbox[data-enter] .apv { animation: m-panel var(--t-panel) var(--ease-out) both }
   .apv-hd {
     display: flex; align-items: baseline; gap: 9px; padding: 7px 12px;
     border-bottom: 1px solid var(--hair);
@@ -1411,14 +1389,13 @@
 
   .intake {
     margin: 0 0 7px; padding: 0 2px; font: var(--w-med) var(--fs-ui) var(--ui);
-    animation: intakein var(--m-line) both;
+    animation: m-card var(--m-line) both;
   }
   .intake[data-tone="attach"] { color: var(--accent-ink) }
   .intake[data-tone="ref"] { color: var(--net) }
   .intake[data-tone="insert"] { color: var(--ok-ink) }
   .intake[data-tone="reject"] { color: var(--faint) }
-  @keyframes intakein { from { opacity: 0; transform: translateY(3px) } to { opacity: 1; transform: none } }
-
+  
   .shots {
     list-style: none; margin: 0; display: flex; flex-wrap: nowrap; align-items: center; gap: 7px;
     padding: 0 2px 8px; overflow-x: auto; overscroll-behavior-inline: contain; scrollbar-width: thin;
@@ -1427,12 +1404,11 @@
     display: inline-flex; align-items: center; gap: 8px; flex: none; max-width: min(310px, 78vw);
     padding: 4px 4px 4px 5px;
     border: 1px solid var(--border); border-radius: var(--r-sm); background: var(--raised);
-    animation: shotin var(--m-line) both; animation-delay: calc(var(--i, 0) * 45ms);
+    animation: m-card var(--m-line) both; animation-delay: calc(var(--i, 0) * 45ms);
   }
   .shot[data-state="adding"] { border-style: dashed; color: var(--faint) }
   .shot[data-state="failed"] { border-color: color-mix(in srgb, var(--err) 42%, var(--border)) }
-  @keyframes shotin { from { opacity: 0; transform: scale(.94) } to { opacity: 1; transform: none } }
-  .shot .thumb {
+    .shot .thumb {
     width: 30px; height: 30px; flex: none; border-radius: var(--r-lg); background: var(--overlay);
     background-size: cover; background-position: center;
   }
@@ -1610,9 +1586,8 @@
   .turntools > .picker:first-of-type .nm { flex: 1; min-width: 0 }
   .go { display: inline-flex; align-items: center; gap: 7px; flex: none }
 
-  .compose .row > * { position: relative; z-index: 8; animation: rowin var(--m-panel) both }
-  @keyframes rowin { from { opacity: 0; transform: translateY(4px) } to { opacity: 1; transform: none } }
-
+  .compose .row > * { position: relative; z-index: 8; animation: m-card var(--m-panel) both }
+  
   .compose .row [data-pending] { pointer-events: none; opacity: .5; transition: opacity var(--m-line) }
 
   .compose .row:has([data-pending])::after {
@@ -1623,7 +1598,7 @@
   }
   @keyframes rowsweep { from { background-position: -34% 0 } to { background-position: 134% 0 } }
 
-  .policy .vl { font-family: var(--ui); font-size: var(--fs-ui); animation: polval var(--m-line) both }
+  .policy .vl { font-family: var(--ui); font-size: var(--fs-ui); animation: m-fade var(--m-line) both }
 
   .policy[data-quiet] .mode { border-color: transparent; color: var(--faint) }
   .policy[data-quiet] .mode:hover,
@@ -1643,8 +1618,7 @@
     color: var(--err-ink);
     box-shadow: var(--lit), 0 0 0 1px color-mix(in srgb, var(--err) 42%, transparent);
   }
-  @keyframes polval { from { opacity: 0 } to { opacity: 1 } }
-
+  
   .polmenu {
     min-width: 296px; padding: 13px 14px 12px; left: auto; right: 0;
     display: flex; flex-direction: column; gap: 16px;
@@ -1946,10 +1920,9 @@
   }
   .plan .s[data-now] .b {
     border: 1.5px solid var(--hair); border-top-color: var(--accent); border-right-color: var(--accent);
-    animation: plan-turn var(--t-live) linear infinite;
+    animation: m-spin var(--t-live) linear infinite;
   }
-  @keyframes plan-turn { to { transform: rotate(360deg) } }
-  .plan .s[data-done] { color: var(--faint) }
+    .plan .s[data-done] { color: var(--faint) }
   .plan .s[data-done] .b { border: 1.5px solid var(--ok); background: var(--ok) }
   @media (prefers-reduced-motion: reduce) {
     .plan .s[data-now] .b { animation: none; border-color: var(--accent) }
@@ -1972,7 +1945,7 @@
   .prog2 .track i { display: block; height: 100%; width: 0; background: var(--ok); transition: width var(--t-live) var(--ease) }
 
   .agents { display: flex; flex-direction: column; gap: 7px; min-height: 18px }
-  .ag { display: flex; align-items: center; gap: 9px; font: var(--w-reg) var(--fs-ui) var(--mono); color: var(--muted); animation: card var(--t-card) var(--ease-out) both }
+  .ag { display: flex; align-items: center; gap: 9px; font: var(--w-reg) var(--fs-ui) var(--mono); color: var(--muted); animation: m-card var(--t-card) var(--ease-out) both }
   .ag .nm { color: var(--text); flex: none } .ag .lbl { display: block; flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
   .ag .rt { margin-left: auto; font-size: var(--fs-meta); color: var(--ghost); font-variant-numeric: tabular-nums; white-space: nowrap }
   .ag .ran, .nest-hd .ran, .agent-tx-hd .ran { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: var(--w-reg) var(--fs-meta) var(--mono); color: var(--faint) }
@@ -1981,7 +1954,7 @@
   .ag[data-status="failed"] .rt { color: var(--warn-ink) }
 
   .jobs { display: flex; flex-direction: column; gap: 7px; min-height: 18px }
-  .job { display: flex; align-items: center; gap: 8px; font: var(--w-reg) var(--fs-meta) var(--mono); color: var(--muted); animation: card var(--t-card) var(--ease-out) both }
+  .job { display: flex; align-items: center; gap: 8px; font: var(--w-reg) var(--fs-meta) var(--mono); color: var(--muted); animation: m-card var(--t-card) var(--ease-out) both }
   .job .cmd { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
   .job .job-name { position: relative; min-width: 0; flex: 0 1 auto; display: block }
   .job .job-name > .cmd { display: block; max-width: 100% }
@@ -1998,7 +1971,7 @@
     padding: 4px 7px 5px; border: 0; border-radius: var(--r-sm);
     background: transparent;
     color: inherit; font: inherit; text-align: left; cursor: pointer;
-    animation: card var(--t-card) var(--ease-out) both;
+    animation: m-card var(--t-card) var(--ease-out) both;
     transition: background var(--t-line) var(--ease-out);
   }
   .srvrow:hover { background: var(--overlay) }
@@ -2030,7 +2003,7 @@
     display: flex; align-items: center; gap: 8px; width: 100%; text-align: left;
     padding: 5px 6px; margin-inline: -6px; border: 0; border-radius: var(--r-xs);
     background: transparent; font: var(--w-reg) var(--fs-ui) var(--mono); color: var(--muted);
-    animation: card var(--t-card) var(--ease-out) both;
+    animation: m-card var(--t-card) var(--ease-out) both;
     transition: background var(--m-line), color var(--m-line);
   }
   button.file { cursor: pointer }
@@ -2055,7 +2028,7 @@
   .file .n .a { color: var(--add) } .file .n .r { color: var(--del) }
   .file .n .mk { margin-right: 6px; color: var(--faint); font-size: var(--fs-micro) }
 
-  .file[data-fresh] { animation: card var(--t-card) var(--ease-out) both, flash 1s var(--ease-out) var(--t-line) }
+  .file[data-fresh] { animation: m-card var(--t-card) var(--ease-out) both, flash 1s var(--ease-out) var(--t-line) }
   @keyframes flash {
     from { background: color-mix(in srgb, var(--accent) 22%, transparent) }
     to { background: transparent }
@@ -2079,9 +2052,8 @@
     .bar .c::after { display: none }
     .mode .vl, .mode.danger::before, .compose .row > *, .call[data-running] > .g .sym { animation: none !important }
 
-    .gutter[data-edge]::after { animation: edgeflash var(--t-card) var(--ease) }
-    @keyframes edgeflash { 0%, 100% { opacity: .9 } 50% { opacity: .25 } }
-
+    .gutter[data-edge]::after { animation: m-pulse var(--t-card) var(--ease) }
+    
     .compose .row:has([data-pending])::after { animation: none; background: var(--net); opacity: .5 }
     .scroll { scroll-behavior: auto }
     .btn:active, .navbtn:active,
@@ -2142,10 +2114,9 @@
   }
 
   .onb { position: relative; z-index: 3; width: min(452px, calc(100% - 56px)) }
-  .oobe[data-play][data-held] .onb { opacity: 0; animation: onbrise .8s var(--ease-out) 9.9s forwards }
+  .oobe[data-play][data-held] .onb { opacity: 0; animation: m-card .8s var(--ease-out) 9.9s forwards }
   .onb-card { width: 100%; display: grid; gap: 11px; text-align: left }
-  @keyframes onbrise { from { opacity: 0; transform: translateY(10px) } to { opacity: 1; transform: none } }
-  .onb-t { margin: 0; font: var(--w-reg) var(--fs-ui) var(--ui); color: rgb(255 255 255 / .62) }
+    .onb-t { margin: 0; font: var(--w-reg) var(--fs-ui) var(--ui); color: rgb(255 255 255 / .62) }
   .onb-s { margin: -4px 0 2px; font: var(--w-reg) var(--fs-ui)/1.6 var(--ui); color: rgb(255 255 255 / .48) }
 
   .onb-field { width: 100%; display: grid; gap: 5px; text-align: left }
@@ -2196,46 +2167,42 @@
 
     background: color-mix(in srgb, var(--page) 40%, transparent);
     -webkit-backdrop-filter: blur(14px) saturate(.92); backdrop-filter: blur(14px) saturate(.92);
-    animation: prefsin var(--t-card) var(--ease-out) both;
+    animation: m-fade var(--t-card) var(--ease-out) both;
   }
   .prefs-sheet {
     width: min(1120px, 100%); height: min(800px, 100%);
     display: flex; flex-direction: column; overflow: hidden;
     border: 1px solid var(--border); border-radius: var(--r-lg);
     background: var(--float); box-shadow: var(--shadow-float);
-    animation: sheetin var(--t-panel) var(--ease-spring) both;
+    animation: m-panel var(--t-panel) var(--ease-spring) both;
   }
   .prefs-sheet[data-wide] { width: 100%; height: 100% }
   .prefs-sheet[data-wide] .prefs-main .prefs-col { max-width: min(1200px, 100%); margin-inline: auto }
 
-  @keyframes prefsin { from { opacity: 0 } to { opacity: 1 } }
-  @keyframes sheetin { from { transform: translateY(14px) scale(.985) } to { transform: none } }
-
+    
   @supports (view-transition-name: none) {
     :root { view-transition-name: none }
     .prefs { view-transition-name: prefsveil; animation: none }
     .prefs-sheet { view-transition-name: prefssheet; animation: none }
-    [data-vt="prefs"]::view-transition-new(prefsveil) { animation: prefsin var(--m-card) both }
-    [data-vt="prefs"]::view-transition-old(prefsveil) { animation: prefsout var(--t-line) var(--ease-in) both }
-    [data-vt="prefs"]::view-transition-new(prefssheet) { animation: sheetin var(--t-panel) var(--ease-spring) both }
-    [data-vt="prefs"]::view-transition-old(prefssheet) { animation: sheetout var(--t-line) var(--ease-in) both }
-    @keyframes prefsout { to { opacity: 0 } }
-    @keyframes sheetout { to { opacity: 0; transform: translateY(6px) scale(.992) } }
-  }
+    [data-vt="prefs"]::view-transition-new(prefsveil) { animation: m-fade var(--m-card) both }
+    [data-vt="prefs"]::view-transition-old(prefsveil) { animation: m-exit var(--t-line) var(--ease-in) both }
+    [data-vt="prefs"]::view-transition-new(prefssheet) { animation: m-panel var(--t-panel) var(--ease-spring) both }
+    [data-vt="prefs"]::view-transition-old(prefssheet) { animation: m-exit var(--t-line) var(--ease-in) both }
+          }
 
   .cpv {
     position: fixed; inset: var(--chrome-h, 39px) 0 0; z-index: 60;
     display: grid; place-items: center; padding: 24px;
     background: color-mix(in srgb, var(--page) 40%, transparent);
     -webkit-backdrop-filter: blur(14px) saturate(.92); backdrop-filter: blur(14px) saturate(.92);
-    animation: prefsin var(--t-card) var(--ease-out) both;
+    animation: m-fade var(--t-card) var(--ease-out) both;
   }
   .cpv-sheet {
     width: min(980px, 100%); max-height: min(720px, 100%);
     display: flex; flex-direction: column; overflow: hidden;
     border: 1px solid var(--border); border-radius: var(--r-lg);
     background: var(--float); box-shadow: var(--shadow-float);
-    animation: sheetin var(--t-panel) var(--ease-spring) both;
+    animation: m-panel var(--t-panel) var(--ease-spring) both;
   }
   .cpv-hd {
     flex: none; display: flex; align-items: center; gap: 12px; padding: 11px 12px 11px 16px;
@@ -2251,8 +2218,8 @@
   @supports (view-transition-name: none) {
     .cpv { view-transition-name: cpv; animation: none }
     .cpv-sheet { animation: none }
-    [data-vt="cpv"]::view-transition-new(cpv) { animation: prefsin var(--t-card) var(--ease-out) both }
-    [data-vt="cpv"]::view-transition-old(cpv) { animation: prefsout var(--t-card) var(--ease-in) both }
+    [data-vt="cpv"]::view-transition-new(cpv) { animation: m-fade var(--t-card) var(--ease-out) both }
+    [data-vt="cpv"]::view-transition-old(cpv) { animation: m-exit var(--t-card) var(--ease-in) both }
   }
 
   .cpv-body .dif { margin-top: 0 }
@@ -2286,7 +2253,7 @@
     display: flex; flex-direction: column; padding: 5px;
     border: 1px solid var(--border); border-radius: 0 0 var(--r-md) var(--r-md);
     border-top: 0; background: var(--float); box-shadow: var(--shadow-float);
-    animation: card var(--m-line) both;
+    animation: m-card var(--m-line) both;
   }
   .prefs-found button {
     display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: baseline;
@@ -2390,9 +2357,8 @@
     transition: box-shadow var(--t-card) var(--ease-out),
                 background-color var(--t-card) var(--ease-out);
   }
-  .prefs-col { animation: navin var(--m-line) both }
-  @keyframes navin { from { opacity: 0; transform: translateY(3px) } to { opacity: 1; transform: none } }
-  .grp:last-child { margin-bottom: 0 }
+  .prefs-col { animation: m-card var(--m-line) both }
+    .grp:last-child { margin-bottom: 0 }
 
   @media (hover: hover) {
     .grp:hover { background: color-mix(in srgb, var(--accent) 3%, var(--surface)) }
@@ -2522,7 +2488,7 @@
   .srv-hd { display: flex; align-items: baseline; gap: 9px }
   .srv .pip { align-self: center }
   .srv[data-st="ready"] .pip { background: var(--ok) }
-  .srv[data-st="connecting"] .pip { background: var(--net); animation: tick 1.6s ease-in-out infinite }
+  .srv[data-st="connecting"] .pip { background: var(--net); animation: m-pulse 1.6s ease-in-out infinite }
   .srv[data-st="failed"] .pip { background: var(--err) }
   .srv[data-st="pending"] .pip { background: var(--warn-ink) }
   .srv[data-st="disabled"] .pip { background: var(--ghost) }
@@ -2592,16 +2558,16 @@
     flex: none; width: 5px; height: 5px; border-radius: 50%; background: var(--ghost);
     transition: background var(--t-line) var(--ease-out);
   }
-  .reload[data-s="run"] .rdot { background: var(--net); animation: breathe 1.1s var(--ease) infinite }
+  .reload[data-s="run"] .rdot { background: var(--net); animation: m-pulse 1.1s var(--ease) infinite }
   .reload[data-s="run"]:disabled { color: var(--text) }
   .reload[data-s="ok"] { color: var(--ok-ink); border-color: var(--ok) }
-  .reload[data-s="ok"] .rdot { background: var(--ok); animation: bumpup var(--t-card) var(--ease-out) }
+  .reload[data-s="ok"] .rdot { background: var(--ok); animation: m-card var(--t-card) var(--ease-out) }
   .reload[data-s="bad"] { color: var(--err-ink); border-color: var(--err); animation: nudge var(--m-card) }
   .reload[data-s="bad"] .rdot { background: var(--err) }
 
   @keyframes nudge { 0%, 100% { transform: none } 30% { transform: translateX(-2px) } 70% { transform: translateX(2px) } }
 
-  .rnote { margin-top: 9px; font: var(--w-reg) var(--fs-ui)/1.6 var(--ui); color: var(--faint); animation: modeval var(--t-line) var(--ease-out) }
+  .rnote { margin-top: 9px; font: var(--w-reg) var(--fs-ui)/1.6 var(--ui); color: var(--faint); animation: m-card var(--t-line) var(--ease-out) }
   .rnote[data-s="ok"] { color: var(--ok-ink) }
   .rnote[data-s="bad"] { color: var(--err-ink) }
 
@@ -3521,7 +3487,7 @@
     border-radius: var(--r-sm); border: 1px solid color-mix(in srgb, var(--err) 40%, var(--border));
     background: color-mix(in srgb, var(--err) 9%, var(--surface)); box-shadow: var(--shadow-float);
     font: var(--w-reg) var(--fs-ui)/1.5 var(--ui); color: var(--err-ink);
-    animation: card var(--t-card) var(--ease-out) both;
+    animation: m-card var(--t-card) var(--ease-out) both;
   }
   .errbar span { flex: 1; min-width: 0; word-break: break-word }
   .cmpalert { position: absolute; top: 0; left: 0; right: 0; height: 0; z-index: 6; pointer-events: none }
@@ -3540,7 +3506,7 @@
     display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; margin-top: 9px; padding: 7px 10px;
     border-radius: var(--r-sm); border: 1px solid var(--border);
     background: var(--overlay); font: var(--w-reg) var(--fs-ui)/1.5 var(--ui); color: var(--muted);
-    animation: card var(--t-card) var(--ease-out) both;
+    animation: m-card var(--t-card) var(--ease-out) both;
   }
   .rtbar[data-lvl="warn"] {
     border-color: color-mix(in srgb, var(--warn) 38%, var(--border));
@@ -3722,7 +3688,7 @@
   .vnow { display: flex; align-items: baseline; gap: 9px }
   .vnow .cur { font: var(--w-semi) var(--fs-display)/1 var(--mono); letter-spacing: .01em; color: var(--text) }
 
-  .vnow .lb { font: var(--w-reg) var(--fs-ui) var(--ui); color: var(--muted); animation: card var(--t-card) var(--ease-out) .07s both }
+  .vnow .lb { font: var(--w-reg) var(--fs-ui) var(--ui); color: var(--muted); animation: m-card var(--t-card) var(--ease-out) .07s both }
   .vnow .pin {
     font: var(--w-med) var(--fs-micro) var(--ui); letter-spacing: var(--track-cap); color: var(--ok-ink);
     padding: 2px 6px; border-radius: var(--r-pill); box-shadow: inset 0 0 0 1px var(--ok);
@@ -3736,7 +3702,7 @@
   .vrow {
     grid-column: 1 / -1; display: grid; grid-template-columns: subgrid; align-items: baseline;
     padding: 9px 12px; border-top: 1px solid var(--hair);
-    animation: card var(--t-card) var(--ease-out) both;
+    animation: m-card var(--t-card) var(--ease-out) both;
   }
   .vrow:last-of-type { border-bottom: 1px solid var(--hair) }
   .vlist .vmore { margin: 10px 0 0 12px }
@@ -3993,11 +3959,10 @@
     opacity: 0;
     animation: oobebrand .9s var(--ease-out) 1.5s forwards;
   }
-  .oobe[data-play] .oobe-sub { opacity: 0; animation: ooberise .8s var(--ease-out) 2.1s forwards }
+  .oobe[data-play] .oobe-sub { opacity: 0; animation: m-card .8s var(--ease-out) 2.1s forwards }
   @keyframes oobebrand { from { opacity: 0; transform: translateY(10px); filter: blur(6px) }
                          to { opacity: 1; transform: none; filter: none } }
-  @keyframes ooberise  { from { opacity: 0; transform: translateY(8px) } to { opacity: 1; transform: none } }
-
+  
   .oobe-lines { position: relative; height: 96px; width: 100%; margin-top: 4px }
   .oobe-line { position: absolute; inset: 0; display: grid; place-items: center; opacity: 0 }
   .oobe-line b { display: block; font: var(--w-reg) calc(30px * var(--fs-scale, 1))/1.35 var(--ui); color: #fff }
@@ -4119,15 +4084,11 @@
   .pane:not([data-off]) { view-transition-name: pane }
   [data-vt="tab"] .pane:not([data-off]) .scroll[data-pane]:not([hidden]) { view-transition-name: tabbody }
   [data-vt="tab"] .pane:has(> .pbody[data-dock]) > .scroll[data-pane="browser"] { view-transition-name: none }
-  [data-vt="tab"]::view-transition-old(tabbody) { animation: tabout var(--t-line) var(--ease-in) both }
-  [data-vt="tab"]::view-transition-new(tabbody) { animation: tabin var(--m-card) both }
-  @keyframes tabout { to { opacity: 0; transform: translateY(-4px) } }
-  @keyframes tabin { from { opacity: 0; transform: translateY(6px) } }
-  [data-vt="pane"]::view-transition-old(pane) { animation: paneout var(--t-card) var(--ease-in) both }
-  [data-vt="pane"]::view-transition-new(pane) { animation: panein var(--m-panel) both }
-  @keyframes paneout { to { opacity: 0; transform: translateY(-6px) } }
-  @keyframes panein { from { opacity: 0; transform: translateY(8px) } }
-
+  [data-vt="tab"]::view-transition-old(tabbody) { animation: m-exit var(--t-line) var(--ease-in) both }
+  [data-vt="tab"]::view-transition-new(tabbody) { animation: m-card var(--m-card) both }
+      [data-vt="pane"]::view-transition-old(pane) { animation: m-exit var(--t-card) var(--ease-in) both }
+  [data-vt="pane"]::view-transition-new(pane) { animation: m-card var(--m-panel) both }
+    
   .panetabs {
     position: relative;
     flex: none; display: flex; align-items: stretch; gap: 2px;
@@ -4155,7 +4116,7 @@
   .ptab-host::before { content: "◦"; margin-right: 2px; opacity: .7 }
   .ptab .pip { flex: none; background: var(--ghost) }
 
-  .ptab[data-run="running"] .pip { background: var(--net); animation: breathe 1.4s ease-in-out infinite }
+  .ptab[data-run="running"] .pip { background: var(--net); animation: m-pulse 1.4s ease-in-out infinite }
   @media (prefers-reduced-motion: reduce) { .ptab[data-run="running"] .pip { animation: none } }
   .ptab[data-run="halt"] .pip { background: var(--accent-ink) }
   .ptab[data-run="done"] .pip { background: transparent; box-shadow: inset 0 0 0 1.5px var(--ok) }
@@ -4172,7 +4133,7 @@
     position: absolute; inset: 0;
     display: grid; place-content: center; justify-items: center; gap: 10px;
     text-align: center; color: var(--faint);
-    animation: card var(--t-card) var(--ease-out) both;
+    animation: m-card var(--t-card) var(--ease-out) both;
   }
   .panes-empty .mk { font: var(--w-reg) calc(30px * var(--fs-scale, 1))/1 var(--ui); color: var(--ghost); margin-bottom: 2px }
   .panes-empty .t { margin: 0; font: var(--w-med) var(--fs-lead) var(--ui); color: var(--muted) }
@@ -4258,7 +4219,7 @@
 
     background: color-mix(in srgb, var(--page) 72%, transparent);
     -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px);
-    animation: card var(--t-card) var(--ease-out) both;
+    animation: m-card var(--t-card) var(--ease-out) both;
   }
 
   .pickveil { z-index: 92 }
@@ -4383,7 +4344,7 @@
     margin: 8px 0 2px 15px; padding: 7px 0 7px 11px;
     display: flex; flex-direction: column; gap: 4px;
     border-left: 2px solid var(--warn);
-    animation: panel var(--t-panel) var(--ease-out) both;
+    animation: m-panel var(--t-panel) var(--ease-out) both;
   }
   .rmtprobe[data-ok] { border-left-color: var(--ok) }
   .rmtprobe-r { display: flex; gap: 10px; font: var(--w-reg) var(--fs-ui) var(--mono) }
@@ -4504,7 +4465,7 @@
     padding: 6px 10px; border: 1px solid var(--border); border-radius: var(--r-sm);
     background: var(--raised); box-shadow: 0 12px 30px -16px var(--shade);
     color: var(--text); font: var(--w-med) var(--fs-meta)/1 var(--ui);
-    animation: pcin var(--t-card, .14s) var(--ease-out, ease-out) both;
+    animation: m-panel var(--t-card, .14s) var(--ease-out, ease-out) both;
   }
   .chrome:has(.pc-note-pop) { z-index: 40 }
   .app:has(> .devicebar) .rail { top: 30px }
@@ -4538,10 +4499,9 @@
     border: 1px solid var(--border); border-radius: var(--r-md);
     background: var(--raised); box-shadow: 0 20px 50px -20px var(--shade);
     color: var(--faint); font: var(--w-med) var(--fs-meta)/1.4 var(--ui); cursor: default; text-align: left;
-    animation: pcin var(--t-card, .14s) var(--ease-out, ease-out) both;
+    animation: m-panel var(--t-card, .14s) var(--ease-out, ease-out) both;
   }
-  @keyframes pcin { from { opacity: 0; transform: translateY(-4px) scale(.985) } }
-  .phonecard > header {
+    .phonecard > header {
     display: flex; align-items: center; justify-content: space-between; gap: 14px;
     padding-bottom: 10px; border-bottom: 1px solid var(--border);
   }
@@ -4681,9 +4641,8 @@
   .machpick svg { width: 12px; height: 12px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round }
   .machacts { grid-area: 1 / 4; display: flex; gap: 2px }
   .machacts .machpick { grid-area: auto }
-  .machpick[data-busy] svg { animation: machspin var(--t-live) linear infinite }
-  @keyframes machspin { to { transform: rotate(360deg) } }
-  @media (prefers-reduced-motion: reduce) { .machpick[data-busy] svg { animation: none } }
+  .machpick[data-busy] svg { animation: m-spin var(--t-live) linear infinite }
+    @media (prefers-reduced-motion: reduce) { .machpick[data-busy] svg { animation: none } }
   .machpick:hover:not(:disabled) { background: var(--raised); color: var(--text) }
   .machpick:focus-visible { outline: 2px solid var(--focus); outline-offset: -1px }
   .machpick:disabled { opacity: .4; cursor: default }
@@ -4827,7 +4786,7 @@
     display: flex; align-items: center; gap: 8px;
     padding: 7px 9px 8px 11px;
     background: var(--overlay); border-left: 2px solid var(--accent);
-    animation: card var(--m-line) both;
+    animation: m-card var(--m-line) both;
   }
   .wsconfirm[data-wide] { flex-direction: column; align-items: stretch; gap: 6px }
   .wsconfirm[data-wide] .wsconfirm-a { flex-wrap: wrap; justify-content: flex-end }
@@ -4862,7 +4821,7 @@
     display: grid; padding: 4px; border-radius: var(--r-sm);
     background: var(--float); border: 1px solid var(--border);
     box-shadow: var(--shadow-float);
-    animation: card var(--m-line) both;
+    animation: m-card var(--m-line) both;
   }
   .tabmenu button {
     padding: 6px 9px; border: 0; border-radius: var(--r-xs); background: none;
@@ -4877,10 +4836,9 @@
     padding: 9px 11px 10px; border-radius: var(--r-sm);
     background: var(--float); border: 1px solid var(--border);
     box-shadow: var(--shadow-float);
-    animation: tabconfirmin var(--m-card) both;
+    animation: m-panel var(--m-card) both;
   }
-  @keyframes tabconfirmin { from { opacity: 0; transform: translateY(-3px) } to { opacity: 1; transform: none } }
-  .tabconfirm .q { font: var(--w-med) var(--fs-ui) var(--ui); color: var(--text) }
+    .tabconfirm .q { font: var(--w-med) var(--fs-ui) var(--ui); color: var(--text) }
   .tabconfirm .h { font: var(--w-reg) var(--fs-meta)/1.55 var(--ui); color: var(--muted) }
   .tabconfirm .a { display: flex; gap: 6px; margin-top: 6px; justify-content: flex-end }
   .tabconfirm .a button {
@@ -5045,7 +5003,7 @@
     border-radius: var(--r-sm); background: var(--float);
     border: 1px solid var(--border); box-shadow: var(--shadow-float);
     pointer-events: none;
-    animation: card var(--m-line) both;
+    animation: m-card var(--m-line) both;
   }
   .ctxpop .hd { display: flex; align-items: baseline; font: var(--w-med) var(--fs-ui) var(--ui); color: var(--text) }
   .ctxpop .hd .n { margin-left: auto; font: var(--w-reg) var(--fs-meta) var(--mono); color: var(--muted) }

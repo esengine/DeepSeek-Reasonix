@@ -1,5 +1,5 @@
 .session-batch button { font: var(--w-reg) var(--fs-meta) var(--ui); }
-.session-batch { position: sticky; bottom: 0; z-index: 2; margin: 4px 0 0; padding: 8px 12px 10px; border: 0; border-top: 1px solid var(--border); border-radius: 0; background: var(--float); box-shadow: var(--shadow-float); animation: card var(--m-panel) both; }
+.session-batch { position: sticky; bottom: 0; z-index: 2; margin: 4px 0 0; padding: 8px 12px 10px; border: 0; border-top: 1px solid var(--border); border-radius: 0; background: var(--float); box-shadow: var(--shadow-float); animation: m-card var(--m-panel) both; }
 .session-batch-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px; font-size: var(--fs-micro); }
 .session-batch-head button { flex: none; height: 24px; color: var(--muted); background: transparent; padding: 0 10px; border: 0; border-radius: var(--r-pill); cursor: pointer; }
 .session-batch-actions { display: flex; gap: 4px; flex-wrap: wrap; }

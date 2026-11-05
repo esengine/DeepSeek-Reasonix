@@ -254,12 +254,11 @@
 .grp-row > .studio-icon { flex: none; width: 14px; height: 14px; color: var(--faint); }
 .prefs-col[data-deep] :not(.deep-page, .deep-page *, :has(.deep-page)) { display: none; }
 .prefs-col[data-deep] :is(.prefs-card, .grp):has(.deep-page) { padding: 0; border: 0; background: none; box-shadow: none; }
-.deep-page { display: flex; flex-direction: column; gap: 12px; animation: deep-in var(--t-panel) var(--ease-out, ease-out); }
+.deep-page { display: flex; flex-direction: column; gap: 12px; animation: m-panel var(--t-panel) var(--ease-out, ease-out); }
 .deep-crumb { display: flex; align-items: center; gap: 6px; color: var(--faint); font: var(--w-med) var(--fs-meta) var(--ui); }
 .deep-crumb button { padding: 0; border: 0; background: none; color: var(--muted); font: inherit; cursor: pointer; }
 .deep-crumb button:hover { color: var(--text); text-decoration: underline; }
 .deep-crumb b { color: var(--text); font-weight: var(--w-semi); }
-@keyframes deep-in { from { opacity: 0; transform: translateX(16px); } }
 @media (prefers-reduced-motion: reduce) { .deep-page { animation: none; } }
 
 .prefs-sheet[data-solo] { grid-template-columns: minmax(0, 1fr) auto; grid-template-rows: auto minmax(0, 1fr); }

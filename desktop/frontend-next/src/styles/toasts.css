@@ -1,5 +1,5 @@
 .toasts { position: fixed; right: 16px; bottom: 16px; z-index: 21; display: flex; flex-direction: column; gap: 8px; align-items: flex-end; width: min(380px, calc(100vw - 32px)); pointer-events: none; }
-.toast { pointer-events: auto; box-sizing: border-box; width: 100%; display: flex; align-items: flex-start; gap: 10px; padding: 10px 10px 10px 12px; border-radius: var(--r-md); border: 1px solid var(--border); background: var(--float); box-shadow: var(--shadow-float); font: var(--w-reg) var(--fs-ui)/1.55 var(--ui); color: var(--text); animation: card var(--t-card) var(--ease-out) both; }
+.toast { pointer-events: auto; box-sizing: border-box; width: 100%; display: flex; align-items: flex-start; gap: 10px; padding: 10px 10px 10px 12px; border-radius: var(--r-md); border: 1px solid var(--border); background: var(--float); box-shadow: var(--shadow-float); font: var(--w-reg) var(--fs-ui)/1.55 var(--ui); color: var(--text); animation: m-card var(--t-card) var(--ease-out) both; }
 .toast[data-kind="error"] { border-color: color-mix(in srgb, var(--err) 40%, var(--border)); }
 .toast-icon { display: flex; flex: none; margin-top: 2px; color: var(--muted); }
 .toast-icon[data-kind="error"] { color: var(--err-ink); }

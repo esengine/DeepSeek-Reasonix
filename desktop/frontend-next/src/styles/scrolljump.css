@@ -6,7 +6,7 @@
   border: 1px solid var(--hair); border-radius: var(--r-sm); background: color-mix(in srgb, var(--surface) 93%, transparent); color: var(--muted);
   backdrop-filter: blur(6px);
   box-shadow: 0 2px 8px -3px rgba(0, 0, 0, .18);
-  animation: card var(--t-card) var(--ease-out) both;
+  animation: m-card var(--t-card) var(--ease-out) both;
 }
 .scrolljump button:hover { color: var(--text); background: var(--surface); border-color: var(--border); }
 .scrolljump button:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
