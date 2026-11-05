@@ -3932,3 +3932,11 @@ test("a pick arms the page, answers what it reports, and a page that cannot answ
     }
   }
 });
+
+test("the installer's by-name fallback for a process it cannot read the path of never names the shared computer-use driver", () => {
+  const nsh = fs.readFileSync(new URL("../assets/installer.nsh", import.meta.url), "utf8");
+  const listed = /\$\$names = @\(([^)]*)\)/.exec(nsh)?.[1] ?? "";
+  assert.ok(listed.includes("${APP_EXECUTABLE_FILENAME}"), "the app's own executable is matched by name");
+  assert.ok(listed.includes("reasonix-studio-host.exe"), "the shell's own host is matched by name");
+  assert.ok(!listed.includes("cua-driver.exe"), "other computer-use apps ship the same driver name, so a path-less one is not ours");
+});

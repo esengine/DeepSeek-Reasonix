@@ -129,7 +129,7 @@
 !macro rxScript
   FileOpen $0 "$PLUGINSDIR\rxclose.ps1" w
   FileWrite $0 "param([string]$$Dir, [string]$$Mode, [int]$$Self)$\r$\n"
-  FileWrite $0 "$$names = @('${APP_EXECUTABLE_FILENAME}', 'reasonix-studio-host.exe', 'cua-driver.exe')$\r$\n"
+  FileWrite $0 "$$names = @('${APP_EXECUTABLE_FILENAME}', 'reasonix-studio-host.exe')$\r$\n"
   FileWrite $0 "$$hit = @(Get-CimInstance -ClassName Win32_Process | ? { $$_.ProcessId -ne $$Self -and (($$_.Path -and $$_.Path.StartsWith($$Dir, 'CurrentCultureIgnoreCase')) -or (-not $$_.Path -and $$names -contains $$_.Name)) })$\r$\n"
   FileWrite $0 "if ($$Mode -eq 'find') { if ($$hit.Count -gt 0) { exit 0 } else { exit 1 } }$\r$\n"
   FileWrite $0 "$$hit | % { Stop-Process -Id $$_.ProcessId -Force -ErrorAction SilentlyContinue }$\r$\n"
