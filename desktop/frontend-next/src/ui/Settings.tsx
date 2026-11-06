@@ -514,7 +514,7 @@ export function Settings({ hub, onError, port, networkPort, localWorkspacePort, 
                     typed in themselves is not part of anyone's package, and
                     filing it under one would misname where it came from. */}
                 <Group id="mcp"
-                  title={t("settings.external_tools")}
+                  title={t("ext.external_services")}
                   now={looseMcp.length ? t("settings.n_services", { n: looseMcp.length }) : undefined}
                   hint={t("settings.mcp_services_you_connected_yourself")}
                 >

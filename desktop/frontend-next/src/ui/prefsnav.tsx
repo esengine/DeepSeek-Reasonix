@@ -244,7 +244,7 @@ export const SETTINGS: SettingEntry[] = [
   { section: "ext", anchor: "ext-runtime", title: "settings.runtime", scope: "session", apply: "immediate", keywords: ["扩展", "沙盒"] },
   { section: "ext", anchor: "market", title: "ext.community_market", scope: "machine", apply: "immediate", keywords: ["市场", "market", "社区", "发现", "下载", "发布", "publish", "主题"] },
   { section: "ext", anchor: "plugins", title: "settings.plugin_packages", scope: "machine", apply: "immediate", keywords: ["安装"] },
-  { section: "ext", anchor: "mcp", title: "settings.external_tools", scope: "chosen", apply: "immediate", keywords: ["mcp", "服务器", "连接外部"] },
+  { section: "ext", anchor: "mcp", title: "ext.external_services", scope: "chosen", apply: "immediate", keywords: ["mcp", "服务器", "连接外部"] },
   { section: "ext", anchor: "skills", title: "settings.skills", scope: "chosen", apply: "immediate", keywords: ["skill", "技能包"] },
 
   { section: "network", anchor: "network", page: true, title: "common.network", scope: "machine", apply: "immediate", keywords: ["代理", "proxy", "抓取", "超时"] },
