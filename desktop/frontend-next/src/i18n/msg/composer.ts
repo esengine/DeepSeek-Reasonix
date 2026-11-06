@@ -126,6 +126,7 @@ export const COMPOSER: Messages = {
   "composer.live": { zh: "实时更新", en: "Live" },
   "composer.loading_commands_and_skills": { zh: "正在加载命令与技能…", en: "Loading commands and skills…" },
   "composer.local_branches": { zh: "本地分支", en: "Local branches" },
+  "composer.make_it_a_steer": { zh: "改为插话", en: "Make it a steer" },
   "composer.make_name_the_default_model": { zh: "将 {name} 设为默认模型", en: "Make {name} the default model" },
   "composer.manage_mcp_and_tools": { zh: "管理 MCP 与工具", en: "Manage MCP and tools" },
   "composer.manage_models_and_connections": { zh: "管理模型与连接", en: "Manage models and connections" },
@@ -256,6 +257,7 @@ export const COMPOSER: Messages = {
   "composer.source": { zh: "起点", en: "Source" },
   "composer.steer_accepted": { zh: "插话已收", en: "Steer accepted" },
   "composer.steer_queued": { zh: "插话排队", en: "Steer queued" },
+  "composer.steer_waiting": { zh: "插话 · 等待插入", en: "Steer · waiting to land" },
   "composer.stop": { zh: "停下", en: "Stop" },
   "composer.stop_the_current_response_and": { zh: "停止当前回复，把这条作为新一轮立即发出", en: "Stop the current response and send this as a new turn" },
   "composer.stopping": { zh: "正在停止…", en: "Stopping…" },
@@ -318,6 +320,7 @@ export const COMPOSER: Messages = {
   "composer.waiting_to_connect": { zh: "等待连接", en: "Waiting to connect" },
   "composer.work_mode": { zh: "工作模式", en: "Work mode" },
   "composer.you_can_also_drop_or": { zh: "也可直接拖入或粘贴", en: "You can also drop or paste files" },
+  "composer.withdraw": { zh: "撤回", en: "Withdraw" },
   "composer.you_can_also_type_the": { zh: "可以直接输入完整模型 ID 添加。", en: "You can also type the full model ID to add it." },
   "composer.you_can_keep_typing_while": { zh: "运行中也可以继续输入…", en: "You can keep typing while it runs…" },
 };

@@ -414,7 +414,13 @@ function PaneView({ port, hub, rt, title, active, visible, sideHost, side, onFoc
   const submit = useSubmit({ port, running, dispatch, trajDispatch, refreshStatus, fail });
 
   const [inserted, setInserted] = useState<{ n: number; text: string; session?: { id: string; title: string } }>({ n: 0, text: "" });
-  const { queue, restored, onRestoreText, onQueueEdit, onQueueMove, onQueueRetry, onQueueRefresh, onQueuePause, onQueueRead, onQueueSendNow, onQueueCancel } = useQueueActions({
+  // Guidance said from this window stands in the transcript as its own bubble
+  // until the turn reads it, so the strip leaves it out.
+  const steerShown = useMemo(
+    () => new Set(s.items.flatMap((i) => (i.t === "user" && i.pending && i.queued === "steer" && i.itemId ? [i.itemId] : []))),
+    [s.items],
+  );
+  const { queue, restored, onRestoreText, onQueueRetry, onQueuePause, onQueueToSteer, onQueueSendNow, onQueueCancel } = useQueueActions({
     port,
     dispatch,
     fail,
@@ -530,6 +536,7 @@ function PaneView({ port, hub, rt, title, active, visible, sideHost, side, onFoc
         turnRunning={running}
         reply={fileReply}
         onResend={onResend}
+        onWithdraw={onQueueCancel}
         items={s.items}
         entering={s.entranceOwed}
         onEntered={(ids) => dispatch({ kind: "__entered", ids } as never)}
@@ -630,13 +637,11 @@ function PaneView({ port, hub, rt, title, active, visible, sideHost, side, onFoc
           <Queue
             queue={queue}
             running={running}
-            onRead={onQueueRead}
+            shown={steerShown}
             onSendNow={onQueueSendNow}
-            onEdit={onQueueEdit}
-            onMove={onQueueMove}
+            onToSteer={onQueueToSteer}
             onCancel={onQueueCancel}
             onRetry={onQueueRetry}
-            onRefresh={onQueueRefresh}
             onPause={onQueuePause}
           />
           <PeerHeldBar port={port} project={rt.host ? undefined : { path: rt.root, name: rt.name }} />

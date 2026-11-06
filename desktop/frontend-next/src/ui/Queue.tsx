@@ -1,56 +1,44 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { Meter } from "./Meter";
 import type { Queue as QueueSnapshot, QueueItem } from "../port/port";
 import { t } from "../i18n";
-import { useFitHeight } from "./fitHeight";
-import { reason } from "../i18n/kernel";
 import { BLOCK_WHY } from "../i18n/queue_why";
-
-import { useSendShortcut } from "../state/prefs";
-import { sendAria, sendsOnKey } from "./sendkey";
-import { useIme } from "./ime";
-import { Overflow } from "./Overflow";
-import { StudioIcon } from "./StudioIcon";
-import { touchKeyboard } from "./touchKeyboard";
 
 interface Props {
   queue: QueueSnapshot | null;
-  // A turn holding the session is the whole reason these are waiting, and it is
-  // what "send now" has to interrupt. Without it the action is meaningless: an
-  // idle queue dispatches on its own.
+  // A turn holding the session is what these lines wait on, and what "send now"
+  // has to interrupt. Without it the action is meaningless: an idle queue
+  // dispatches on its own.
   running: boolean;
-  onRead: (id: string) => Promise<string>;
-  onEdit: (id: string, text: string) => void;
-  onMove: (id: string, to: number) => void;
-  onCancel: (id: string) => void | Promise<void>;
+  // Entries whose guidance already stands in the transcript as its own bubble.
+  shown?: ReadonlySet<string>;
   onSendNow: (item: QueueItem) => void;
+  onToSteer: (item: QueueItem) => void;
+  onCancel: (id: string) => void | Promise<void>;
   onRetry: (id: string) => void;
-  onRefresh: (id: string) => void;
   onPause: (paused: boolean) => void;
 }
 
 // The kernel has taken the line: it is in the transcript now, and the entry is
-// swept only when the whole turn ends. This panel is what has not happened yet,
+// swept only when the whole turn ends. This strip is what has not happened yet,
 // so a taken entry leaves it rather than standing there inert as a second copy.
 const taken = (s: QueueItem["state"]) => s === "steer_consumed" || s === "running";
 
-// "To send" is what the person said and has not sent yet. A host continuation —
-// a finished background job asking the session to pick the work back up — is
-// not theirs and belongs with the work it came from. It appears here only when
-// it needs a decision, which is the one case nobody else can make for them.
+// A host continuation — a finished background job asking the session to pick
+// the work back up — is not the person's and belongs with the work it came
+// from. It appears here only when it needs a decision.
 const theirs = (it: QueueItem) => it.origin !== "host" || it.state === "blocked" || it.state === "uncertain";
 
 // Codes whose entry the kernel knows never reached the model, so sending it
 // again cannot repeat an effect. Every other uncertain code may have run.
 const RETRY_SAFE = new Set(["steer_unapplied"]);
-// The kernel edits, reorders and re-freezes only a line nobody has taken yet; a
-// line already accepted as guidance can only be withdrawn or sent now.
-const editable = (it: QueueItem) => it.state === "queued" || it.state === "blocked" || it.state === "uncertain";
 const retryable = (it: QueueItem) =>
   it.state === "blocked" || (it.state === "uncertain" && !!it.blockCode && RETRY_SAFE.has(it.blockCode));
+// Only plain text can become guidance: a picture or a frozen file reference
+// travels with a whole turn.
+const steerable = (it: QueueItem) =>
+  it.origin !== "host" && it.state === "queued" && it.intent === "followup" && !it.images && !it.refs?.length;
 
-/** What the panel draws: the lines nobody has acted on yet. The header's count
- *  of guidance in flight reads this too, so it can never name a line the panel
+/** What the strip draws: the lines nobody has acted on yet. The header's count
+ *  of guidance in flight reads this too, so it can never name a line the strip
  *  is not showing. */
 export const waiting = (queue: QueueSnapshot | null): QueueItem[] =>
   queue ? queue.items.filter((it) => !taken(it.state) && theirs(it)) : [];
@@ -58,7 +46,7 @@ export const waiting = (queue: QueueSnapshot | null): QueueItem[] =>
 // Each arm calls t() with its own literal: the catalogue is built by reading
 // these call sites, and a table of strings looked up later is invisible to it —
 // which is how a row would render Chinese inside an English window.
-function label(it: QueueItem): string {
+function label(it: QueueItem, n: number): string {
   if (it.origin === "host") {
     if (it.state === "blocked") return t("composer.background_blocked");
     if (it.state === "uncertain") return t("composer.background_uncertain");
@@ -72,252 +60,59 @@ function label(it: QueueItem): string {
     case "uncertain":
       return t("composer.uncertain");
     default:
-      // The kernel's own reason for not delivering mid-turn, read from what the
-      // entry froze rather than guessed from its text.
       if (it.images && it.state === "queued") return t("composer.has_an_image_sent_when");
-      // A steer the kernel could not admit is converted to a follow-up, so an
-      // entry still calling itself one is waiting on a held queue, not refused.
-      return it.intent === "steer" ? t("composer.steer_queued") : t("common.queued");
+      if (it.intent === "steer") return t("composer.steer_queued");
+      return `${t("common.queued")} ${n}`;
   }
 }
 
-function tone(state: QueueItem["state"]): string | undefined {
-  switch (state) {
-    case "steer_accepted":
-      return "accent";
-    case "blocked":
-    case "uncertain":
-      return "warn";
-    default:
-      return undefined;
-  }
-}
-
-// Each side of the ratio picks its own unit. The ceiling is 64 MiB and what a
-// queue actually holds is a few typed lines, so a shared unit would print every
-// real queue as 0 — the bar is what carries the proportion.
-function size(n: number): string {
-  if (n < 1024) return `${n}B`;
-  if (n < 1 << 20) return `${n < 10240 ? (n / 1024).toFixed(1) : Math.round(n / 1024)}k`;
-  const m = n / (1 << 20);
-  return `${m < 10 ? m.toFixed(1) : Math.round(m)}M`;
-}
-
-// The list scrolls inside a height `.composeaux` caps, so an editor taller than
-// what the list shows is cut off with no way to reach its edge.
-function listRoom(el: HTMLTextAreaElement): number {
-  const list = el.closest(".qitems");
-  const row = el.closest(".qi");
-  return list && row ? list.clientHeight - (row.getBoundingClientRect().height - el.offsetHeight) : Infinity;
-}
-
-export function Queue({ queue, running, onRead, onEdit, onMove, onCancel, onSendNow, onRetry, onRefresh, onPause }: Props) {
-  const [editing, setEditing] = useState("");
-  const [draft, setDraft] = useState("");
-  // Which row could not be read back, and why. Not a draft: the editor stays
-  // shut, because the row's own text is the only thing that may fill it.
-  const [unread, setUnread] = useState<{ id: string; why: string } | null>(null);
-  const box = useRef<HTMLTextAreaElement>(null);
-  const readEpoch = useRef(0);
-  useFitHeight(box, editing ? draft : "", undefined, listRoom);
-  useLayoutEffect(() => {
-    const row = box.current?.closest<HTMLElement>(".qi");
-    const list = row?.closest<HTMLElement>(".qitems");
-    if (!row || !list) return;
-    const over = row.getBoundingClientRect().bottom - list.getBoundingClientRect().bottom;
-    const under = list.getBoundingClientRect().top - row.getBoundingClientRect().top;
-    list.scrollTop += under > 0 ? -under : Math.max(0, over);
-  }, [editing, draft]);
-  const shortcut = useSendShortcut();
-  const ime = useIme();
-
-  // The body arrives after the click, so focus waits for the field to exist.
-  useEffect(() => {
-    if (editing) box.current?.focus();
-  }, [editing]);
-
-  const open = useCallback(
-    async (id: string) => {
-      // Opening on the preview would put a cut-off line in the box and save it
-      // back as the whole instruction.
-      const epoch = ++readEpoch.current;
-      setUnread(null);
-      let body: string;
-      try {
-        body = await onRead(id);
-      } catch (e) {
-        if (epoch !== readEpoch.current) return;
-        // A read that failed is not an empty instruction. Filling the box with
-        // "" would have the user retype a line they never saw, and the save
-        // replaces the whole entry with it.
-        setUnread({ id, why: reason(e) });
-        return;
-      }
-      if (epoch !== readEpoch.current) return;
-      setDraft(body);
-      setEditing(id);
-    },
-    [onRead],
-  );
-
-  const commit = useCallback(() => {
-    const text = draft.trim();
-    if (editing && text) onEdit(editing, text);
-    setEditing("");
-  }, [draft, editing, onEdit]);
-
-  // No pending work means no pending UI. A persisted pause is an internal
-  // queue policy; drawing a full strip for it above an empty composer makes it
-  // look like a stuck task. If a new item arrives while held, the strip returns
-  // with both the item and the action needed to release it.
+export function Queue({ queue, running, shown, onSendNow, onToSteer, onCancel, onRetry, onPause }: Props) {
   if (!queue) return null;
-  const items = waiting(queue);
+  const items = waiting(queue).filter((it) => !shown?.has(it.id));
   if (items.length === 0) return null;
-  const cap = queue.capacity;
-  const fullItems = cap.maxItems > 0 && cap.items >= cap.maxItems;
-  const fullBytes = cap.maxBytes > 0 && cap.bytes >= cap.maxBytes;
-  const capacityPressure = fullItems || fullBytes ||
-    (cap.maxItems > 0 && cap.items / cap.maxItems >= 0.75) ||
-    (cap.maxBytes > 0 && cap.bytes / cap.maxBytes >= 0.75);
-  const ordinary = (it: QueueItem) => it.origin !== "host" && it.state === "queued" && it.intent === "followup";
+  const sendable = running && !queue.paused;
 
   return (
     <div className="queue" role="group" aria-label={t("composer.pending")}>
-      <div className="qhd">
-        <span className="lb">{t("common.to_send")}</span>
-        <span className="qcount" aria-label={t("composer.n_to_send", { n: items.length })}>{items.length}</span>
-        <span className="qsummary">
-          {queue.readonly
-            ? t("composer.this_conversation_is_temporarily_read")
-            : queue.paused
-              ? t("composer.sending_is_paused")
-              : running
-                ? t("composer.not_delivered_yet_edit_it")
-                : t("composer.sending")}
-        </span>
-        {queue.readonly && <span className="qflag" data-ro="">{t("common.read_only")}</span>}
-        {/* The kernel pauses itself when it recovers entries: something was
-            said that no one has since re-confirmed. */}
-        {!!queue.recoveredCount && <span className="qflag" data-warn="">{t("composer.n_recovered", { n: queue.recoveredCount })}</span>}
-        {/* Both limits refuse on their own, so a header that showed one of them
-            would be wrong about the other exactly when it bites. */}
-        {capacityPressure && <span className="qcap" aria-label={t("composer.queue_capacity")}>
-          {cap.maxItems > 0 && <span data-full={fullItems || undefined}>
-            {t("composer.items")} {cap.items}/{cap.maxItems}
-            <Meter value={cap.items} max={cap.maxItems} label={t("composer.items")} full={fullItems} />
-          </span>}
-          <span data-full={fullBytes || undefined}>
-            {t("composer.bytes")} {size(cap.bytes)}/{size(cap.maxBytes)}
-            <Meter value={cap.bytes} max={cap.maxBytes} label={t("composer.bytes")} full={fullBytes} />
-          </span>
-        </span>}
-        <button className="qhold" data-action="queue.pause" onClick={() => onPause(!queue.paused)} disabled={queue.readonly}>
-          {queue.paused ? t("composer.release") : t("composer.hold")}
-        </button>
-      </div>
-
-      <div className="qitems">
-        {items.map((it, i) => {
-          const live = !queue.readonly && editing !== it.id;
-          const coded = it.blockCode ? BLOCK_WHY[it.blockCode] : undefined;
-          const why = coded ? t(coded) : it.blockReason;
-          return (
-            <div key={it.id} className="qi" data-state={it.state} title={why || undefined}>
-              {/* The chip is the answer to "did that land". Its wording says
-                  which turn the line goes into; the title says when. */}
-              {ordinary(it) ? (
-                <span className="qdot" aria-hidden="true" />
-              ) : (
-                <span className="pill" data-tone={tone(it.state)} title={it.state === "steer_accepted" ? t("composer.goes_in_at_the_next") : it.origin === "host" ? t("composer.background_job_follow_on") : undefined}>
-                  {label(it)}
-                </span>
+      {items.map((it, i) => {
+        const coded = it.blockCode ? BLOCK_WHY[it.blockCode] : undefined;
+        const why = coded ? t(coded) : it.blockReason;
+        const held = it.state === "blocked" || it.state === "uncertain";
+        return (
+          <div key={it.id} className="qi" data-state={it.state} title={why || undefined}>
+            <span className="ql" data-tone={held ? "warn" : undefined} title={it.state === "steer_accepted" ? t("composer.goes_in_at_the_next") : it.origin === "host" ? t("composer.background_job_follow_on") : undefined}>
+              {label(it, i + 1)}
+            </span>
+            <span className="pv">{it.preview}</span>
+            {held && why && <span className="qwhy" title={why}>{why}</span>}
+            <span className="qacts">
+              {queue.paused && i === 0 && !queue.readonly && (
+                <button className="qb" data-action="queue.pause" onClick={() => onPause(false)}>{t("composer.release")}</button>
               )}
-              {editing === it.id ? (
-                <textarea
-                    data-action-keydown="queue.edit"
-                  ref={box}
-                  className="qedit"
-                  value={draft}
-                  rows={1}
-                  onChange={(e) => setDraft(e.target.value)}
-                  onBlur={commit}
-                  {...ime.handlers}
-                  aria-keyshortcuts={sendAria(shortcut, touchKeyboard())}
-                  onKeyDown={(e) => {
-                    if (e.key === "Escape") { e.preventDefault(); setEditing(""); return; }
-                    if (ime.isIme(e.nativeEvent)) {
-                      if (e.key === "Enter") e.preventDefault();
-                      return;
-                    }
-                    if (sendsOnKey(e, shortcut, touchKeyboard())) {
-                      e.preventDefault();
-                      commit();
-                    }
-                  }}
-                />
-              ) : (
-                // 「改」走 onRead 读回整条正文，但已结算的行没有那个按钮。
-                // 被截断时看得见全文，是每一行都该有的，而不是可编辑的那些。
-                <Overflow className="pv" text={it.preview} />
-              )}
-              {!!it.refs?.length && <span className="rf">{t("composer.n_frozen", { n: it.refs.length })}</span>}
-              {why && (it.state === "blocked" || it.state === "uncertain") && <span className="qwhy" title={why}>{why}</span>}
-              {unread?.id === it.id && (
-                <span className="qwhy" data-err="" role="alert">
-                  {t("composer.could_not_read_this_entry", { why: unread.why })}
-                </span>
-              )}
-              {live && (
-                <span className="qacts">
-                  {items.length > 1 && editable(it) && <>
-                    <button className="qmove" data-action="queue.move" data-target={it.id} data-value="up" onClick={() => onMove(it.id, i - 1)} disabled={i === 0} title={t("common.move_up")} aria-label={t("common.move_up")}>
-                      <StudioIcon name="arrow" />
-                    </button>
-                    <button className="qmove" data-action="queue.move" data-target={it.id} data-value="down" onClick={() => onMove(it.id, i + 1)} disabled={i === items.length - 1} title={t("common.move_down")} aria-label={t("common.move_down")}>
-                      <StudioIcon name="arrow" data-flip="" />
-                    </button>
-                  </>}
-                  {editable(it) && (
-                    <button data-action="queue.edit" data-target={it.id} onClick={() => void open(it.id)} title={t("common.edit")} aria-label={t("composer.edit")}>
-                      <StudioIcon name="edit" />
-                    </button>
-                  )}
-                  {/* Waiting is the normal case and needs no button. This is the
-                      other one: the turn in front of this line is not worth
-                      finishing, and nothing else can end it. */}
-                  {running && !queue.paused && (it.state === "queued" || it.state === "steer_accepted") && (
-                    <button
-                      className="qnow"
-                      data-action="queue.send-now"
-                      data-target={it.id}
-                      onClick={() => onSendNow(it)}
-                      title={t("composer.stop_the_current_response_and")}
-                    >
-                      {t("composer.send_now")}
-                    </button>
-                  )}
-                  {retryable(it) && (
-                    <button data-action="queue.retry" data-target={it.id} onClick={() => onRetry(it.id)} title={t("common.retry")}>
-                      {t("common.retry")}
-                    </button>
-                  )}
-                  {/* Only an entry that quoted files has anything to re-freeze. */}
-                  {editable(it) && !!it.refs?.length && (
-                    <button data-action="queue.refresh" data-target={it.id} onClick={() => onRefresh(it.id)} title={t("composer.re_freeze_the_files_it")}>
-                      {t("common.re_freeze")}
-                    </button>
-                  )}
-                </span>
-              )}
-              {live && (
-                <button className="x" data-action="queue.cancel" data-target={it.id} onClick={() => onCancel(it.id)} title={t("composer.take_it_back")} aria-label={t("composer.take_it_back")}>
-                  <StudioIcon name="rewind" />
+              {sendable && steerable(it) && (
+                <button className="qb" data-action="queue.to-steer" data-target={it.id} onClick={() => onToSteer(it)}>
+                  {t("composer.make_it_a_steer")}
                 </button>
               )}
-            </div>
-          );
-        })}
-      </div>
+              {sendable && (it.state === "queued" || it.state === "steer_accepted") && (
+                <button className="qb" data-action="queue.send-now" data-target={it.id} title={t("composer.stop_the_current_response_and")} onClick={() => onSendNow(it)}>
+                  {t("composer.send_now")}
+                </button>
+              )}
+              {retryable(it) && (
+                <button className="qb" data-action="queue.retry" data-target={it.id} title={t("common.retry")} onClick={() => onRetry(it.id)}>
+                  {t("common.retry")}
+                </button>
+              )}
+              {!queue.readonly && (
+                <button className="qb" data-action="queue.cancel" data-target={it.id} title={t("composer.take_it_back")} onClick={() => onCancel(it.id)}>
+                  {t("composer.withdraw")}
+                </button>
+              )}
+            </span>
+          </div>
+        );
+      })}
     </div>
   );
 }

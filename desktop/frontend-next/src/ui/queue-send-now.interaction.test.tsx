@@ -51,9 +51,8 @@ function draw(port: MockPort) {
     }, [port]);
     const actions = useQueueActions({ port: port as unknown as AgentPort, dispatch, fail, moved });
     return <Queue queue={actions.queue} running
-      onRead={actions.onQueueRead} onEdit={actions.onQueueEdit} onMove={actions.onQueueMove}
-      onCancel={actions.onQueueCancel} onSendNow={actions.onQueueSendNow}
-      onRetry={actions.onQueueRetry} onRefresh={actions.onQueueRefresh} onPause={actions.onQueuePause} />;
+      onCancel={actions.onQueueCancel} onSendNow={actions.onQueueSendNow} onToSteer={actions.onQueueToSteer}
+      onRetry={actions.onQueueRetry} onPause={actions.onQueuePause} />;
   }
   render(<Panel />);
   return { beforeCancel, dispatch, fail };
@@ -127,5 +126,35 @@ describe("sending the selected queue entry now", () => {
     await screen.findByText(BODIES[0]);
     expect(screen.queryByRole("button", { name: "立即发送" })).toBeNull();
     expect(beforeCancel).toEqual([]);
+  });
+});
+
+describe("making a queued follow-up guidance", () => {
+  it("takes the line back and says it again as a steer, whole", async () => {
+    const port = await queued();
+    // Lines held while the queue was paused have no timer for the fixture's
+    // cancel to clear, so it refuses them; the kernel lets a held line go.
+    vi.spyOn(port, "cancelQueued").mockImplementation(async (id: string) => {
+      (port as unknown as { dropQueued: (id: string) => void }).dropQueued(id);
+    });
+    const { dispatch, fail } = draw(port);
+    await userEvent.click((await screen.findAllByRole("button", { name: "改为插话" }))[1]);
+    await waitFor(() => expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({ kind: "__queued", queued: "steer" })));
+    const snapshot = await port.queue();
+    const bodies = await Promise.all(snapshot.items.map((item) => port.readQueued(item.id)));
+    expect(bodies.filter((b) => b === BODIES[1])).toHaveLength(1);
+    expect(snapshot.items.find((item) => item.preview.startsWith(BODIES[1]))?.intent).toBe("steer");
+    expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({ kind: "__unsent" }));
+    expect(fail).not.toHaveBeenCalled();
+  });
+
+  it("keeps the line queued when it cannot be read back", async () => {
+    const port = await queued();
+    const error = new Error("read failed");
+    vi.spyOn(port, "readQueued").mockRejectedValue(error);
+    const { fail } = draw(port);
+    await userEvent.click((await screen.findAllByRole("button", { name: "改为插话" }))[0]);
+    await waitFor(() => expect(fail).toHaveBeenCalledWith(error));
+    expect((await port.queue()).items).toHaveLength(3);
   });
 });

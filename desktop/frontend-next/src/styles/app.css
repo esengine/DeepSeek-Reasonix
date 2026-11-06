@@ -380,7 +380,7 @@
   .queue {
     display: flex; flex-direction: column; gap: 6px; margin-bottom: 10px;
     min-height: 0; padding-bottom: 10px; border-bottom: 1px solid var(--hair);
-    font: var(--w-reg) var(--fs-meta) var(--mono);
+    font: var(--w-reg) var(--fs-meta) var(--ui);
     animation: m-card var(--m-card) both;
   }
     .qhd { display: flex; align-items: center; gap: 7px; min-width: 0 }

@@ -67,8 +67,6 @@ interface Props {
   onAnswer: (itemId: string, id: string, answers: { questionId: string; selected: string[]; value?: Record<string, unknown> }[]) => Promise<void>;
   onForget: (itemId: string, name: string) => void;
   onSettings?: (at?: string) => void;
-  // Takes a still-queued line back. Only rows the kernel has given an
-  // item id can offer it, and only until the turn reads them.
   onExtInvoke: (name: string) => void;
   // Views published against a tool call, keyed by anchor. A card looks itself
   // up here rather than being handed one, so an arriving takeover repaints the
@@ -79,6 +77,7 @@ interface Props {
   reply?: ReplyActions;
   // Rewriting a message: the turn it takes back, and what to send instead.
   onResend?: (turn: number, text: string) => Promise<void>;
+  onWithdraw?: (itemId: string) => void | Promise<void>;
   onExtSubmit: (pluginId: string, surfaceId: string, values: Record<string, unknown>) => void | Promise<void>;
   // The checkpoint each user card can return to, keyed by item id. Absent for a
   // card whose turn could not be matched — see state/checkpoints.
@@ -104,7 +103,7 @@ interface Props {
   brought?: { ids: string[]; bring: (id: string) => void; dismiss: (id: string) => void };
 }
 
-export function Transcript({ items: every, port, historyPaging, entering, onEntered, brought, revision, waiting, scroll, hidden, focus, find, query, onApprove, onFullAccess, onPlan, onAnswer, onForget, onSettings, onExtInvoke, onExtSubmit, reply, onResend, takeovers = {}, checkpoints, onPrepareRewind, onCommitRewind, onPrepareFileRevert, onCommitFileRevert, needsProject, onOpenProject, onKeepHere, onSuggest, foldWork = false, turnRunning = false, scope = "" }: Props) {
+export function Transcript({ items: every, port, historyPaging, entering, onEntered, brought, revision, waiting, scroll, hidden, focus, find, query, onApprove, onFullAccess, onPlan, onAnswer, onForget, onSettings, onExtInvoke, onExtSubmit, reply, onResend, onWithdraw, takeovers = {}, checkpoints, onPrepareRewind, onCommitRewind, onPrepareFileRevert, onCommitFileRevert, needsProject, onOpenProject, onKeepHere, onSuggest, foldWork = false, turnRunning = false, scope = "" }: Props) {
   // A block the selection touches must not leave the DOM. Unmounting the node a
   // selection is anchored to makes the browser remap that selection onto
   // whatever is still mounted — which reads as "I selected up there and the
@@ -472,7 +471,7 @@ export function Transcript({ items: every, port, historyPaging, entering, onEnte
 
   const bring = brought?.bring;
   const onBring = useMemo(() => (bring ? (id: string) => { bring(id); resume(); } : undefined), [bring, resume]);
-  const rowProps = { onBring, owed, echoes, port, onApprove, onFullAccess, onPlan, onAnswer, onForget, onSettings, onExtInvoke, takeovers, onExtSubmit, onPrepareRewind, onCommitRewind, onPrepareFileRevert, onCommitFileRevert, reply, onResend };
+  const rowProps = { onBring, owed, echoes, port, onApprove, onFullAccess, onPlan, onAnswer, onForget, onSettings, onExtInvoke, takeovers, onExtSubmit, onPrepareRewind, onCommitRewind, onPrepareFileRevert, onCommitFileRevert, reply, onResend, onWithdraw };
 
   const marks = railMarks(blocks, (id) => checkpoints.get(id)?.files ?? 0);
 
@@ -509,6 +508,7 @@ export function Transcript({ items: every, port, historyPaging, entering, onEnte
           />
         ))}
         {live && <Row it={live} {...rowProps} cp={checkpoints.get(live.id)} />}
+        {every.filter((it) => it.t === "user" && it.pending && it.queued === "steer").map((it) => <Row key={it.id} it={it} {...rowProps} />)}
         {brought && <BroughtResults items={items} ids={brought.ids} onDismiss={brought.dismiss} takeovers={takeovers} onExtInvoke={onExtInvoke} onPrepareFileRevert={onPrepareFileRevert} onCommitFileRevert={onCommitFileRevert} />}
         {waiting.ttftSince && <Await since={waiting.ttftSince} retry={waiting.retry} />}
         <div ref={end} className="flow-end" aria-hidden="true" />
@@ -626,6 +626,7 @@ interface RowHandlers {
   onPrepareFileRevert: Props["onPrepareFileRevert"];
   reply: Props["reply"];
   onResend: Props["onResend"];
+  onWithdraw: Props["onWithdraw"];
   onCommitFileRevert: Props["onCommitFileRevert"];
 }
 
@@ -701,7 +702,7 @@ const Row = memo(function Row({
   onAnswer,
   onExtInvoke,
   reply,
-  onResend,
+  onResend, onWithdraw,
   takeovers,
   onExtSubmit,
   cp,
@@ -731,6 +732,7 @@ const Row = memo(function Row({
           port={port}
           cp={cp}
           onResend={onResend}
+          onWithdraw={onWithdraw}
           onPrepareRewind={onPrepareRewind}
           onCommitRewind={onCommitRewind}
         />

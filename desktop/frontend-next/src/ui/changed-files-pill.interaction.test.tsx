@@ -144,11 +144,11 @@ describe("the changed-files pill above the input box", () => {
     vi.spyOn(pane.port, "steer").mockImplementation((text) => pane.port.queueFollowup(text));
     fireEvent.change(box(), { target: { value: "next thing", selectionStart: 10 } });
     fireEvent.click(await screen.findByRole("button", { name: "插话" }));
-    await screen.findByRole("button", { name: "取回" });
+    await screen.findByRole("button", { name: "撤回" });
     pane.send({ kind: "notice", level: "warn", audience: "operator", code: "x.y", text: "运行时提示" });
     await screen.findByText("运行时提示");
     expect(pill()).toBeTruthy();
-    expect(screen.getByRole("button", { name: "取回" }).closest(".composeaux")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "撤回" }).closest(".composeaux")).toBeTruthy();
     expect(pill()!.closest(".composeaux, .composenotes")).toBeNull();
     expect(document.querySelector(".composenotes")!.contains(screen.getByText("运行时提示"))).toBe(true);
   });

@@ -33,6 +33,7 @@ export function UserCard({
   port,
   cp,
   onResend,
+  onWithdraw,
   onPrepareRewind,
   onCommitRewind,
 }: {
@@ -40,6 +41,7 @@ export function UserCard({
   port?: Pick<AgentPort, "workspaceImageURL">;
   cp?: Checkpoint;
   onResend?: (turn: number, text: string) => Promise<void>;
+  onWithdraw?: (itemId: string) => void | Promise<void>;
   onPrepareRewind?: (turn: number, scope: RewindScope) => Promise<RewindPlan>;
   onCommitRewind?: (planId: string, text?: string) => Promise<RewindResult>;
 }) {
@@ -77,6 +79,21 @@ export function UserCard({
       .catch((e) => setFailed(reason(e)))
       .finally(() => setSending(false));
   };
+
+  if (item.pending && item.queued === "steer" && item.itemId && onWithdraw) {
+    const itemId = item.itemId;
+    return (
+      <div className="steerwait" data-pending="">
+        <div className="sw-hd">
+          {t("composer.steer_waiting")}
+          <button type="button" className="sw-undo" data-action="steer.withdraw" data-target={itemId} onClick={() => void onWithdraw(itemId)}>
+            {t("composer.withdraw")}
+          </button>
+        </div>
+        <div className="sw-txt" dir="auto">{item.text}</div>
+      </div>
+    );
+  }
 
   return (
     <div className="call" data-k="me" data-pending={item.pending ? "" : undefined}>

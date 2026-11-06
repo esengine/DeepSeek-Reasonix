@@ -13,8 +13,8 @@ interface Inputs {
   sessionPath?: string;
 }
 
-/** The outbox as the kernel holds it, and the eight things that can be done to
- *  a line still in it. Nothing here patches the snapshot: every edit is asked
+/** The outbox as the kernel holds it, and what can be done to a line still in
+ *  it: send it now, make it guidance, take it back, retry it. Nothing here patches the snapshot: every edit is asked
  *  of the kernel and the answer is read back whole, which is also what puts
  *  another window's lines in front of this one. */
 export function useQueueActions({ port, dispatch, fail, moved, sessionState = "settled", sessionPath }: Inputs) {
@@ -40,12 +40,31 @@ export function useQueueActions({ port, dispatch, fail, moved, sessionState = "s
   }, [port, moved, sessionState, sessionPath]);
   const taking = useRef(new Set<string>());
 
-  const onQueueEdit = useCallback((id: string, text: string) => void port.editQueued(id, text).catch(fail), [port, fail]);
-  const onQueueMove = useCallback((id: string, to: number) => void port.moveQueued(id, to).catch(fail), [port, fail]);
   const onQueueRetry = useCallback((id: string) => void port.retryQueued(id).catch(fail), [port, fail]);
-  const onQueueRefresh = useCallback((id: string) => void port.refreshQueued(id).catch(fail), [port, fail]);
   const onQueuePause = useCallback((on: boolean) => void port.setQueuePaused(on).catch(fail), [port, fail]);
-  const onQueueRead = useCallback((id: string) => port.readQueued(id), [port]);
+  // A follow-up becomes guidance by being taken back and said again as a steer;
+  // the steer the kernel cannot admit is converted to a follow-up, so the line
+  // is never lost. The body is read before the entry is given up.
+  const onQueueToSteer = useCallback(
+    async (item: QueueItem) => {
+      if (taking.current.has(item.id)) return;
+      taking.current.add(item.id);
+      try {
+        const text = await port.readQueued(item.id);
+        await port.cancelQueued(item.id);
+        dispatch({ kind: "__unsent", id: item.id } as never);
+        const id = localId();
+        dispatch({ kind: "__user", text, pending: true, id } as never);
+        const said = await port.steer(text);
+        if (said.itemId) dispatch({ kind: "__queued", id, itemId: said.itemId, queued: said.paused || said.disposition === "queued_followup" ? "followup" : "steer", paused: said.paused } as never);
+      } catch (e) {
+        fail(e);
+      } finally {
+        taking.current.delete(item.id);
+      }
+    },
+    [port, fail, dispatch],
+  );
   // Cancellation lets the dispatcher take the queue head. Accepted guidance
   // must leave the active turn and become a follow-up before that turn ends.
   const onQueueSendNow = useCallback(
@@ -90,5 +109,5 @@ export function useQueueActions({ port, dispatch, fail, moved, sessionState = "s
     },
     [port, fail, dispatch, onRestoreText],
   );
-  return { queue, restored, onRestoreText, onQueueEdit, onQueueMove, onQueueRetry, onQueueRefresh, onQueuePause, onQueueRead, onQueueSendNow, onQueueCancel };
+  return { queue, restored, onRestoreText, onQueueRetry, onQueuePause, onQueueToSteer, onQueueSendNow, onQueueCancel };
 }

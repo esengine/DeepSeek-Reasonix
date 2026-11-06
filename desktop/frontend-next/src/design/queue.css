@@ -1,2 +1,18 @@
-.qacts button.qnow { height: 24px; margin-left: 3px; padding: 0 10px; border: 1px solid var(--border); border-radius: var(--r-pill); background: var(--raised); color: var(--text); font: var(--w-reg) var(--fs-micro) var(--ui); white-space: nowrap; }
-.qacts button.qnow:hover:not(:disabled) { background: var(--overlay); color: var(--text); }
+.queue { display: flex; flex-direction: column; gap: 6px; margin: 0 0 8px; padding: 0; border: 0; }
+.queue .qi { display: flex; align-items: center; gap: 8px; min-width: 0; min-height: 0; padding: 6px 8px 6px 10px; border: 1px solid var(--hair); border-radius: var(--r-md); background: var(--page); font: var(--w-reg) var(--fs-meta)/1.35 var(--ui); color: var(--text); }
+.queue .qi:hover, .queue .qi:focus-within { background: var(--page); }
+.queue .ql { flex: none; font-weight: var(--w-med); color: var(--muted); white-space: nowrap; }
+.queue .ql[data-tone="warn"] { color: var(--warn-ink); }
+.queue .pv { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.queue .qwhy { flex: 0 1 24%; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); }
+.queue .qacts { display: flex; align-items: center; gap: 6px; flex: none; }
+.queue .qb { height: 20px; padding: 0 7px; border: 1px solid var(--border); border-radius: var(--r-pill); background: var(--raised); color: var(--text); font: var(--w-reg) var(--fs-micro)/1 var(--ui); white-space: nowrap; cursor: pointer; }
+.queue .qb:hover { background: var(--overlay); }
+.queue .qb:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+.steerwait { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; margin: 0 0 10px; }
+.steerwait .sw-hd { display: flex; align-items: center; gap: 6px; font: var(--w-med) var(--fs-micro)/1.35 var(--ui); color: var(--faint); }
+.steerwait .sw-undo { height: 20px; padding: 0 7px; border: 1px solid var(--border); border-radius: var(--r-pill); background: var(--raised); color: var(--text); font: var(--w-reg) var(--fs-micro)/1 var(--ui); cursor: pointer; }
+.steerwait .sw-undo:hover { background: var(--overlay); }
+.steerwait .sw-undo:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.steerwait .sw-txt { max-width: 80%; padding: 8px 12px; border: 1px dashed var(--border); border-radius: var(--r-md); background: var(--overlay); font: var(--w-reg) var(--fs-ui)/1.5 var(--ui); opacity: .8; white-space: pre-wrap; overflow-wrap: anywhere; }

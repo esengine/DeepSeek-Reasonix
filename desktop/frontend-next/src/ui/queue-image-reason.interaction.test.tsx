@@ -16,7 +16,7 @@ function rows(items: QueueItem[]) {
   const queue: QueueSnapshot = { revision: 1, paused: false, items, capacity: { items: items.length, maxItems: 64, bytes: 10, maxBytes: 64 << 20 } };
   const noop = () => {};
   const { container } = render(
-    <Queue queue={queue} running onRead={async () => ""} onEdit={noop} onMove={noop} onSendNow={noop} onCancel={noop} onRetry={noop} onRefresh={noop} onPause={noop} />,
+    <Queue queue={queue} running onSendNow={noop} onToSteer={noop} onCancel={noop} onRetry={noop} onPause={noop} />,
   );
   return container;
 }

@@ -43,11 +43,11 @@ describe("queued submission and withdrawal", () => {
     type(BODY);
     expect(screen.getByText("Enter 排队 · Shift+Enter 换行")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "排队发送" }));
-    await screen.findByRole("button", { name: "取回" });
+    await screen.findByRole("button", { name: "撤回" });
     expect(followup).toHaveBeenCalledWith(BODY, undefined);
     expect(steer).not.toHaveBeenCalled();
     expect((await port.queue()).items[0].intent).toBe("followup");
-    fireEvent.click(screen.getByRole("button", { name: "取回" }));
+    fireEvent.click(screen.getByRole("button", { name: "撤回" }));
     await waitFor(() => expect(box().value).toBe(BODY));
     fireEvent.click(screen.getByRole("radio", { name: "下个工具边界插话" }));
     expect(screen.getByRole("button", { name: "插话" })).toBeTruthy();
@@ -64,10 +64,10 @@ describe("queued submission and withdrawal", () => {
     expect(screen.queryByRole("button", { name: "立即发送" })).toBeNull();
     cleanup();
     render(<Pane {...props} port={port} />);
-    await screen.findByRole("button", { name: "取回" });
+    await screen.findByRole("button", { name: "撤回" });
     expect(box().value).toBe("");
     expect((await port.queue()).items[0].intent).toBe("followup");
-    fireEvent.click(screen.getByRole("button", { name: "取回" }));
+    fireEvent.click(screen.getByRole("button", { name: "撤回" }));
     await waitFor(() => expect(box().value).toBe(BODY));
   });
 
@@ -76,10 +76,10 @@ describe("queued submission and withdrawal", () => {
     vi.spyOn(port, "steer").mockImplementation((text) => port.queueFollowup(text));
     type(BODY);
     fireEvent.click(screen.getByRole("button", { name: "插话" }));
-    await screen.findByRole("button", { name: "取回" });
+    await screen.findByRole("button", { name: "撤回" });
     expect(box().value).toBe("");
     type(draft);
-    fireEvent.click(screen.getByRole("button", { name: "取回" }));
+    fireEvent.click(screen.getByRole("button", { name: "撤回" }));
     await waitFor(() => expect(box().value).toBe(draft && draft !== BODY ? `${draft}\n${BODY}` : BODY));
   });
 
@@ -165,20 +165,20 @@ describe("queued submission and withdrawal", () => {
     type(BODY);
     fireEvent.click(screen.getByRole("button", { name: "插话" }));
     await waitFor(() => expect(box().value).toBe(BODY));
-    expect(screen.queryByRole("button", { name: "取回" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "撤回" })).toBeNull();
   });
 
   it("pulls the queue after reload without filling the composer", async () => {
     const port = new MockPort();
     await port.queueFollowup(BODY);
     await open(port);
-    await screen.findByRole("button", { name: "取回" });
+    await screen.findByRole("button", { name: "撤回" });
     expect(box().value).toBe("");
     cleanup();
     render(<Pane {...props} port={port} />);
-    await screen.findByRole("button", { name: "取回" });
+    await screen.findByRole("button", { name: "撤回" });
     expect(box().value).toBe("");
-    fireEvent.click(screen.getByRole("button", { name: "取回" }));
+    fireEvent.click(screen.getByRole("button", { name: "撤回" }));
     await waitFor(() => expect(box().value).toBe(BODY));
   });
 

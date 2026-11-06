@@ -26,18 +26,16 @@ const snapshot = (over: Partial<QueueSnapshot> = {}): QueueSnapshot => ({
   ...over,
 });
 
-const paint = (q: QueueSnapshot, running: boolean) =>
+const paint = (q: QueueSnapshot, running: boolean, shown?: ReadonlySet<string>) =>
   renderToStaticMarkup(
     <Queue
       queue={q}
       running={running}
-      onRead={async () => ""}
-      onEdit={() => {}}
-      onMove={() => {}}
+      shown={shown}
       onSendNow={() => {}}
+      onToSteer={() => {}}
       onCancel={() => {}}
       onRetry={() => {}}
-      onRefresh={() => {}}
       onPause={() => {}}
     />,
   );
@@ -45,28 +43,43 @@ const paint = (q: QueueSnapshot, running: boolean) =>
 const draw = (q: QueueSnapshot) => paint(q, true);
 const drawIdle = (q: QueueSnapshot) => paint(q, false);
 
-describe("compact queue presentation", () => {
-  it("keeps action identities and order when edit and withdraw become icons", () => {
-    const html = draw(snapshot({ items: [item({ state: "queued" }), item({ id: "i2", state: "queued" })] }));
-    expect(html).toContain('title="编辑" aria-label="改"');
-    expect(html).toContain('title="取回" aria-label="取回"');
+describe("queue strip", () => {
+  it("draws one pill row per entry with the design's three actions in order", () => {
+    const html = draw(snapshot({ items: [item({ state: "queued", intent: "followup" }), item({ id: "i2", state: "queued", intent: "followup" })] }));
     const actions = [...html.matchAll(/data-action="([^"]+)"/g)].map((m) => m[1]);
-    expect(actions).toEqual(["queue.pause", "queue.move", "queue.move", "queue.edit", "queue.send-now", "queue.cancel",
-      "queue.move", "queue.move", "queue.edit", "queue.send-now", "queue.cancel"]);
+    expect(actions).toEqual(["queue.to-steer", "queue.send-now", "queue.cancel", "queue.to-steer", "queue.send-now", "queue.cancel"]);
+    expect(html).toContain("改为插话");
+    expect(html).toContain("立即发送");
+    expect(html).toContain("撤回");
+    expect(html).not.toContain("暂停派发");
     expect(html).not.toContain("draggable");
   });
 
   it("offers only send-now and withdraw on guidance the turn has already accepted", () => {
     const html = draw(snapshot({ items: [item(), item({ id: "i2" })] }));
     const actions = [...html.matchAll(/data-action="([^"]+)"/g)].map((m) => m[1]);
-    expect(actions).toEqual(["queue.pause", "queue.send-now", "queue.cancel", "queue.send-now", "queue.cancel"]);
+    expect(actions).toEqual(["queue.send-now", "queue.cancel", "queue.send-now", "queue.cancel"]);
   });
 
-  it("says paused once and preserves the resume control", () => {
+  it("numbers a follow-up by its place in the strip", () => {
+    const html = draw(snapshot({ items: [item({ state: "queued", intent: "followup" }), item({ id: "i2", state: "queued", intent: "followup" })] }));
+    expect(html).toContain("排队 1");
+    expect(html).toContain("排队 2");
+  });
+
+  it("offers no steer conversion on a line that carries a picture or frozen files", () => {
+    expect(draw(snapshot({ items: [item({ state: "queued", intent: "followup", images: true })] }))).not.toContain("queue.to-steer");
+    expect(draw(snapshot({ items: [item({ state: "queued", intent: "followup", refs: [{ path: "a.go" }] })] }))).not.toContain("queue.to-steer");
+  });
+
+  it("leaves out guidance the transcript already shows as its own bubble", () => {
+    expect(paint(snapshot(), true, new Set(["i1"]))).toBe("");
+  });
+
+  it("keeps the release control when the queue is held", () => {
     const html = draw(snapshot({ paused: true }));
-    expect(html).toContain("发送已暂停");
-    expect(html).not.toContain('data-hold');
     expect(html).toContain("继续派发");
+    expect(html).not.toContain("queue.send-now");
   });
 
   it("keeps long reasons in titles and limits inline reasons to held entries", () => {
@@ -152,19 +165,18 @@ describe("what the pending strip says back", () => {
   });
 
   it("names an accepted steer as taken, not as waiting", () => {
-    const html = draw(snapshot());
-    expect(html).toContain("插话已收");
-    expect(html).toContain('data-tone="accent"');
+    expect(draw(snapshot())).toContain("插话已收");
   });
 
-  it("keeps a queued follow-up apart from a steer the kernel took", () => {
+  it("says a queued follow-up is queued, not accepted", () => {
     const html = draw(snapshot({ items: [item({ intent: "followup", state: "queued" })] }));
-    expect(html).toContain("尚未送达，可以改，也可以取回");
+    expect(html).toContain("排队 1");
     expect(html).not.toContain("插话已收");
   });
 
+
   it("offers taking it back while that is still true", () => {
-    expect(draw(snapshot())).toContain("取回");
+    expect(draw(snapshot())).toContain("撤回");
   });
 
   // Past the tool boundary the text is the model's, and the kernel refuses the
@@ -187,39 +199,12 @@ describe("what the pending strip says back", () => {
     expect(drawIdle(snapshot())).not.toContain("立即发送");
   });
 
-  it("keeps technical capacity out of the ordinary one-line queue", () => {
-    const html = draw(snapshot());
-    expect(html).not.toContain("1/64");
-    expect(html).not.toContain("3.1k/64M");
-    expect(html).toContain("尚未送达，可以改，也可以取回");
-  });
 
   // Capacity becomes useful when it needs attention rather than occupying the
   // primary layout for every one-line follow-up.
-  it("reveals both capacity limits when either is under pressure", () => {
-    const html = draw(snapshot({ capacity: { items: 49, maxItems: 64, bytes: 3174, maxBytes: 64 << 20 } }));
-    expect(html).toContain("49/64");
-    expect(html).toContain("3.1k/64M");
-  });
 
-  it("draws each capacity limit as a labelled meter with its own value and maximum", () => {
-    const html = draw(snapshot({ capacity: { items: 64, maxItems: 64, bytes: 3174, maxBytes: 64 << 20 } }));
-    expect(html).toMatch(/role="meter" aria-label="条目" aria-valuemin="0" aria-valuemax="64" aria-valuenow="64" data-full="true"/);
-    expect(html).toMatch(/role="meter" aria-label="字节" aria-valuemin="0" aria-valuemax="67108864" aria-valuenow="3174"/);
-    expect(html).not.toMatch(/aria-label="字节"[^>]*data-full/);
-  });
 
-  it("draws no item meter when the queue has no item limit, only the byte one under pressure", () => {
-    const html = draw(snapshot({ capacity: { items: 300, maxItems: 0, bytes: 60 << 20, maxBytes: 64 << 20 } }));
-    expect(html).not.toContain("300/0");
-    expect(html).not.toMatch(/aria-label="条目" aria-valuemin/);
-    expect(html).toMatch(/role="meter" aria-label="字节"/);
-  });
 
-  it("shows no capacity strip for a long unlimited queue with room in the bytes", () => {
-    const html = draw(snapshot({ capacity: { items: 300, maxItems: 0, bytes: 3174, maxBytes: 64 << 20 } }));
-    expect(html).not.toContain('class="qcap"');
-  });
 
   it("renders nothing when there is nothing waiting and the queue is not held", () => {
     expect(draw(snapshot({ items: [], capacity: { items: 0, maxItems: 64, bytes: 0, maxBytes: 64 << 20 } }))).toBe("");
