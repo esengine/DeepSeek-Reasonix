@@ -10,7 +10,7 @@
 @media (max-width: 680px) { .compose { width: calc(100% - 24px); } }
 
 .compose .studio-runstate { box-sizing: border-box; min-height: 30px; gap: 8px; padding: 6px 12px 0; margin: 0; color: var(--muted); font: var(--w-reg) var(--fs-micro)/1.2 var(--ui); }
-.compose:not(:has(.changedpill)) .studio-runstate[data-idle] { display: none; }
+.compose:is(:not(:has(.changedpill)), :has(.composeaux > .posturenote)) .studio-runstate[data-idle] { display: none; }
 .compose .studio-runstate[data-idle] .studio-runlabel { visibility: hidden; }
 .compose .studio-runstate .studio-runlabel { display: inline-flex; align-items: center; gap: 6px; height: 22px; padding: 0 8px; box-sizing: border-box; border-radius: var(--r-sm); }
 .compose .studio-runstate:is([data-running], [data-waiting]) .studio-runlabel { background: var(--net-wash); color: var(--net-ink); font: var(--w-med) var(--fs-meta)/1 var(--ui); }
