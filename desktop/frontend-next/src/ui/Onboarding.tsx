@@ -8,6 +8,8 @@ import { KIND_LABEL, nameFrom } from "./vendors";
 import { hasVendorMark, VendorMark } from "./vendormarks";
 import { OnboardingDemo } from "./OnboardingDemo";
 import { RMark } from "./RMark";
+import { OnboardingProject, type ProjectChoice } from "./OnboardingProject";
+import { startRise } from "./firstRise";
 import { Picker } from "./Menu";
 import { WindowControls, zoomOnTitleBar } from "./WindowControls";
 
@@ -16,6 +18,8 @@ interface Props {
   setup: ProviderSetup;
   onDone: () => void;
   onSkip?: () => void;
+  // Which folder the work happens in. Without it setup ends at the model.
+  project?: ProjectChoice;
 }
 
 // Shortcuts fill the address, nothing more. A service missing from this row is
@@ -53,7 +57,7 @@ const SHORTCUTS: { label: string; hint: string; url: string; mark?: string; cons
 // address the person typed is ever asked how it is spoken to.
 const MODEL_LIST_MAX = 8;
 
-type Step = "welcome" | "connect" | "model";
+type Step = "welcome" | "connect" | "model" | "project";
 
 // The two failures nobody fixes in this window: the key is refused, or the
 // account behind it is out of credit. Both are settled on the vendor's site,
@@ -81,13 +85,14 @@ function failed(e: unknown): Failed {
 // it belongs to is the user's business, so this asks where and with what, then
 // lets the endpoint answer the rest — protocol, model list, image support are
 // all knowable by asking, and a person cannot be expected to know them.
-export function Onboarding({ port, setup, onDone, onSkip }: Props) {
+export function Onboarding({ port, setup, onDone, onSkip, project }: Props) {
   const [pick, setPick] = useState(SHORTCUTS[0].label);
   const [url, setUrl] = useState(SHORTCUTS[0].url);
   const [completed, setCompleted] = useState("");
   const [key, setKey] = useState("");
   const [busy, setBusy] = useState(false);
   const [connected, setConnected] = useState(false);
+  const [leaving, setLeaving] = useState(false);
   const [err, setErr] = useState<Failed | null>(setup.error ? { text: setup.error } : null);
   const [found, setFound] = useState<ProviderProbe | null>(null);
   const [catalog, setCatalog] = useState<Protocol[]>([]);
@@ -97,6 +102,13 @@ export function Onboarding({ port, setup, onDone, onSkip }: Props) {
   const [step, setStep] = useState<Step>("welcome");
   const [back, setBack] = useState(false);
   const go = (next: Step, backwards = false) => { setBack(backwards); setStep(next); };
+  // The card shrinks and fades before the conversation takes over, and the
+  // composer rises into the place it left.
+  const leave = (then: () => void) => {
+    setLeaving(true);
+    startRise();
+    window.setTimeout(then, matchMedia?.("(prefers-reduced-motion: reduce)").matches ? 0 : 240);
+  };
 
   useEffect(() => {
     void port.protocols().then(setCatalog).catch(() => setCatalog([]));
@@ -167,7 +179,10 @@ export function Onboarding({ port, setup, onDone, onSkip }: Props) {
       });
       await port.setModel(`${name}/${model}`);
       await port.setDefaultModel(`${name}/${model}`);
-      onDone();
+      if (project) {
+        setBusy(false);
+        go("project");
+      } else leave(onDone);
     } catch (e) {
       setErr(failed(e));
       setBusy(false);
@@ -193,7 +208,7 @@ export function Onboarding({ port, setup, onDone, onSkip }: Props) {
   const at = steps.findIndex(([id]) => id === step);
 
   return (
-    <div className="onb-stage">
+    <div className="onb-stage" data-leaving={leaving ? "" : undefined}>
       <header className="onb-brandbar" onDoubleClick={zoomOnTitleBar}>
         <span className="onb-lockup">
           <img className="onb-wordmark" src={logoWordmark} alt="Reasonix Studio" draggable={false} />
@@ -298,6 +313,10 @@ export function Onboarding({ port, setup, onDone, onSkip }: Props) {
               </div>
               {!custom && <p className="onb-note">{t("onboarding.address_filled_for_name", { name: t(pick), host: url.replace(/^https?:\/\//, "").replace(/\/.*$/, "") })}</p>}
             </>
+          )}
+
+          {step === "project" && project && (
+            <OnboardingProject project={project} onDone={() => leave(onDone)} onSkip={() => leave(onDone)} />
           )}
 
           {step === "model" && found && (

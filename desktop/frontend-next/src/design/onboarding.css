@@ -112,3 +112,20 @@
 @media (prefers-reduced-motion: reduce) {
   .onb-stage::before, .onb-stage::after, .onb-welcome-mark, .onb-welcome > *, .onb-demo * { animation: none !important; }
 }
+.onb-drop { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; min-height: 150px; padding: 20px; border: 1.5px dashed var(--border); border-radius: var(--r-md); background: transparent; color: var(--muted); font: var(--w-med) var(--fs-ui) var(--ui); text-align: center; transition: background-color 160ms var(--ease-out), border-color 160ms var(--ease-out); }
+.onb-drop > .studio-icon { width: 22px; height: 22px; color: var(--faint); }
+.onb-drop[data-over] { border-color: var(--accent); background: var(--overlay); animation: onb-dash 1.2s linear infinite; background-image: repeating-linear-gradient(45deg, transparent 0 8px, color-mix(in srgb, var(--accent) 6%, transparent) 8px 16px); background-size: 22.6px 22.6px; }
+.onb-drop[data-chosen] { border-style: solid; border-color: var(--accent); background: var(--raised); }
+.onb-chosen { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 2px 10px; max-width: 100%; text-align: start; animation: onb-land 260ms var(--ease-out) both; }
+.onb-chosen > .studio-icon { grid-row: 1 / span 2; width: 22px; height: 22px; color: var(--text); }
+.onb-chosen > b { color: var(--text); font: var(--w-semi) var(--fs-ui) var(--ui); }
+.onb-chosen > small { overflow: hidden; color: var(--faint); font: var(--w-reg) var(--fs-meta) var(--mono); text-overflow: ellipsis; white-space: nowrap; }
+@keyframes onb-dash { to { background-position: 22.6px 0; } }
+@keyframes onb-land { from { opacity: 0; transform: translateY(-12px) scale(.96); } }
+@keyframes onb-leave { to { opacity: 0; transform: scale(.94); } }
+@keyframes compose-rise { from { opacity: 0; transform: translateY(24px); } }
+.onb-stage[data-leaving] .onb-shell { animation: onb-leave 240ms ease-in forwards; }
+.compose[data-rise] { animation: compose-rise 320ms var(--ease-out) both; }
+@media (prefers-reduced-motion: reduce) {
+  .onb-drop[data-over], .onb-chosen, .onb-stage[data-leaving] .onb-shell, .compose[data-rise] { animation: none !important; }
+}

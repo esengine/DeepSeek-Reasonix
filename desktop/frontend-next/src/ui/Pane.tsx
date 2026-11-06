@@ -47,6 +47,7 @@ import { RunLine } from "./RunLine";
 import { AgentCompositionPicker } from "./AgentCompositionPicker";
 import type { PaneProps, PaneReport } from "./panetypes";
 import { TerminalHostContext } from "./terminal_host";
+import { isRising } from "./firstRise";
 import { useRate, useTrail } from "./num";
 import { useCompactNow } from "./CompactNow";
 import { DOCK, Gutter } from "./Gutter";
@@ -626,7 +627,7 @@ function PaneView({ port, hub, rt, title, active, visible, sideHost, side, onFoc
       {/* Keep the composer mounted so a half-written prompt survives a visit to
           analysis; hidden removes it from layout without throwing its state
           away. */}
-      <div className="compose" hidden={tab !== "flow"}>
+      <div className="compose" hidden={tab !== "flow"} data-rise={isRising() ? "" : undefined}>
         <span className="glowring" aria-hidden="true">
           <i />
         </span>

@@ -416,6 +416,8 @@ export const ACTIONS: UIAction[] = [
   { id: "capability.scope", kind: "kernel-mutation", target: "none", proof: "authority-effect" },
   { id: "model.select", kind: "kernel-mutation", target: "none", proof: "authority-effect" },
   { id: "network.save", kind: "kernel-mutation", target: "none", proof: "authority-effect" },
+  { id: "onboarding.pick-folder", kind: "view", target: "none", proof: "interaction" },
+  { id: "onboarding.start", kind: "kernel-mutation", target: "none", proof: "authority-effect" },
   { id: "onboarding.demo", kind: "view", target: "none", proof: "interaction" },
   { id: "onboarding.connect", kind: "kernel-mutation", target: "none", proof: "authority-effect" },
   { id: "transcript.scroll", kind: "view", target: "none", proof: "interaction" },

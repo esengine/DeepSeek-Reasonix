@@ -20,6 +20,7 @@ import { CompletionMenu, useCompletion } from "./Completion";
 import { ChipMirror, useSkillChips } from "./ChipMirror";
 import { useIme } from "./ime";
 import { usePlaceholderFit } from "./placeholderfit";
+import { useTypedPlaceholder } from "./firstRise";
 import { useFitHeight } from "./fitHeight";
 import { onComposerHintChange, showsComposerHint, useRunningMessageIntent, useSendShortcut } from "../state/prefs";
 import { runningSendIntent, sendAria, sendHint, sendsOnKey } from "./sendkey";
@@ -220,7 +221,8 @@ export function Composer({ port, status, running, queued = false, quote, restore
   useFitHeight(box, text, placeCaret);
   const showHint = useSyncExternalStore(onComposerHintChange, showsComposerHint, showsComposerHint);
   const fittedPlaceholder = usePlaceholderFit(box, queued ? [t("composer.keep_typing_to_queue_further"), t("composer.keep_typing"), "…"] : running ? [t("composer.you_can_keep_typing_while"), t("composer.keep_typing"), "…"] : [t("composer.describe_a_task_question_or"), t("composer.describe_a_task"), "…"]);
-  const placeholder = showHint ? fittedPlaceholder : "";
+  const typedPlaceholder = useTypedPlaceholder(fittedPlaceholder, text.length > 0);
+  const placeholder = showHint ? typedPlaceholder : "";
 
   // Attachments ride into the turn as path references, exactly as they do from
   // the CLI — the host saved the bytes, the turn parser resolves the token. A

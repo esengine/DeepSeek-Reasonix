@@ -531,7 +531,13 @@ export function App({ hub }: { hub: HubPort }) {
 
   const branchSession = useBranchSession({ panePorts, runtimes, runsRef, openPane });
 
-  const first = useFirstRun({ port: activePort, setup, welcomed, setSetup, setWelcomed, reloadPanes });
+  const first = useFirstRun({
+    port: activePort, setup, welcomed, setSetup, setWelcomed, reloadPanes,
+    project: {
+      pick: async () => (await hub.pickFolder()) || null,
+      add: async (dir) => { const workspace = await hub.addWorkspace(dir); await reloadTree(); await openPane({ root: workspace.root }); },
+    },
+  });
 
   if (setup === undefined || welcomed === undefined) return <div className="app" data-run="idle" />;
   if (first.gate) return first.gate;

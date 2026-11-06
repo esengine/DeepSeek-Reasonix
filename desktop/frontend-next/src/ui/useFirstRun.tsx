@@ -2,6 +2,7 @@ import { useState, type ReactNode } from "react";
 import type { AgentPort, ProviderSetup } from "../port/port";
 import type { ConnectOffer } from "./ConnectNote";
 import { Onboarding } from "./Onboarding";
+import type { ProjectChoice } from "./OnboardingProject";
 
 interface Args {
   port: AgentPort | null | undefined;
@@ -10,12 +11,13 @@ interface Args {
   setSetup: (next: ProviderSetup | null) => void;
   setWelcomed: (next: boolean) => void;
   reloadPanes: () => Promise<unknown> | void;
+  project?: ProjectChoice;
 }
 
 // The key prompt is owed until a provider exists, but putting it off is the
 // person's call for this launch only: the deferral lives in memory, so the next
 // start asks again.
-export function useFirstRun({ port, setup, welcomed, setSetup, setWelcomed, reloadPanes }: Args): { gate: ReactNode; connect?: ConnectOffer } {
+export function useFirstRun({ port, setup, welcomed, setSetup, setWelcomed, reloadPanes, project }: Args): { gate: ReactNode; connect?: ConnectOffer } {
   const [deferred, setDeferred] = useState(false);
   if (!setup?.required || welcomed === undefined || !port) return { gate: null };
   if (deferred) return { gate: null, connect: { none: !!setup.noProvider, open: () => setDeferred(false) } };
@@ -30,6 +32,7 @@ export function useFirstRun({ port, setup, welcomed, setSetup, setWelcomed, relo
       <Onboarding
         port={port}
         setup={setup}
+        project={project}
         onSkip={() => {
           setDeferred(true);
           settleWelcome();

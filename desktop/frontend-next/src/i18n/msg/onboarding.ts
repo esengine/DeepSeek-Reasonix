@@ -1,6 +1,8 @@
 import type { Messages } from "./types";
 
 export const ONBOARDING: Messages = {
+  "onboarding.choose_a_folder": { zh: "选择文件夹…", en: "Choose a folder…" },
+  "onboarding.choose_another": { zh: "换一个…", en: "Choose another…" },
   "onboarding.choose_the_default_model": { zh: "选默认模型", en: "Choose the default model" },
   "onboarding.common_services": { zh: "常用服务", en: "Common services" },
   "onboarding.connect": { zh: "连接", en: "Connect" },
@@ -11,6 +13,8 @@ export const ONBOARDING: Messages = {
   "onboarding.demo_read": { zh: "读取", en: "Read" },
   "onboarding.demo_run": { zh: "运行命令", en: "Run" },
   "onboarding.demo_thinking": { zh: "思考中", en: "Thinking" },
+  "onboarding.drop_a_folder_here": { zh: "把文件夹拖到这里", en: "Drop a folder here" },
+  "onboarding.drop_to_choose": { zh: "松手就选这个文件夹", en: "Let go to choose this folder" },
   "onboarding.every_step_stays_on_the": { zh: "每一步均可追溯。", en: "Every step stays on the record." },
   "onboarding.https_your_host_v1": { zh: "https://你的地址/v1", en: "https://your-host/v1" },
   "onboarding.local_first_credentials_stay_in": { zh: "本地优先 · 凭据由系统安全存储 · 连接前不会发送请求", en: "Local first · credentials stay in secure system storage · nothing is sent before you connect" },
@@ -26,6 +30,7 @@ export const ONBOARDING: Messages = {
   "onboarding.siliconflow": { zh: "硅基流动", en: "SiliconFlow" },
   "onboarding.welcome_to_reasonix": { zh: "欢迎使用 Reasonix。", en: "Welcome to Reasonix." },
   "onboarding.which_file_changed_which_command": { zh: "修改了哪个文件、运行了哪条命令、消耗了多少 token，均可回溯查看。", en: "Which file changed, which command ran, how many tokens it cost — all of it can be read back." },
+  "onboarding.which_project": { zh: "在哪个项目里干活？", en: "Which project will you work in?" },
   "onboarding.you_hand_it_a_task": { zh: "交付一项任务，由它完整执行。", en: "You hand it a task, and it sees the task through." },
   "onboarding.zhipu": { zh: "智谱", en: "Zhipu" },
   "onboarding.hand_it_a_task": { zh: "欢迎使用 Reasonix", en: "Welcome to Reasonix" },

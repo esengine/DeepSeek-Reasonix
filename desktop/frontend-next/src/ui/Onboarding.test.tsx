@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import "./testkit";
 import { MockPort } from "../port/mock";
@@ -35,7 +35,7 @@ describe("first-run setup", () => {
     await user.click(screen.getByRole("radio", { name: /deepseek-flash/ }));
     await user.click(screen.getByRole("button", { name: "继续" }));
     expect(save).toHaveBeenCalledWith(expect.objectContaining({ kind: "openai", baseUrl: "https://api.deepseek.com", default: "deepseek-flash", replace: true }));
-    expect(onDone).toHaveBeenCalled();
+    await waitFor(() => expect(onDone).toHaveBeenCalled());
   });
 
   it("asks a typed address how it is spoken to when it answers both ways, and saves the one chosen", async () => {
@@ -62,5 +62,34 @@ describe("first-run setup", () => {
     expect((screen.getByPlaceholderText("sk-…") as HTMLInputElement).value).toBe("sk-test");
     await user.click(screen.getByRole("button", { name: "稍后再说" }));
     expect(onSkip).toHaveBeenCalled();
+  });
+});
+
+describe("the project step", () => {
+  function drawWithProject() {
+    const port = new MockPort() as unknown as AgentPort;
+    port.saveProvider = vi.fn(async () => {});
+    const onDone = vi.fn();
+    const add = vi.fn(async (_dir: string) => {});
+    const pick = vi.fn(async () => "/work/demo");
+    render(<Onboarding port={port} setup={{ required: true, provider: "", model: "" }} onDone={onDone} project={{ pick, add }} />);
+    return { onDone, add, pick, user: userEvent.setup() };
+  }
+
+  it("asks which folder to work in after the model, and starts only once one is chosen", async () => {
+    const { onDone, add, user } = drawWithProject();
+    await user.click(screen.getByRole("button", { name: "开始设置" }));
+    await user.type(screen.getByPlaceholderText("sk-…"), "sk-test");
+    await user.click(screen.getByRole("button", { name: "连接" }));
+    await user.click(await screen.findByRole("button", { name: "继续" }, { timeout: 5000 }));
+    expect(await screen.findByRole("heading", { name: "在哪个项目里干活？" })).toBeTruthy();
+    const start = screen.getByRole("button", { name: "开始" }) as HTMLButtonElement;
+    expect(start.disabled).toBe(true);
+    await user.click(screen.getByRole("button", { name: "选择文件夹…" }));
+    expect(await screen.findByText("demo")).toBeTruthy();
+    expect(start.disabled).toBe(false);
+    await user.click(start);
+    await waitFor(() => expect(add).toHaveBeenCalledWith("/work/demo"));
+    await waitFor(() => expect(onDone).toHaveBeenCalled());
   });
 });
