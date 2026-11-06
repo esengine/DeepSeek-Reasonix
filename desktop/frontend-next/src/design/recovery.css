@@ -65,3 +65,10 @@
 .themeacts .btn.sm, .themeacts .btn.sm:hover { height: 24px; padding: 0 10px; border: 1px solid var(--border); border-radius: var(--r-pill); background: var(--raised); color: var(--text); font: var(--w-reg) var(--fs-meta)/1 var(--ui); }
 .themefail { display: flex; align-items: center; margin-top: 8px; padding: 10px 12px; border: 0; border-radius: var(--r-md); background: color-mix(in srgb, var(--warn) 12%, transparent); color: var(--text); font: var(--w-reg) var(--fs-ui)/1.55 var(--ui); }
 .pal-rm[data-confirming], .pal-rm.btn.sm[aria-busy] { color: var(--err-ink); }
+.srcfb { font: var(--w-reg) var(--fs-ui)/1.7 var(--ui); }
+.srcfb .srcfb-hd { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; color: var(--faint); font-size: var(--fs-meta); }
+.srcfb .srcfb-tag { display: inline-grid; place-items: center; height: 20px; padding: 0 7px; border-radius: var(--r-pill); background: var(--overlay); color: var(--muted); font: var(--w-reg) var(--fs-micro)/1 var(--ui); white-space: nowrap; }
+.srcfb .srcfb-src { padding: 10px 12px; border-radius: var(--r-md); background: var(--page); font: var(--w-reg) var(--fs-ui)/1.7 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+.toolfb { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border: 1px solid var(--border); border-radius: var(--r-md); font: var(--w-reg) var(--fs-ui)/1.5 var(--ui); color: var(--text); }
+.toolfb .toolfb-nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.toolfb .srcfb-tag { display: inline-grid; place-items: center; height: 20px; padding: 0 7px; border-radius: var(--r-pill); background: var(--overlay); color: var(--muted); font: var(--w-reg) var(--fs-micro)/1 var(--ui); white-space: nowrap; }

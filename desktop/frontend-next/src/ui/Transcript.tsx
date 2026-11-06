@@ -6,7 +6,7 @@ import type { ExtensionSurface } from "../port/wire";
 import type { AgentPort, ApprovalVerdict, Checkpoint, RewindPlan, RewindResult, RewindScope } from "../port/port";
 import { Hero } from "./Hero";
 import { Await } from "./Await";
-import { ToolCard } from "./cards/ToolCard";
+import { ToolCard } from "./cards/ToolCardSafe";
 import { Boundary } from "./Boundary";
 import { LazyChart } from "./chart/LazyChart";
 import { chartOfTool } from "./chart/spec";

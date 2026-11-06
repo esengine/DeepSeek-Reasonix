@@ -217,7 +217,7 @@ export function SayCard({ item, afterAnswer, settled = true, reply, quiet }: { i
                 e.preventDefault();
                 e.stopPropagation();
               }}>
-              <Boundary retryKey={item.text} fallback={<div className="md" style={{ whiteSpace: "pre-wrap" }}>{item.text}</div>}>
+              <Boundary retryKey={item.text} fallback={<div className="srcfb"><div className="srcfb-hd"><span className="srcfb-tag">{t("chat.shown_as_written")}</span><span>{t("chat.this_layout_did_not_show")}</span></div><div className="md srcfb-src">{item.text}</div></div>}>
                 <LazyMarkdown text={item.text} streaming={!item.done} local={reply?.files} />
               </Boundary>
             </div>

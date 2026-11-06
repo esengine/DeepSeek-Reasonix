@@ -52,3 +52,18 @@ describe("the import results follow the board", () => {
     expect(rule(".ns-dlg .ns-drop")).toMatch(/border:\s*1px dashed var\(--border\)/);
   });
 });
+
+describe("the as-written fallback follows the board", () => {
+  it("tags the source in a 20px pill and sets it in the mono face on the page surface", () => {
+    expect(rule(".srcfb .srcfb-tag")).toMatch(/height:\s*20px/);
+    expect(rule(".srcfb .srcfb-src")).toMatch(/var\(--mono\)/);
+    expect(rule(".srcfb .srcfb-src")).toMatch(/background:\s*var\(--page\)/);
+  });
+});
+
+describe("the simplified tool card follows the board", () => {
+  it("is a one-line hairline row with the tag at its end", () => {
+    expect(rule(".toolfb")).toMatch(/border-radius:\s*var\(--r-md\)/);
+    expect(rule(".toolfb .toolfb-nm")).toMatch(/white-space:\s*nowrap/);
+  });
+});
