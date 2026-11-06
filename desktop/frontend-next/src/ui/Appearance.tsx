@@ -1,7 +1,7 @@
 import { ApplyNote } from "./Group";
-import { SettingDeep } from "./SettingDeep";
-import { useCallback, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from "react";
-import { effectsMode, onEffectsChange, setEffectsMode, type EffectsMode } from "../state/prefs";
+import { SettingDeep, SettingDeepContext } from "./SettingDeep";
+import { useCallback, useContext, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from "react";
+import { effectsMode, onEffectsChange, setEffectsMode } from "../state/prefs";
 import type { AgentPort, Appearance as Look, ThemePack } from "../port/port";
 import { SIZE_STEPS, ZOOM_PRESETS } from "./zoom";
 import { chord } from "./keys";
@@ -14,7 +14,8 @@ import { useCrop } from "./useCrop";
 import { WindowSection } from "./WindowSection";
 import { GraphicsSection } from "./GraphicsSection";
 import { SectionCard } from "./SectionCard";
-import { SegChoice, SettingRow } from "./SettingRow";
+import { PillButton, SegChoice, SettingRow } from "./SettingRow";
+import { Switch } from "./Switch";
 import { ThemeModeRow } from "./ThemeModeRow";
 import { ThemeImport } from "./ThemeImport";
 import { ThemeRemove } from "./ThemeRemove";
@@ -62,11 +63,6 @@ const MEASURES: [string, string, string][] = [
   ["custom", "look.custom_percentage", "look.set_the_conversation_and_composer"],
 ];
 
-const EFFECTS: [EffectsMode, string, string][] = [
-  ["full", "look.full", "look.background_blur_the_animated_sky"],
-  ["reduced", "look.reduced", "look.turns_off_background_blur_the"],
-];
-
 const CONTRASTS: [string, string, string][] = [
   ["", "look.follow_the_system", "look.uses_the_strongest_step_when"],
   ["soft", "look.soft", "look.softer_body_text_easier_over"],
@@ -84,6 +80,7 @@ export const WALLPAPER_ACCEPT = "image/png,image/jpeg,image/webp,image/avif,imag
 export function Appearance({ port, theme, onTheme, contrast, onContrast, weight, onWeight, reloadThemes, look, onLook }: Props) {
   const { packs, unread, load } = useThemeInventory(port);
   const effects = useSyncExternalStore(onEffectsChange, effectsMode);
+  const deep = useContext(SettingDeepContext);
 
   // Activating repaints through App's own theme effect, so this only refreshes
   // the list and asks App to re-read which pack is active.
@@ -387,9 +384,14 @@ export function Appearance({ port, theme, onTheme, contrast, onContrast, weight,
 
         </SettingDeep>
         <SettingRow id="effects" title={t("look.visual_effects")} desc={t("settings.frosted_glass_glow_effects")}>
-          <SegChoice<EffectsMode> label={t("look.visual_effects")} value={effects} action="appearance.effects" onPick={setEffectsMode}
-            options={EFFECTS.map(([id, name]) => [id, t(name)] as const)} />
+          <Switch on={effects === "full"} label={t("look.visual_effects")} data-action="appearance.effects" data-value={effects}
+            onClick={() => setEffectsMode(effects === "full" ? "reduced" : "full")} />
         </SettingRow>
+        {deep.pages && (
+          <SettingRow id="advanced-look" title={t("look.advanced_look")} desc={t("look.import_themes_custom_colours")}>
+            <PillButton action="settings.open-page" target="scheme" onClick={() => deep.go("scheme")}>{t("look.advanced_look")}</PillButton>
+          </SettingRow>
+        )}
       </SectionCard>
       <SectionCard title={t("settings.text_card")}>
         <SettingDeep id="font" title={t("look.typeface")} hint={t("settings.interface_and_code_typeface")} act={t("settings.change")}>

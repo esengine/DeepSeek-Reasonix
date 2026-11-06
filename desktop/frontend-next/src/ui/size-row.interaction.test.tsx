@@ -62,3 +62,12 @@ describe("the size row on the appearance page", () => {
     expect(go).toHaveBeenCalledWith("size");
   });
 });
+
+describe("the advanced appearance row", () => {
+  it("opens the page that holds theme import and custom colours", async () => {
+    const { go } = draw();
+    expect(screen.getByText("导入主题、自定义颜色")).toBeTruthy();
+    await userEvent.click(screen.getByRole("button", { name: "高级外观" }));
+    expect(go).toHaveBeenCalledWith("scheme");
+  });
+});
