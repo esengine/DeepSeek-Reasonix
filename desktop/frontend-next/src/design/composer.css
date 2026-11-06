@@ -167,3 +167,14 @@
 .slashmenu .mi .ds ~ .ds { flex-basis: 100%; padding-left: 96px; font-size: var(--fs-meta); color: var(--faint); }
 .slashmenu .mi[data-on]::before { content: none; }
 .slashmenu .mi[data-kind="builtin"] .rt, .slashmenu .mi[data-kind="file"] .rt, .slashmenu .mi[data-kind="dir"] .rt { display: none; }
+.compose .refine-card { display: block; margin: 10px 12px 0; padding: 0; overflow: hidden; border: 1px solid var(--border); border-radius: var(--r-md); background: var(--raised); }
+.compose .refine-card:is([data-phase="ready"], [data-phase="failed"]) { border-color: var(--accent); }
+.compose .refine-card > header { gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--hair); font: var(--w-semi) var(--fs-ui)/1.4 var(--ui); }
+.compose .refine-card > header small { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.compose .refine-card .refine-text { max-height: 240px; padding: 10px 12px; font: var(--w-med) var(--fs-ui)/1.75 var(--ui); }
+.compose .refine-card :is(.refine-wait, .refine-error) { padding: 10px 12px; }
+.compose .refine-card > footer { gap: 6px; padding: 8px 12px; border-top: 1px solid var(--hair); background: var(--page); }
+.compose .refine-card .refine-original { font: var(--w-med) var(--fs-meta)/1.4 var(--ui); text-decoration: line-through; }
+.compose .refine-card > footer .btn { height: 32px; padding: 0 14px; border: 1px solid var(--border); border-radius: var(--r-sm); background: var(--raised); color: var(--text); font: var(--w-med) var(--fs-ui)/1 var(--ui); }
+.compose .refine-card > footer .btn[data-primary] { border-color: var(--accent); background: var(--accent); color: var(--accent-fg); }
+.compose .refine-card > footer .btn[data-weak] { height: 24px; padding: 0 10px; border-color: transparent; border-radius: var(--r-pill); background: transparent; color: var(--muted); font: var(--w-med) var(--fs-meta)/1 var(--ui); }
