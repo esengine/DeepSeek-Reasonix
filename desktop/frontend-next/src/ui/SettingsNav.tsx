@@ -72,6 +72,7 @@ export function SettingsTitle({ at }: { at: Section }) {
           {count > 0 && <span className="count">{t("settings.n_items", { n: count })}</span>}
         </span>
       )}
+      <p className="usual">{t("settings.page_usual")}</p>
     </div>
   );
 }

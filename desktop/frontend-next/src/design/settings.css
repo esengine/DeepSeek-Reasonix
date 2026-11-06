@@ -424,3 +424,15 @@
 @container prefsmain (min-width: 860px) {
   .prefs-main:has(.prefs-col[data-cols="2"]) > .prefs-pagetitle { max-width: 1160px; }
 }
+.apply[data-usual] { display: none; }
+.prefs-card > .grp > .apply { display: none; }
+.scope-tag { display: inline-grid; place-items: center; height: 18px; padding: 0 7px; border-radius: var(--r-pill); background: var(--overlay); color: var(--muted); font: var(--w-reg) var(--fs-micro)/1 var(--ui); white-space: nowrap; }
+.prefs-card > .grp { padding-block: 6px; min-height: 36px; box-sizing: border-box; }
+.prefs-card > .srow { padding-block: 6px; min-height: 36px; box-sizing: border-box; }
+.prefs-card > .grp > .hint, .srow-desc { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.prefs-card > .grp > .hint { margin: 0; line-height: 1.4; }
+.prefs-card > .grp > .grp-hd { display: flex; align-items: center; gap: 8px; }
+.prefs-pagetitle { flex-wrap: wrap; }
+.prefs-pagetitle > .usual { flex-basis: 100%; margin: 0; color: var(--faint); font: var(--w-reg) var(--fs-meta)/1.4 var(--ui); }
+.srow-name { display: flex; align-items: center; gap: 8px; }
+.srow-meta > .apply:not([data-usual]) { display: none; }

@@ -17,10 +17,11 @@ export function Group({
     <section className="grp" id={`set-${id}`} data-setting={id} data-inline={inline ? "" : undefined}>
       <div className="grp-hd">
         <h3>{title}</h3>
+        <ScopeTag id={id} />
         {now && <span className="now">{now}</span>}
         {action}
       </div>
-      {hint && <p className="hint">{hint}</p>}
+      {hint && <p className="hint" title={hint}>{hint}</p>}
       {children && <div className="grp-items">{children}</div>}
       {/* A fact about this block, at the weight of a fact: what it costs to
           change is not a warning, and three of them on a page should not read
@@ -45,10 +46,23 @@ export function ApplyNote({ id }: { id: string }) {
   // One text node: .apply is a flex row, and separate children would take the
   // row's gap on both sides of the separator.
   return (
-    <p className="apply" data-apply={entry.apply} data-scope={entry.scope}>
+    <p className="apply" data-apply={entry.apply} data-scope={entry.scope} data-usual={isUsual(entry) ? "" : undefined}>
       {[t(SCOPE_SAID[entry.scope]), apply].filter(Boolean).join(" · ")}
     </p>
   );
+}
+
+// This machine, in force at once, is what nearly every setting is, so it is
+// said once at the top of the page; only a block that differs says so.
+const isUsual = (entry: { scope: SettingScope; apply: string }) =>
+  entry.scope === "machine" && (entry.apply === "immediate" || entry.apply === "none");
+
+/** What a block does differently from the page's usual, beside its name. */
+export function ScopeTag({ id }: { id: string }) {
+  const entry = SETTING_AT(id);
+  if (!entry || isUsual(entry)) return null;
+  const said = [entry.scope === "machine" ? null : t(SCOPE_SAID[entry.scope]), entry.apply === "immediate" || entry.apply === "none" ? null : t(APPLY_SAID[entry.apply])];
+  return <span className="scope-tag">{said.filter(Boolean).join(" · ")}</span>;
 }
 
 /** Whose setting this is. A fact, at the weight of a fact — no accent, no chip:

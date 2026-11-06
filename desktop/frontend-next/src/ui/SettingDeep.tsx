@@ -1,6 +1,6 @@
 import { createContext, useContext, type ReactNode } from "react";
 import { t } from "../i18n";
-import { ApplyNote } from "./Group";
+import { ApplyNote, ScopeTag } from "./Group";
 import { SETTING_AT } from "./prefsnav";
 import { StudioIcon } from "./StudioIcon";
 
@@ -26,8 +26,8 @@ export function SettingDeep({ id, title, now, hint, act, children }: { id: strin
     return (
       <div className="srow" id={`set-${id}`} data-setting={id}>
         <div className="srow-meta">
-          <span className="srow-name">{title}</span>
-          {hint && <span className="srow-desc">{hint}</span>}
+          <span className="srow-name">{title}<ScopeTag id={id} /></span>
+          {hint && <span className="srow-desc" title={hint}>{hint}</span>}
           <ApplyNote id={id} />
         </div>
         <div className="srow-ctl">

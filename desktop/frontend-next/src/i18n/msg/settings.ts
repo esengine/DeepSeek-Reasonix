@@ -110,6 +110,7 @@ export const SETTINGS: Messages = {
   "settings.opening": { zh: "正在打开…", en: "Opening…" },
   "settings.other_sections_and_your_session": { zh: "其他分区与当前会话不受影响；关闭设置后重新打开可重试。", en: "Other sections and your session are unaffected; close Settings and reopen to try again." },
   "settings.outside_text": { zh: "外部文字", en: "Outside text" },
+  "settings.page_usual": { zh: "本页设置默认：本机，立即生效；例外的在名字旁标出", en: "Settings here apply on this machine at once; exceptions are marked beside the name" },
   "settings.palette": { zh: "配色", en: "Palette" },
   "settings.permissions_and_safety": { zh: "权限与安全", en: "Permissions and safety" },
   "settings.persona": { zh: "人设", en: "Persona" },
