@@ -1687,8 +1687,6 @@ export const EN: Record<string, string> = {
   "工作模式": "Work mode",
   "执行任务并使用已启用工具": "Run tasks with enabled tools",
   "先整理步骤，不写入文件": "Plan steps before changing files",
-  "直接回答，不调用工具": "Answer directly without tools",
-  "Ask（未实现）": "Ask (Not implemented)",
   "当前 Git 分支": "Current Git branch",
   "后续任务会继续使用这个分支": "Later tasks will continue on this branch",
   "由模型自动选择": "Let the model choose",

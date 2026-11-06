@@ -681,14 +681,13 @@ export function Composer({ port, status, running, queued = false, quote, restore
             ariaPressed={status?.plan ?? false}
             place="bottom"
             title={t("composer.work_mode")}
-            menuClassName="composer-menu"
+            menuClassName="composer-menu mode-menu"
             current={status?.plan ? "plan" : "agent"}
             pending={busy["plan"]}
             items={[
               { value: "__mode", label: t("composer.work_mode"), right: t("common.current_task"), header: true },
               { value: "agent", label: "Agent", desc: t("composer.run_tasks_with_enabled_tools") },
               { value: "plan", label: "Plan", desc: t("composer.plan_steps_before_changing_files") },
-              { value: "ask", label: t("composer.ask_not_implemented"), desc: t("composer.answer_directly_without_tools"), disabled: true },
             ]}
             onPick={(value) => change("plan", () => port.setPlanMode(value === "plan"))}
             label={<><StudioIcon name="agent" /><span className="studio-sr-label">{t("common.plan")}</span><span>{status?.plan ? "Plan" : "Agent"}</span><StudioIcon name="down" /></>}
