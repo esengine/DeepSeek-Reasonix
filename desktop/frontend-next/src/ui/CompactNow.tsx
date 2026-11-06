@@ -8,7 +8,7 @@ const tokenLabel = (n: number): string =>
   n >= 1_000_000
     ? `${(n / 1_000_000).toFixed(1)}M`
     : n >= 1_000
-      ? `${Math.round(n / 100) / 10}k`
+      ? `${Math.round(n / 100) / 10}K`
       : String(n);
 
 export interface CompactAction {
