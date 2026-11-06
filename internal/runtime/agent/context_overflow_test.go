@@ -76,7 +76,6 @@ func TestContextOverflowRejectionFoldsAndReplays(t *testing.T) {
 	session := foldableSessionOverForce(20)
 	a := New(prov, tool.NewRegistry(), session, Options{
 		ContextWindow: 40_000,
-		RecentKeep:    2,
 		ArchiveDir:    testenv.TempDir(t),
 	}, event.Discard)
 
@@ -106,7 +105,6 @@ func TestContextOverflowProbesAnUndeclaredWindow(t *testing.T) {
 	)
 	session := foldableSessionOverForce(60)
 	a := New(prov, tool.NewRegistry(), session, Options{
-		RecentKeep: 2,
 		ArchiveDir: testenv.TempDir(t),
 	}, event.Discard)
 	if got := a.window().effectiveContextWindow(); got != 0 {
@@ -157,7 +155,6 @@ func TestContextOverflowRecoveryIsOneShotPerRound(t *testing.T) {
 	session := foldableSessionOverForce(20)
 	a := New(prov, tool.NewRegistry(), session, Options{
 		ContextWindow: 40_000,
-		RecentKeep:    2,
 		ArchiveDir:    testenv.TempDir(t),
 	}, event.Discard)
 
@@ -193,7 +190,6 @@ func TestCodelessRejectionPastTheWindowWithItsCompletionFoldsAndReplays(t *testi
 		ContextWindow:   12_000,
 		MaxOutputTokens: 4_000,
 		CompactRatio:    0.99,
-		RecentKeep:      2,
 		ArchiveDir:      testenv.TempDir(t),
 	}, event.Discard)
 	if est := a.window().estimatedPromptTokens(session.Snapshot()); est >= 12_000 || est+4_000 <= 12_000 {
@@ -227,7 +223,6 @@ func TestCodelessRejectionOnASharedWindowFoldsAndReplays(t *testing.T) {
 		ContextWindow:   20_000,
 		MaxOutputTokens: 4_000,
 		CompactRatio:    0.99,
-		RecentKeep:      2,
 		ArchiveDir:      testenv.TempDir(t),
 	}, event.Discard)
 	if est := a.window().estimatedPromptTokens(session.Snapshot()); est >= 20_000 || est+4_000 >= 20_000 || est+4_000+outputBudgetReserveFor(20_000) <= 20_000 {

@@ -24,7 +24,7 @@ func projectionWithLiveTail(t *testing.T) (*Agent, *sessionstore.Session, int) {
 	}
 	dir := testenv.TempDir(t)
 	a := New(&fakeProvider{reply: "digest"}, tool.NewRegistry(), sess, Options{
-		ContextWindow: 2000, RecentKeep: 2, ArchiveDir: dir,
+		ContextWindow: 2000, ArchiveDir: dir,
 		SessionPath: filepath.Join(dir, "s.jsonl"), WorkspaceID: "ws", ModelRef: "m",
 	}, event.Discard)
 	if _, err := a.CompactNow(context.Background(), CompactRequest{}); err != nil {

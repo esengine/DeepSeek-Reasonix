@@ -129,7 +129,7 @@ func TestRefusedOverWindowReadsStatusAndSizeNotWords(t *testing.T) {
 func TestProseOnlyOverflowRefusalFoldsAndReplays(t *testing.T) {
 	prov := testutil.NewMock("mock")
 	a := New(prov, tool.NewRegistry(), foldableSessionOverForce(20), Options{
-		ContextWindow: 40_000, RecentKeep: 2, ArchiveDir: testenv.TempDir(t),
+		ContextWindow: 40_000, ArchiveDir: testenv.TempDir(t),
 	}, event.Discard)
 	w := a.window()
 	refused := &samplingRequest{req: provider.Request{Messages: []provider.Message{{Role: provider.RoleUser, Content: strings.Repeat("x", 4*45_000)}}}}

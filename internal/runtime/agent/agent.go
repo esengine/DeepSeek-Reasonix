@@ -370,7 +370,6 @@ type Agent struct {
 
 	// Context management keeps the canonical transcript immutable and installs
 	// at most one provider-visible checkpoint each time compactRatio is crossed.
-	keepPolicy             KeepPolicy
 	strictAlternatingRoles bool // coalesce adjacent user turns on provider request copies
 	// activeTurnCreatedAt identifies the real/synthetic user message that began
 	// the currently running turn. Compaction may rewrite older history while a
@@ -378,15 +377,6 @@ type Agent struct {
 	// verbatim so cancellation/crash recovery can retain completed tool pairs.
 	activeTurnCreatedAt atomic.Int64
 }
-
-// KeepPolicy is a bitmask controlling which messages are preserved beyond the
-// recent tail during compaction.
-type KeepPolicy int
-
-const (
-	KeepErrors KeepPolicy = 1 << iota
-	KeepUserMarked
-)
 
 // SetPlanMode enters or leaves the plan-first workflow. Ordinary calls still
 // use Permissions/Sandbox; only explicit phase opt-outs are refused. The system
@@ -640,9 +630,6 @@ func New(prov provider.Provider, tools *tool.Registry, session *sessionstore.Ses
 	if opts.CompactRatio <= 0 {
 		opts.CompactRatio = defaultCompactRatio
 	}
-	if opts.RecentKeep <= 0 {
-		opts.RecentKeep = minRecentKeep
-	}
 	if nilutil.IsNil(sink) {
 		sink = event.Discard
 	}
@@ -709,7 +696,6 @@ func New(prov provider.Provider, tools *tool.Registry, session *sessionstore.Ses
 			providerRetries:         opts.ProviderRetries,
 			contextWindow:           opts.ContextWindow,
 			compactRatio:            opts.CompactRatio,
-			recentKeep:              opts.RecentKeep,
 			budgets:                 opts.CompactionBudgets,
 			archiveDir:              opts.ArchiveDir,
 		},
@@ -731,7 +717,6 @@ func New(prov provider.Provider, tools *tool.Registry, session *sessionstore.Ses
 		ablation:               opts.Ablation,
 		capabilityLedger:       opts.CapabilityLedger,
 		capabilityAudit:        opts.CapabilityAudit,
-		keepPolicy:             opts.KeepPolicy,
 		strictAlternatingRoles: opts.StrictAlternatingRoles,
 	}
 	a.sess.output.outputBudget = outputBudgetOf(prov)

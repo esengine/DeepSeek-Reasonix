@@ -29,7 +29,7 @@ func (a *contextWindow) acceptAttributed(trigger string, scope compactionScope, 
 // candidate cannot get under the trigger whatever the summary says: the fixed
 // prefix, the messages the keep policy protects and the recent tail already
 // reach it.
-func (a *contextWindow) foldCannotFit(trigger string, msgs []provider.Message, head, start int, policy KeepPolicy) (CompactionNoopReason, error) {
+func (a *contextWindow) foldCannotFit(trigger string, msgs []provider.Message, head, start int) (CompactionNoopReason, error) {
 	prefix := a.estimatedPromptTokens(a.providerProjectionMessages(msgs[:head]))
 	limit := a.compactTrigger()
 	if a.effectiveContextWindow() <= 0 || limit <= 0 {
@@ -41,7 +41,7 @@ func (a *contextWindow) foldCannotFit(trigger string, msgs []provider.Message, h
 	if trigger == CompactionTriggerManual && a.estimatedPromptTokens(msgs) < limit {
 		return "", nil
 	}
-	kept, _, _, _ := a.partitionFoldWith(msgs[head:start], msgs[start:], policy)
+	kept, _ := a.partitionFold(msgs[head:start], msgs[start:])
 	held := candidateHolds{Prefix: prefix, Kept: a.estimatedPromptTokens(kept), Tail: a.estimatedPromptTokens(msgs[start:])}
 	if held.Prefix+held.Kept+held.Tail < limit {
 		return "", nil

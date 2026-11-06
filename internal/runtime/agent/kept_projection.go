@@ -35,27 +35,8 @@ func supersedeStandingState(kept, tail []provider.Message) []provider.Message {
 	return kept
 }
 
-// StripSupersededUserBlocks is the floor a retained turn can shrink to, with
-// every standing block gone. keepUserTurns costs turns against this floor: at
-// most one copy of each variant survives the whole fold, so the error is those
-// few blocks rather than one per turn.
-func StripSupersededUserBlocks(content string) string {
-	return filterLeadingBlocks(content, func(tag, _ string) bool {
-		return sessionstore.SupersededUserBlock[tag]
-	})
-}
-
 func carriesStandingState(m provider.Message) bool {
 	return m.Role == provider.RoleUser && !m.LocalOnly && !isCompactionSummary(m)
-}
-
-// projectedUserTurnFloor is what keepUserTurns measures a retained turn as.
-func projectedUserTurnFloor(m provider.Message) provider.Message {
-	if !carriesStandingState(m) {
-		return m
-	}
-	m.Content = StripSupersededUserBlocks(m.Content)
-	return m
 }
 
 // filterLeadingBlocks walks the host-injected block chain that opens content and

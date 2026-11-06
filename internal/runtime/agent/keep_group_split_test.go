@@ -30,54 +30,6 @@ func batch(round, reads int, readBody string) []provider.Message {
 		Content: goTestFailure(), ToolExecution: &provider.ToolExecution{ExitCode: &exit}})
 }
 
-// A failure is evidence about its own call. Keeping it must not pin the reads
-// that ran beside it, and what stays has to be a valid transaction on its own.
-func TestFailurePinsOnlyItsOwnCall(t *testing.T) {
-	a := &Agent{}
-	a.keepPolicy = KeepErrors
-	region := append([]provider.Message{{Role: provider.RoleUser, Content: "go"}}, batch(0, 6, strings.Repeat("source line\n", 400))...)
-	kept, fold, _, _ := a.window().partitionFoldForProjection(region)
-
-	var keptResults, keptCalls int
-	for _, m := range kept {
-		if m.Role == provider.RoleTool {
-			keptResults++
-		}
-		keptCalls += len(m.ToolCalls)
-	}
-	if keptResults != 1 || keptCalls != 1 {
-		t.Fatalf("kept %d calls and %d results, want only the failed pair", keptCalls, keptResults)
-	}
-	for _, m := range provider.ModelMessages(kept) {
-		if strings.Contains(m.Content, "interrupted") {
-			t.Fatalf("the kept assistant turn still issues a call nothing answers: %q", m.Content)
-		}
-	}
-	rendered := renderTranscript(fold)
-	if strings.Count(rendered, "[assistant calls read_file]") != 6 || strings.Count(rendered, "[tool read_file result]") != 6 {
-		t.Fatalf("the reads did not reach the summarizer with their calls:\n%s", rendered)
-	}
-}
-
-// The folded siblings keep their calls, because the digest's coverage guard
-// reads changed files and failed commands from the calls the fold holds.
-func TestFoldedSiblingsKeepTheirCalls(t *testing.T) {
-	a := &Agent{}
-	a.keepPolicy = KeepErrors
-	region := []provider.Message{{Role: provider.RoleUser, Content: "go"}}
-	region = append(region, batch(0, 2, "body")...)
-	_, fold, _, _ := a.window().partitionFoldForProjection(region)
-	var calls []string
-	for _, m := range fold {
-		for _, tc := range m.ToolCalls {
-			calls = append(calls, tc.ID)
-		}
-	}
-	if len(calls) != 2 || calls[0] != "r0-0" || calls[1] != "r0-1" {
-		t.Fatalf("fold holds calls %v, want the two reads", calls)
-	}
-}
-
 // One failing call batched with many reads used to pin the whole batch, so the
 // candidate exceeded the ceiling and a billed summary was thrown away.
 func TestFailingBatchDoesNotBlockTheFold(t *testing.T) {
@@ -92,8 +44,7 @@ func TestFailingBatchDoesNotBlockTheFold(t *testing.T) {
 		}
 	})
 	a := New(&fakeProvider{reply: "## Goal\ndigest"}, tool.NewRegistry(), sess,
-		Options{ContextWindow: 20000, CompactRatio: 0.8, RecentKeep: 2,
-			KeepPolicy: KeepErrors, ArchiveDir: testenv.TempDir(t)}, sink)
+		Options{ContextWindow: 20000, CompactRatio: 0.8, ArchiveDir: testenv.TempDir(t)}, sink)
 	for round := range 3 {
 		for _, m := range batch(round, 8, strings.Repeat("source line with detail\n", 85)) {
 			sess.Add(m)
@@ -124,8 +75,7 @@ func TestRetainedFailuresYieldWhenTheyAloneExceedTheCeiling(t *testing.T) {
 	}}
 	prov := &fakeProvider{reply: "## Goal\ndigest"}
 	a := New(prov, tool.NewRegistry(), sess,
-		Options{ContextWindow: 20000, CompactRatio: 0.8, RecentKeep: 2, KeepPolicy: KeepErrors,
-			CompactionBudgets: CompactionBudgets{CheckpointCeilingRatio: 0.12}, ArchiveDir: testenv.TempDir(t)}, event.Discard)
+		Options{ContextWindow: 20000, CompactRatio: 0.8, CompactionBudgets: CompactionBudgets{CheckpointCeilingRatio: 0.12}, ArchiveDir: testenv.TempDir(t)}, event.Discard)
 	for round := range 40 {
 		for _, m := range batch(round, 0, "") {
 			sess.Add(m)

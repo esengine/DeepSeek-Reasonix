@@ -103,10 +103,6 @@ func newHarness(t *testingDir, p provider.Provider, window int, rec *callRecorde
 		ContextWindow: window,
 		ArchiveDir:    filepath.Join(t.dir, "archive"),
 		SessionPath:   path,
-		RecentKeep:    4,
-		// boot's default when cfg.Agent.Keep is unset; without it the bench
-		// would measure a configuration no real session runs.
-		KeepPolicy: agent.KeepErrors,
 	}, rec.sink())
 	return &harness{sess: sess, agentA: a, path: path, calls: rec}
 }

@@ -27,7 +27,6 @@ import (
 	"reasonix/internal/contract/tool"
 	"reasonix/internal/ext/skill"
 	"reasonix/internal/platform/lsp"
-	"reasonix/internal/runtime/agent"
 	"reasonix/internal/runtime/delegation"
 	"reasonix/internal/safety/permission"
 	"reasonix/internal/safety/sandbox"
@@ -40,22 +39,6 @@ import (
 // resolved to a provider — e.g. a default_model left over from a renamed or
 // removed provider. Callers can detect it (errors.Is) to re-run setup.
 var ErrUnknownModel = provider.ErrUnknownModel
-
-func agentKeepPolicy(keep []string) agent.KeepPolicy {
-	if keep == nil {
-		return agent.KeepErrors | agent.KeepUserMarked
-	}
-	var p agent.KeepPolicy
-	for _, k := range keep {
-		switch strings.TrimSpace(k) {
-		case "errors":
-			p |= agent.KeepErrors
-		case "user_marked":
-			p |= agent.KeepUserMarked
-		}
-	}
-	return p
-}
 
 func recoveryHeadlessMode(opts Options) bool {
 	return strings.TrimSpace(opts.HeadlessApprovalMode) != ""

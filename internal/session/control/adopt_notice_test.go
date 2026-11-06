@@ -24,7 +24,7 @@ func coldNoticeController(t *testing.T, sink event.Sink) (*Controller, string) {
 	if _, err := sessionstore.EnsureBranchMeta(path); err != nil {
 		t.Fatalf("meta: %v", err)
 	}
-	exec := agent.New(nil, nil, sessionstore.NewSession("sys"), agent.Options{ContextWindow: 1000, RecentKeep: 2, ArchiveDir: dir}, event.Discard)
+	exec := agent.New(nil, nil, sessionstore.NewSession("sys"), agent.Options{ContextWindow: 1000, ArchiveDir: dir}, event.Discard)
 	c := New(Options{Executor: exec, SessionDir: dir, Label: "test", Sink: sink})
 	c.testCacheColdAfter = -1 // force cold
 	return c, path

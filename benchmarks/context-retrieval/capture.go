@@ -62,8 +62,7 @@ func captureRequest(f builtFixture, arm ablation.Set, prompt string) (provider.R
 
 	cap := &captureProvider{}
 	a := agent.New(cap, reg, sess, agent.Options{
-		ContextWindow: fixtureWindow, CompactRatio: 0.5, RecentKeep: 2,
-		SessionPath: f.Path, KeepPolicy: agent.KeepErrors, Ablation: arm,
+		ContextWindow: fixtureWindow, CompactRatio: 0.5, SessionPath: f.Path, Ablation: arm,
 	}, event.Discard)
 	a.LoadProjectionSidecar(f.Path)
 

@@ -20,8 +20,7 @@ func manualAgent(t *testing.T, sess *sessionstore.Session) (*Agent, *countingPro
 	t.Helper()
 	prov := &countingProvider{reply: "## Standing facts\n- never change the public API"}
 	a := New(prov, tool.NewRegistry(), sess, Options{
-		ContextWindow: 200_000, CompactRatio: 0.8, RecentKeep: 2,
-		SessionPath: filepath.Join(testenv.TempDir(t), "session.jsonl"),
+		ContextWindow: 200_000, CompactRatio: 0.8, SessionPath: filepath.Join(testenv.TempDir(t), "session.jsonl"),
 		WorkspaceID: "ws", ModelRef: "p/m",
 		ArchiveDir: testenv.TempDir(t),
 	}, event.Discard)

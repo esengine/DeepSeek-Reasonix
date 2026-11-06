@@ -6,7 +6,6 @@ import (
 	"errors"
 	"reflect"
 	"slices"
-	"strings"
 	"sync"
 	"testing"
 
@@ -270,34 +269,6 @@ func TestRewrittenCallFeedsExecutedArgumentsLiveAndOriginalOnesOnReplay(t *testi
 	))
 	if got, want := obs.seen(), []string{"/original.go"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("replay observed %q, want the recorded %q", got, want)
-	}
-}
-
-// Compaction folds what the model sees and leaves the canonical transcript
-// whole, so a conversation reopened after one still replays every call.
-func TestCompactionDoesNotCostTheReplayAnyTouchedPath(t *testing.T) {
-	reg := tool.NewRegistry()
-	reg.Add(readingTool{pathTool{name: "read_file", readOnly: true, read: "/ws/early.go"}})
-	sess := &sessionstore.Session{Messages: []provider.Message{
-		{Role: provider.RoleSystem, Content: "sys"},
-		{Role: provider.RoleUser, Content: "task"},
-		callMsg("1", "read_file"), resultMsg("1", "read_file", nil),
-		{Role: provider.RoleAssistant, Content: strings.Repeat("a ", 5000)},
-		{Role: provider.RoleUser, Content: "c"},
-		{Role: provider.RoleAssistant, Content: strings.Repeat("b ", 5000)},
-		{Role: provider.RoleUser, Content: "e"},
-		{Role: provider.RoleAssistant, Content: "f"},
-	}}
-	opts := Options{ContextWindow: 10_000, CompactRatio: 0.8, RecentKeep: 2}
-	a := New(&fakeProvider{reply: "s"}, reg, sess, opts, event.Discard)
-	prepareForObservedUsage(a, context.Background(), &provider.Usage{PromptTokens: 8500})
-	if !hasCompactionSummary(visibleContext(a)) {
-		t.Fatal("the fixture did not compact")
-	}
-	obs := &recordedPaths{}
-	a.SetPathObserver(obs)
-	if got, want := obs.seen(), []string{"/ws/early.go"}; !reflect.DeepEqual(got, want) {
-		t.Fatalf("after compaction the replay saw %q, want %q", got, want)
 	}
 }
 

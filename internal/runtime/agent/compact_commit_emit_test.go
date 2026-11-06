@@ -52,8 +52,7 @@ func TestCommitSummaryEmitsOutsideCompactionLock(t *testing.T) {
 	path := filepath.Join(testenv.TempDir(t), "session.jsonl")
 	sink := &reentrantSnapshotSink{}
 	a := New(prov, tool.NewRegistry(), sess, Options{
-		ContextWindow: 20_000, CompactRatio: 0.5, RecentKeep: 2,
-		SessionPath: path, WorkspaceID: "ws", ModelRef: "p/m",
+		ContextWindow: 20_000, CompactRatio: 0.5, SessionPath: path, WorkspaceID: "ws", ModelRef: "p/m",
 	}, sink)
 	sink.agent = a
 	if _, err := a.CompactNow(context.Background(), CompactRequest{}); err != nil {
@@ -91,8 +90,7 @@ func TestCommitSurvivesPostPublishDirSyncFailure(t *testing.T) {
 	}}
 	path := filepath.Join(testenv.TempDir(t), "session.jsonl")
 	a := New(prov, tool.NewRegistry(), sess, Options{
-		ContextWindow: 20_000, CompactRatio: 0.5, RecentKeep: 2,
-		SessionPath: path, WorkspaceID: "ws", ModelRef: "p/m",
+		ContextWindow: 20_000, CompactRatio: 0.5, SessionPath: path, WorkspaceID: "ws", ModelRef: "p/m",
 	}, event.Discard)
 	if _, err := a.CompactNow(context.Background(), CompactRequest{}); err != nil {
 		t.Fatalf("CompactNow with post-publish dir sync fault: %v", err)

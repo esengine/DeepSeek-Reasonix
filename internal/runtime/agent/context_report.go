@@ -27,14 +27,6 @@ type ContextReport struct {
 	LastResult    int
 	CacheState    string
 	BlockedReason string
-
-	// What the last fold did to the user's own turns. A dropped turn is the
-	// loss compaction cannot undo, and the budget that decided it is the
-	// user's to set, so both the outcome and the budget are reportable.
-	UserTurnsKept        int
-	UserTurnsDropped     int
-	UserTurnsDroppedToks int
-	UserTurnKeepBudget   int
 }
 
 // ContextReport samples the current context state. Compaction is disabled when
@@ -48,15 +40,11 @@ func (a *Agent) ContextReport() ContextReport {
 
 func (a *contextWindow) contextReport() ContextReport {
 	rep := ContextReport{
-		Window:             a.effectiveContextWindow(),
-		HardCeiling:        a.hardInputCeiling(),
-		OutputBudget:       a.maxOutputTokens,
-		CacheState:         a.cacheState(),
-		UserTurnKeepBudget: a.keptUserTurnsBudget(),
+		Window:       a.effectiveContextWindow(),
+		HardCeiling:  a.hardInputCeiling(),
+		OutputBudget: a.maxOutputTokens,
+		CacheState:   a.cacheState(),
 	}
-	retention := a.sess.win.compaction.lastUserTurns
-	rep.UserTurnsKept, rep.UserTurnsDropped = retention.Kept, retention.Dropped
-	rep.UserTurnsDroppedToks = retention.DroppedTokens
 	if u := a.sess.output.lastUsage.Load(); u != nil {
 		rep.LatestPrompt = u.LatestPromptTokens()
 	}

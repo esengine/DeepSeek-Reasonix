@@ -63,7 +63,6 @@ type builder struct {
 	pendingMgr         *sidecar.Manager // sidecars no RuntimeSet owns yet
 	providers          providerStage
 	model              modelSelection
-	keep               agent.KeepPolicy
 	session            sessionRuntime
 	balanceClient      *http.Client
 	keyedClient        *http.Client // carries provider keys; refuses cross-origin redirects
@@ -254,7 +253,6 @@ func (b *builder) load() error {
 	if b.model, err = selectModel(opts, cfg, b.providers.extension); err != nil {
 		return err
 	}
-	b.keep = agentKeepPolicy(cfg.Agent.Keep)
 
 	migrations.report(b.sink, cfg)
 	b.timer.mark("config")
@@ -410,7 +408,7 @@ func (b *builder) wireTools() error {
 	}
 
 	t.roles = roleWiring{cfg: cfg, roots: b.roots, resolver: b.providers.effective, extension: b.providers.extension,
-		proxy: b.proxy, sink: b.sink, gate: t.gate, reg: t.reg, keep: b.keep, hooks: t.hookRunner, checkTargetAccess: t.env.targetAccessCheck()}
+		proxy: b.proxy, sink: b.sink, gate: t.gate, reg: t.reg, hooks: t.hookRunner, checkTargetAccess: t.env.targetAccessCheck()}
 	t.sub = newSubagentConfig(opts, cfg, b.model.entry, b.model.name, b.providers.effective, b.proxy, b.prompt.skillStore)
 	if t.sub.inheritedEffortDropped {
 		report(b.sink, event.Event{
@@ -531,10 +529,8 @@ func (b *builder) executor() *agent.Agent {
 		CapabilityAudit:   t.caps.audit,
 		ContextWindow:     entry.ContextWindow,
 		CompactRatio:      cfg.Agent.CompactRatio,
-		RecentKeep:        cfg.Agent.RecentKeep,
 		CompactionBudgets: compactionBudgets(cfg),
 		ArchiveDir:        b.roots.ArchiveDir(),
-		KeepPolicy:        b.keep,
 		ReasoningLanguage: cfg.ReasoningLanguage(),
 		SubagentDepth:     0,
 		MaxSubagentDepth:  t.sub.maxDepth,

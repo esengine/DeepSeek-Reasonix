@@ -54,8 +54,7 @@ func TestStaleContextBlockFailsTheNextOverflowTurn(t *testing.T) {
 	sess := &sessionstore.Session{Messages: latchTranscript()}
 	prov := &appendDuringSummary{sess: sess}
 	a := New(prov, tool.NewRegistry(), sess, Options{
-		ContextWindow: window, CompactRatio: 0.85, RecentKeep: 2,
-		WorkspaceID: "workspace", ModelRef: "model",
+		ContextWindow: window, CompactRatio: 0.85, WorkspaceID: "workspace", ModelRef: "model",
 	}, event.Discard)
 	a.BindSessionPath(path, true)
 	if _, err := a.window().contextManager().Prepare(context.Background(), ContextPreparePolicy{

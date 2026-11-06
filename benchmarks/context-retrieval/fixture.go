@@ -83,8 +83,7 @@ func buildFixture(f fixtureInstance, arm ablation.Set, sessionPath string) (buil
 	at := -1
 
 	a := agent.New(&digestProvider{}, tool.NewRegistry(), sess, agent.Options{
-		ContextWindow: fixtureWindow, CompactRatio: 0.5, RecentKeep: 2,
-		SessionPath: sessionPath, KeepPolicy: agent.KeepErrors, Ablation: arm,
+		ContextWindow: fixtureWindow, CompactRatio: 0.5, SessionPath: sessionPath, Ablation: arm,
 	}, event.Discard)
 
 	for gen := range fixtureGenerations {

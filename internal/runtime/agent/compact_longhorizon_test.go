@@ -115,25 +115,6 @@ func growSession(a *Agent, gen int) {
 	}
 }
 
-// indexCarriesAddress reports whether any visible fold index still addresses
-// this position. It is an observation, not a requirement: search must work
-// whether or not the index happens to have kept the line.
-func indexCarriesAddress(a *Agent, pos int) bool {
-	canonical, _ := a.sess.conversation.SnapshotMessagesVersion()
-	for _, m := range modelVisibleFromProjection(a.sess.win.compactionState.Projection, canonical) {
-		_, index := splitFoldIndex(m.Content)
-		if index == "" {
-			continue
-		}
-		for _, line := range indexBodyLines(index) {
-			if strings.HasPrefix(strings.TrimPrefix(line, "- "), fmt.Sprintf("#%d ", pos)) {
-				return true
-			}
-		}
-	}
-	return false
-}
-
 func hitRank(res tool.RecallResult, want int) int {
 	for i, h := range res.Hits {
 		if h.Position == want {
@@ -141,67 +122,6 @@ func hitRank(res tool.RecallResult, want int) int {
 		}
 	}
 	return 0
-}
-
-// The pin: whatever a projection lost, a search finds and a read returns
-// verbatim, for as many generations as the session runs.
-func TestLongHorizonRetrievability(t *testing.T) {
-	for _, c := range retrievalCarriers() {
-		t.Run(c.name, func(t *testing.T) {
-			sess, at := horizonSession(c, 6)
-			a := agentOverForce(t, &fakeProvider{reply: "Work continued."}, sess)
-
-			const generations = 50
-			indexHeldUntil, lostAt, proven := -1, -1, 0
-			for gen := range generations {
-				if err := prepareContext(context.Background(), a, CompactionTriggerOverflow); err != nil {
-					t.Fatalf("generation %d prepare = %v", gen, err)
-				}
-				growSession(a, gen)
-				if indexCarriesAddress(a, at) {
-					indexHeldUntil = gen
-				}
-				// A tool call's index line quotes its command, so an indexed
-				// carrier stays legible until that line is trimmed. Only once
-				// the fact is genuinely out of sight does a hit prove anything.
-				if !foldedOutOfSight(a, c.needle) {
-					continue
-				}
-				if lostAt < 0 {
-					lostAt = gen
-				}
-				proven++
-				res := searchRecall(t, a, c.query)
-				rank := hitRank(res, at)
-				if rank == 0 {
-					t.Fatalf("generation %d: search %q returned %v, want #%d\n%s",
-						gen, c.query, hitPositions(res), at, res.Text)
-				}
-				if rank > 5 {
-					t.Errorf("generation %d: #%d ranked %d, outside the first five hits", gen, at, rank)
-				}
-			}
-			if proven == 0 {
-				t.Fatalf("the fact never left the model's sight in %d generations; this run tested nothing", generations)
-			}
-			t.Logf("out of sight from generation %d; search verified %d generations", lostAt, proven)
-			// Exact recovery after every generation of loss.
-			read, err := a.RecallContext(context.Background(), tool.RecallRequest{Positions: []int{at}})
-			if err != nil {
-				t.Fatalf("read #%d after %d generations = %v", at, generations, err)
-			}
-			if !strings.Contains(read.Text, c.needle) {
-				t.Errorf("read #%d returned %q, want the original wording", at, read.Text)
-			}
-			switch {
-			case !c.indexed && indexHeldUntil >= 0:
-				t.Errorf("an unindexed carrier held an index address through generation %d", indexHeldUntil)
-			case c.indexed:
-				t.Logf("index addressed #%d through generation %d of %d; search covered all %d",
-					at, indexHeldUntil, generations, generations)
-			}
-		})
-	}
 }
 
 // Rank must not decay as the corpus grows: a long session is exactly where the

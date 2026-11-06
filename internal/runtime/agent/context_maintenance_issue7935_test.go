@@ -40,7 +40,6 @@ func TestIssue7935Maintains206ToolResultsOnceAndOnlyProcessesNewTail(t *testing.
 	a := New(&fakeProvider{reply: "structured history digest"}, tool.NewRegistry(), sess, Options{
 		ContextWindow: 8_000,
 		CompactRatio:  0.80,
-		RecentKeep:    2,
 		ArchiveDir:    testenv.TempDir(t),
 	}, sink)
 

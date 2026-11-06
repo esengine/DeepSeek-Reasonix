@@ -42,14 +42,6 @@ func renderAgentDelta(buf *strings.Builder, c, d *Config) bool {
 		fmt.Fprintf(buf, "compact_ratio = %s\n", formatFloat(c.Agent.CompactRatio))
 		wrote = true
 	}
-	if c.Agent.Keep != nil && !reflect.DeepEqual(c.Agent.Keep, d.Agent.Keep) {
-		fmt.Fprintf(buf, "keep = %s\n", renderStringArray(c.Agent.Keep))
-		wrote = true
-	}
-	if c.Agent.RecentKeep > 0 && c.Agent.RecentKeep != d.Agent.RecentKeep {
-		fmt.Fprintf(buf, "recent_keep = %d\n", c.Agent.RecentKeep)
-		wrote = true
-	}
 	if len(c.Agent.PlanModeReadOnlyCommands) > 0 && !reflect.DeepEqual(c.Agent.PlanModeReadOnlyCommands, d.Agent.PlanModeReadOnlyCommands) {
 		fmt.Fprintf(buf, "plan_mode_read_only_commands = %s\n", renderStringArray(c.Agent.PlanModeReadOnlyCommands))
 		wrote = true

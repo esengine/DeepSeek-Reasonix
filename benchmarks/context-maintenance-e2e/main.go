@@ -108,7 +108,6 @@ func newAgent(p provider.Provider, sess *sessionstore.Session, path string, sink
 	return agent.New(p, tool.NewRegistry(), sess, agent.Options{
 		ContextWindow: windowTokens,
 		CompactRatio:  compactRatio,
-		RecentKeep:    2,
 		SessionPath:   path,
 		WorkspaceID:   "cm-e2e",
 		ModelRef:      "deepseek/" + model,

@@ -150,38 +150,34 @@ func consecutiveCompactingTurns(perTurn []int) int {
 	return worst
 }
 
-// TestCompactionStopsWhenProtectedContentExceedsWindow covers the user report
-// where a single tool result alone exhausts a tiny window. Automatic maintenance
-// no longer prunes mid-session tool bodies: it attempts one summary, records a
-// generation-scoped block when the candidate cannot land, and must not loop.
-func TestCompactionPausesWhenWindowTooSmall(t *testing.T) {
+// TestTinyWindowFoldsEveryRoundAndStaysBounded: nothing is protected from a
+// fold, so a tiny window whose every tool result nearly fills it is archived
+// each round instead of blocking. The model, not the fold, decides when such a
+// loop ends; what the fold owes is a request that stays under the window.
+func TestTinyWindowFoldsEveryRoundAndStaysBounded(t *testing.T) {
 	mock := &loopMock{t: t}
 	srv := httptest.NewServer(http.HandlerFunc(mock.handler))
 	defer srv.Close()
 	reg := tool.NewRegistry()
 	reg.Add(fatTool{blob: strings.Repeat("LARGE FILE CONTENTS. ", 350)})
 	a, _ := newAgent(t, srv.URL, reg, 1600, 4)
-	started := 0
-	blocked := 0
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := 0
 	a.svc.sink = event.FuncSink(func(e event.Event) {
-		if e.Kind == event.CompactionStarted {
-			started++
-		}
-		if e.Kind == event.ContextMaintenanceEvent && e.Maintenance != nil &&
-			(e.Maintenance.Status == "blocked" || e.Maintenance.Status == "failed") {
-			blocked++
+		if e.Kind == event.CompactionDone {
+			done++
+			if done >= 5 {
+				cancel()
+			}
 		}
 	})
-	// First turn may fail with a typed overflow/blocked error once protected
-	// content cannot form a safe checkpoint. It must not start many summaries.
-	_ = a.Run(context.Background(), "turn 0: keep going")
-	_ = a.Run(context.Background(), "turn 1: keep going")
-	if started > 2 {
-		t.Fatalf("summary transactions started = %d, want ≤2 (no multi-span / retry loop)", started)
+	_ = a.Run(ctx, "turn 0: keep going")
+	if done < 2 {
+		t.Fatalf("folds completed = %d, want a fold on every round", done)
 	}
-	if blocked == 0 && a.window().currentProjectionVersion() == 0 {
-		// Either a durable block or a successful install is fine; looping is not.
-		t.Logf("started=%d blocked=%d version=%d", started, blocked, a.window().currentProjectionVersion())
+	if v := a.window().currentProjectionVersion(); v == 0 {
+		t.Fatal("no projection was installed")
 	}
 }
 

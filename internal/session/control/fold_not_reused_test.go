@@ -42,7 +42,7 @@ func foldController(t *testing.T, sink event.Sink, coversHash string) (*Controll
 	}); err != nil {
 		t.Fatalf("sidecar: %v", err)
 	}
-	exec := agent.New(nil, nil, sessionstore.NewSession("sys"), agent.Options{ContextWindow: 1000, RecentKeep: 2, ArchiveDir: dir}, event.Discard)
+	exec := agent.New(nil, nil, sessionstore.NewSession("sys"), agent.Options{ContextWindow: 1000, ArchiveDir: dir}, event.Discard)
 	c := New(Options{Executor: exec, SessionDir: dir, Label: "test", Sink: sink})
 	loaded, err := sessionstore.LoadSession(path)
 	if err != nil {

@@ -63,7 +63,7 @@ func anchorSession(t *testing.T) *sessionstore.Session {
 func newAnchorAgent(t *testing.T) (*Agent, *summaryCounter) {
 	prov := &summaryCounter{}
 	a := New(prov, tool.NewRegistry(), anchorSession(t), Options{
-		ContextWindow: anchorWindow, CompactRatio: 0.85, RecentKeep: 2, WorkspaceID: "ws", ModelRef: "m", ArchiveDir: testenv.TempDir(t),
+		ContextWindow: anchorWindow, CompactRatio: 0.85, WorkspaceID: "ws", ModelRef: "m", ArchiveDir: testenv.TempDir(t),
 	}, event.Discard)
 	return a, prov
 }
@@ -215,7 +215,7 @@ func TestReportedUsageNeverRaisesTheHardCeilingVerdict(t *testing.T) {
 	a := New(prov, tool.NewRegistry(), &sessionstore.Session{Messages: []provider.Message{
 		{Role: provider.RoleSystem, Content: "system"},
 		{Role: provider.RoleUser, Content: "only turn"},
-	}}, Options{ContextWindow: anchorWindow, CompactRatio: 0.85, RecentKeep: 2, WorkspaceID: "ws", ModelRef: "m"}, event.Discard)
+	}}, Options{ContextWindow: anchorWindow, CompactRatio: 0.85, WorkspaceID: "ws", ModelRef: "m"}, event.Discard)
 	sendWithUsage(t, a, &provider.Usage{PromptTokens: 99_990})
 	_, err := a.window().contextManager().Prepare(context.Background(), ContextPreparePolicy{Trigger: CompactionTriggerPressure})
 	if errors.Is(err, ErrCompactionRequired) {
@@ -231,7 +231,7 @@ func TestUnfoldableReportedUsageDoesNotRepeatTheAttempt(t *testing.T) {
 	a := New(prov, tool.NewRegistry(), &sessionstore.Session{Messages: []provider.Message{
 		{Role: provider.RoleSystem, Content: "system"},
 		{Role: provider.RoleUser, Content: "only turn"},
-	}}, Options{ContextWindow: anchorWindow, CompactRatio: 0.85, RecentKeep: 2, WorkspaceID: "ws", ModelRef: "m", ArchiveDir: testenv.TempDir(t)}, event.Discard)
+	}}, Options{ContextWindow: anchorWindow, CompactRatio: 0.85, WorkspaceID: "ws", ModelRef: "m", ArchiveDir: testenv.TempDir(t)}, event.Discard)
 	for range 5 {
 		sendWithUsage(t, a, &provider.Usage{PromptTokens: 90_000})
 		foldPass(t, a)
@@ -316,7 +316,7 @@ func newCalibratedAgent(t *testing.T) *Agent {
 	}
 	msgs = append(msgs, provider.Message{Role: provider.RoleUser, Content: "current"})
 	a := New(&summaryCounter{}, tool.NewRegistry(), &sessionstore.Session{Messages: msgs}, Options{
-		ContextWindow: anchorWindow, CompactRatio: 0.85, RecentKeep: 2, WorkspaceID: "ws", ModelRef: "m", ArchiveDir: testenv.TempDir(t),
+		ContextWindow: anchorWindow, CompactRatio: 0.85, WorkspaceID: "ws", ModelRef: "m", ArchiveDir: testenv.TempDir(t),
 	}, event.Discard)
 	sendWithUsage(t, a, &provider.Usage{PromptTokens: 9_000})
 	return a

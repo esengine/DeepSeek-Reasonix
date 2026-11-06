@@ -45,7 +45,6 @@ func usageFixture(t *testing.T, toolResults int) *Agent {
 	}
 	return New(nil, tool.NewRegistry(), &sessionstore.Session{Messages: msgs}, Options{
 		ContextWindow: 1_000_000,
-		RecentKeep:    2,
 		ArchiveDir:    testenv.TempDir(t),
 	}, event.Discard)
 }
@@ -83,7 +82,6 @@ func TestContextUsedTokensIncludesToolSchemasLikeTheTrigger(t *testing.T) {
 	}
 	a := New(nil, reg, &sessionstore.Session{Messages: msgs}, Options{
 		ContextWindow: 1_000_000,
-		RecentKeep:    2,
 		ArchiveDir:    testenv.TempDir(t),
 	}, event.Discard)
 
@@ -104,7 +102,7 @@ func TestContextUsedTokensFollowsLiveToolRegistry(t *testing.T) {
 	a := New(nil, reg, &sessionstore.Session{Messages: []provider.Message{
 		{Role: provider.RoleSystem, Content: "system"},
 		{Role: provider.RoleUser, Content: "task"},
-	}}, Options{ContextWindow: 1_000_000, RecentKeep: 2, ArchiveDir: testenv.TempDir(t)}, event.Discard)
+	}}, Options{ContextWindow: 1_000_000, ArchiveDir: testenv.TempDir(t)}, event.Discard)
 
 	withoutTools := a.ContextUsedTokens()
 	reg.Add(bigSchemaTool{})

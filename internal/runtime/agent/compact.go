@@ -20,28 +20,19 @@ import (
 // checkpoint is installed (stable prefix + one structured digest + recent tail).
 // 50% is only the normal acceptance ceiling — candidates are never padded up to it.
 const (
-	defaultCompactRatio          = 0.90 // capacity share of the window before maintenance
-	checkpointCeilingRatio       = 0.50 // normal auto-checkpoint acceptance ceiling
-	recentTailBudgetRatio        = 0.10 // recent verbatim tail as a fraction of the window
-	minRecentTailTokens          = 32 * 1024
-	maxRecentTailTokens          = 96 * 1024
-	summaryOutputMaxTokens       = 16 * 1024                  // max digest output; further clipped by remaining candidate space
-	summaryRetryOutputMaxTokens  = 2 * summaryOutputMaxTokens // one retry after a truncation may spend up to this
-	summaryEffort                = "low"                      // lowest depth an endpoint may approve; reasoning shares the output cap
-	exceptionalMinSavingsRatio   = 0.25                       // when fixed prefix alone exceeds 50%, require at least this savings
-	minRecentKeep                = 2                          // never keep fewer recent messages than this
-	minCompactMessages           = 2                          // skip compaction below this many compactable messages
-	fallbackTokPerChar           = 0.25                       // ~4 chars/token, used before any usage is available to calibrate
-	defaultPinnedFirstUserTokens = 1500                       // default ceiling on pinning the first user turn verbatim
-	pinnedFirstUserWindowFrac    = 0.15                       // and never pin a first turn worth more than this fraction of the window
-	keptUserTurnsWindowFrac      = 0.05                       // default verbatim user-turn budget, as a fraction of the window
-	keptUserTurnsFloorTokens     = 1024                       // ...with a floor so a small window still holds something
-	protocolReserveTokens        = 256                        // provider framing and control fields not represented by message estimates
+	defaultCompactRatio        = 0.90 // capacity share of the window before maintenance
+	checkpointCeilingRatio     = 0.50 // normal auto-checkpoint acceptance ceiling
+	refoldMinTokensRatio       = 0.10 // recent verbatim tail as a fraction of the window
+	minRefoldTokens            = 32 * 1024
+	maxRefoldTokens            = 96 * 1024
+	exceptionalMinSavingsRatio = 0.25 // when fixed prefix alone exceeds 50%, require at least this savings
+	minCompactMessages         = 2    // skip compaction below this many compactable messages
+	fallbackTokPerChar         = 0.25 // ~4 chars/token, used before any usage is available to calibrate
+	protocolReserveTokens      = 256  // provider framing and control fields not represented by message estimates
 )
 
 var (
-	errSummaryOutputTruncated = errors.New("summarizer output truncated")
-	errCheckpointRejected     = errors.New("checkpoint candidate rejected")
+	errCheckpointRejected = errors.New("checkpoint candidate rejected")
 )
 
 // summaryTag wraps the compaction summary so the model can distinguish it from
@@ -104,23 +95,21 @@ func (a *contextWindow) hardInputCeiling() int {
 	return max(1, window-reserve)
 }
 
-// recentTailBudget is the content-construction budget for the recent verbatim
-// tail. Production windows use clamp(window×10%, 32K, 96K). Smaller synthetic
-// windows (tests / constrained providers) drop the 32K floor so the tail cannot
-// alone exceed the window.
-func (a *contextWindow) recentTailBudget() int {
+// refoldMinTokens is how much new closed history a second fold waits for:
+// every fold costs the whole prefix cache, so it must free more than it costs.
+func (a *contextWindow) refoldMinTokens() int {
 	window := a.effectiveContextWindow()
 	if window <= 0 {
-		return minRecentTailTokens
+		return minRefoldTokens
 	}
-	n := int(float64(window) * recentTailBudgetRatio)
-	if window >= minRecentTailTokens*2 {
-		if n < minRecentTailTokens {
-			n = minRecentTailTokens
+	n := int(float64(window) * refoldMinTokensRatio)
+	if window >= minRefoldTokens*2 {
+		if n < minRefoldTokens {
+			n = minRefoldTokens
 		}
 	}
-	if n > maxRecentTailTokens {
-		n = maxRecentTailTokens
+	if n > maxRefoldTokens {
+		n = maxRefoldTokens
 	}
 	if max := window / 2; max > 0 && n > max {
 		n = max
@@ -248,35 +237,14 @@ func isCompactionSummary(m provider.Message) bool {
 		strings.HasPrefix(strings.TrimLeft(m.Content, "\n "), SummaryTagOpen)
 }
 
-// pinnedPrefixLen counts the leading messages a fold keeps verbatim ahead of
-// everything else: the system prompt and the first user turn (its task + stated
-// facts/constraints) when it is small enough to be a brief. Digests are never
-// pinned — any digest in the transcript enters the fold region and is merged
-// into the next one, so a session cannot accumulate a chain of them.
+// pinnedPrefixLen counts the leading messages a fold leaves in place: the
+// system prompt and nothing else. Every conversational message may be archived.
 func (a *contextWindow) pinnedPrefixLen(msgs []provider.Message) int {
 	i := 0
 	if i < len(msgs) && msgs[i].Role == provider.RoleSystem {
 		i++
 	}
-	if i < len(msgs) && msgs[i].Role == provider.RoleUser && !isCompactionSummary(msgs[i]) && a.fixedPinnableUserTurn(msgs[i]) {
-		i++
-	}
 	return i
-}
-
-func (a *contextWindow) fixedPinnableUserTurn(m provider.Message) bool {
-	budget := defaultPinnedFirstUserTokens
-	if a.budgets.FirstTurnPinTokens > 0 {
-		budget = a.budgets.FirstTurnPinTokens
-	}
-	// The window guard stands whatever the setting: the pinned first turn sits
-	// in the fixed prefix and is paid for on every request of the session.
-	if window := a.effectiveContextWindow(); window > 0 {
-		if f := int(float64(window) * pinnedFirstUserWindowFrac); f < budget {
-			budget = f
-		}
-	}
-	return fixedTokenEstimate(m) <= budget
 }
 
 // closedPrefixEnd is how far into msgs every tool call has its result. A fold
@@ -300,40 +268,16 @@ func closedPrefixEnd(msgs []provider.Message) int {
 	return end
 }
 
-func (a *contextWindow) keepIndexes(region []provider.Message, policy KeepPolicy) ([]bool, userTurnRetention) {
+// keepIndexes marks what a fold may not archive: the request that began the
+// running turn and the tool-call groups it is still executing.
+func (a *contextWindow) keepIndexes(region []provider.Message) []bool {
 	keep := make([]bool, len(region))
 	activeTurn := a.activeTurnCreatedAt.Load()
-	policyStart := 0
 	for i, m := range region {
-		if isCompactionSummary(m) {
-			policyStart = i + 1
-		}
-	}
-	// Retention applies only to messages since the latest digest. A failed tool
-	// result is bounded by its own budget, since last fold's survivors sit past
-	// the digest and would otherwise be kept again.
-	var failures, marked []int
-	for i, m := range region {
-		if i >= policyStart && shouldKeepMessage(m, policy) {
-			switch m.Role {
-			case provider.RoleTool:
-				failures = append(failures, i)
-			case provider.RoleUser:
-				marked = append(marked, i)
-			default:
-				keep[i] = true
-			}
-		}
-		// The request that began the running turn states the work the rest of
-		// the turn is executing. Its closed transactions may fold; it may not.
 		if activeTurn != 0 && m.Role == provider.RoleUser && m.CreatedAt == activeTurn {
 			keep[i] = true
 		}
 	}
-	a.keepFailuresWithinBudget(region, keep, failures)
-	markedDropped, markedTokens := a.keepMarkedWithinBudget(region, keep, marked)
-	retention := a.keepUserTurns(region, keep)
-	retention.MarkedDropped, retention.MarkedDroppedTokens = markedDropped, markedTokens
 	pinned := slices.Clone(keep)
 	for i, m := range region {
 		if !pinned[i] {
@@ -348,7 +292,7 @@ func (a *contextWindow) keepIndexes(region []provider.Message, policy KeepPolicy
 			keepToolCallGroup(region, keep, i)
 		}
 	}
-	return keep, retention
+	return keep
 }
 
 // fixedTokenEstimate is what every verbatim-retention decision measures with.
@@ -356,16 +300,6 @@ func (a *contextWindow) keepIndexes(region []provider.Message, policy KeepPolicy
 // turn's ratio would keep a turn at one checkpoint and fold it at the next.
 func fixedTokenEstimate(m provider.Message) int {
 	return int(float64(msgChars(m)) * fallbackTokPerChar)
-}
-
-func shouldKeepMessage(m provider.Message, policy KeepPolicy) bool {
-	if policy&KeepErrors != 0 && isErrorMessage(m) {
-		return true
-	}
-	if policy&KeepUserMarked != 0 && isUserMarked(m) {
-		return true
-	}
-	return false
 }
 
 func isErrorMessage(m provider.Message) bool {
@@ -398,17 +332,6 @@ func failedExecution(ex *provider.ToolExecution) bool {
 	return ex.Verification == tool.ShellVerificationFailed
 }
 
-func isUserMarked(m provider.Message) bool {
-	if m.Role != provider.RoleUser {
-		return false
-	}
-	content := strings.TrimSpace(strings.ToLower(m.Content))
-	return strings.HasPrefix(content, "[[keep]]") ||
-		strings.HasPrefix(content, "[keep]") ||
-		strings.HasPrefix(content, "<keep>") ||
-		strings.HasPrefix(content, "<!-- keep -->")
-}
-
 func findToolCaller(region []provider.Message, toolIndex int, id string) int {
 	for i := toolIndex - 1; i >= 0; i-- {
 		if region[i].Role != provider.RoleAssistant {
@@ -431,92 +354,15 @@ func toolCallIDs(m provider.Message) map[string]bool {
 	return ids
 }
 
-// planCompaction returns [head:start] to fold; the tail is recentTailBudget
-// unless force halves it so CompactNow still reduces mid-size sessions.
-func (a *contextWindow) planCompaction(msgs []provider.Message, min int, force bool) (head, start int, ok bool) {
+// planCompaction returns [head:start] to fold: everything after the system
+// prompt. The caller trims it to the closed prefix of an active turn.
+func (a *contextWindow) planCompaction(msgs []provider.Message, min int, _ bool) (head, start int, ok bool) {
 	head = a.pinnedPrefixLen(msgs)
-	if a.effectiveContextWindow() > 0 {
-		budget := a.recentTailBudget()
-		if force {
-			if half := a.estimatedPromptTokens(provider.ModelMessages(msgs)) / 2; half > 0 && half < budget {
-				budget = half
-			}
-		}
-		start = tailStart(msgs, head, budget, a.tokPerChar(), a.tailFloor())
-		// Remeasure when force or non-strict roles; strict-alternating otherwise
-		// keeps a cheap tokPerChar overestimate of the tail under force.
-		floor := max(head, len(msgs)-a.tailFloor())
-		if force || !a.strictAlternatingRoles {
-			start = a.remeasuredTailStart(msgs, start, floor, budget)
-		}
-	} else {
-		// No window: keep a fixed recent count, aligned off tool results.
-		start = len(msgs) - a.tailFloor()
-		for start > head && start < len(msgs) && msgs[start].Role == provider.RoleTool {
-			start--
-		}
-	}
-	start = max(start, head)
+	start = len(msgs)
 	if start-head < min {
 		return head, start, false
 	}
 	return head, start, true
-}
-
-// remeasuredTailStart walks the cheap tokPerChar boundary forward until the
-// verbatim tail fits budget under the calibrated estimate. A request's shape is
-// the sum of its messages', so the measurement is carried and decremented per
-// message dropped; measuring each candidate whole instead re-scanned the whole
-// remaining transcript per step, and copied it whenever a receipt was present.
-func (a *contextWindow) remeasuredTailStart(msgs []provider.Message, start, floor, budget int) int {
-	policy := sharedWindowInputPolicyOf(a.svc.prov)
-	tail := requestCalibrationShape{}
-	for i := len(msgs) - 1; i >= start; i-- {
-		tail = tail.plus(projectedMessageCalibrationShape(msgs[i], policy))
-	}
-	drop := func() {
-		tail = tail.minus(projectedMessageCalibrationShape(msgs[start], policy))
-		start++
-	}
-	for start < floor && a.estimatedShapeTokens(tail) > budget {
-		drop()
-		for start < floor && start < len(msgs) && msgs[start].Role == provider.RoleTool {
-			drop()
-		}
-	}
-	return start
-}
-
-func (a *contextWindow) tailFloor() int {
-	if a.recentKeep > minRecentKeep {
-		return a.recentKeep
-	}
-	return minRecentKeep
-}
-
-// tailStart walks newest→oldest, growing the verbatim tail until the next
-// message would push its token estimate past budgetTokens (but never below
-// minKeep messages), then aligns the boundary back off any tool result so the
-// tail never begins with an orphan whose assistant tool_calls were summarized
-// away.
-func tailStart(msgs []provider.Message, head, budgetTokens int, tokPerChar float64, minKeep int) int {
-	start := len(msgs)
-	acc := 0
-	for i := len(msgs) - 1; i > head; i-- {
-		c := int(float64(msgChars(msgs[i])) * tokPerChar)
-		if len(msgs)-i > minKeep && acc+c > budgetTokens {
-			break
-		}
-		acc += c
-		start = i
-	}
-	// start == len(msgs) when nothing fit the tail (a session too small to have a
-	// message after head); there is no msgs[start] to align off, and the caller's
-	// minCompactMessages check then no-ops the pass.
-	for start > head && start < len(msgs) && msgs[start].Role == provider.RoleTool {
-		start--
-	}
-	return start
 }
 
 // tokPerChar derives a tokens-per-character ratio from the last turn's real
@@ -628,12 +474,4 @@ func summarizeToolArgs(args string) string {
 	}
 	keys := slices.Sorted(maps.Keys(parsed))
 	return fmt.Sprintf("{%s} (%d keys)", strings.Join(keys, ", "), len(parsed))
-}
-
-func charsOfMessages(msgs []provider.Message) int {
-	n := 0
-	for _, m := range msgs {
-		n += msgChars(m)
-	}
-	return n
 }

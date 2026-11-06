@@ -32,7 +32,6 @@ type contextWindow struct {
 	sess                   *sessionRuntime
 	svc                    *agentServices
 	ablation               ablation.Set
-	keepPolicy             KeepPolicy
 	strictAlternatingRoles bool
 	activeTurnCreatedAt    *atomic.Int64
 	windowProbe            *contextWindowProbe
@@ -43,7 +42,7 @@ type contextWindow struct {
 func (a *Agent) window() *contextWindow {
 	return &contextWindow{
 		agentConfig: &a.agentConfig, windowHost: a, sess: &a.sess, svc: &a.svc,
-		ablation: a.ablation, keepPolicy: a.keepPolicy, strictAlternatingRoles: a.strictAlternatingRoles,
+		ablation: a.ablation, strictAlternatingRoles: a.strictAlternatingRoles,
 		activeTurnCreatedAt: &a.activeTurnCreatedAt, windowProbe: &a.windowProbe,
 	}
 }

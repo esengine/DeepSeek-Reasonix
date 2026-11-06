@@ -19,8 +19,7 @@ func archiveAgent(t *testing.T, sess *sessionstore.Session, sink event.Sink) (*A
 	prov := &countingProvider{reply: "## Standing facts\n- a summarizer was asked"}
 	dir := testenv.TempDir(t)
 	a := New(prov, tool.NewRegistry(), sess, Options{
-		ContextWindow: 200_000, CompactRatio: 0.8, RecentKeep: 2,
-		SessionPath: filepath.Join(dir, "session.jsonl"),
+		ContextWindow: 200_000, CompactRatio: 0.8, SessionPath: filepath.Join(dir, "session.jsonl"),
 		WorkspaceID: "ws", ModelRef: "p/m",
 		ArchiveDir: testenv.TempDir(t),
 	}, sink)
@@ -104,6 +103,45 @@ func TestAnArchiveNeverHoldsLocalOnlyOutput(t *testing.T) {
 		body, err := os.ReadFile(f)
 		if err != nil || strings.Contains(string(body), "local-only output that must stay out") {
 			t.Fatalf("the archive %s holds display-only output (%v)", f, err)
+		}
+	}
+}
+
+// Nothing of the conversation is held back: after a fold between turns the
+// context is the system prompt and the one pointer, the first user turn, the
+// recent turns and the user's own words included, and the archive has them all.
+func TestAFoldRetainsNothingButThePointer(t *testing.T) {
+	sess := &sessionstore.Session{Messages: []provider.Message{
+		{Role: provider.RoleSystem, Content: "sys"},
+		{Role: provider.RoleUser, Content: "FIRST-TURN codeword blue-whale"},
+		{Role: provider.RoleAssistant, Content: "ok " + strings.Repeat("filler ", 200)},
+		{Role: provider.RoleUser, Content: "SECOND-TURN deadline friday"},
+		{Role: provider.RoleAssistant, Content: "noted " + strings.Repeat("filler ", 200)},
+		{Role: provider.RoleUser, Content: "LAST-TURN owner lin"},
+		{Role: provider.RoleAssistant, Content: "done " + strings.Repeat("filler ", 200)},
+	}}
+	a, _, dir := archiveAgent(t, sess, event.Discard)
+	verdict, err := a.CompactNow(context.Background(), CompactRequest{})
+	if err != nil || !verdict.Compacted() {
+		t.Fatalf("CompactNow = %+v, %v; want a fold", verdict, err)
+	}
+	visible := a.window().modelVisibleMessages()
+	if len(visible) != 2 || visible[0].Role != provider.RoleSystem || !isCompactionSummary(visible[1]) {
+		t.Fatalf("visible = %+v, want the system prompt and one pointer", visible)
+	}
+	for _, word := range []string{"blue-whale", "friday", "owner lin"} {
+		if strings.Contains(visible[1].Content, word) {
+			t.Fatalf("the pointer carries %q; it must only point", word)
+		}
+	}
+	files, _ := filepath.Glob(filepath.Join(dir, "session.outputs", "fold-*.md"))
+	if len(files) != 1 {
+		t.Fatalf("archive files = %v", files)
+	}
+	body, _ := os.ReadFile(files[0])
+	for _, word := range []string{"blue-whale", "friday", "owner lin"} {
+		if !strings.Contains(string(body), word) {
+			t.Fatalf("the archive lost %q", word)
 		}
 	}
 }

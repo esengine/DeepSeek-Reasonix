@@ -120,9 +120,7 @@ func reportShippedPath(root string) {
 			continue
 		}
 		a := agent.New(&digestProvider{}, tool.NewRegistry(), f.Session, agent.Options{
-			ContextWindow: fixtureWindow, CompactRatio: 0.5, RecentKeep: 2,
-			SessionPath: f.Path, KeepPolicy: agent.KeepErrors,
-		}, event.Discard)
+			ContextWindow: fixtureWindow, CompactRatio: 0.5, SessionPath: f.Path}, event.Discard)
 		a.LoadProjectionSidecar(f.Path)
 		queries := append([]string{inst.ProbeQuery}, historicalQueries[t.ID]...)
 		for _, q := range queries {

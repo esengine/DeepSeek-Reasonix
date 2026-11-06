@@ -85,14 +85,6 @@ func renderContextReport(rep agent.ContextReport) (summary, detail string) {
 	} else {
 		line("last maintenance", "none this session")
 	}
-	if rep.UserTurnKeepBudget > 0 {
-		yours := fmt.Sprintf("budget %s per fold", thousands(rep.UserTurnKeepBudget))
-		if rep.UserTurnsKept > 0 || rep.UserTurnsDropped > 0 {
-			yours = fmt.Sprintf("%d kept · %d dropped (~%s tokens) · %s",
-				rep.UserTurnsKept, rep.UserTurnsDropped, thousands(rep.UserTurnsDroppedToks), yours)
-		}
-		line("your turns", yours)
-	}
 	if rep.CacheState != "" {
 		line("cache", rep.CacheState)
 	}

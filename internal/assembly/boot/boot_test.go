@@ -34,7 +34,6 @@ import (
 	"reasonix/internal/ext/plugin"
 	"reasonix/internal/ext/pluginpkg"
 	"reasonix/internal/ext/skill"
-	"reasonix/internal/runtime/agent"
 	"reasonix/internal/runtime/agent/testutil"
 	"reasonix/internal/runtime/delegation"
 	"reasonix/internal/safety/sandbox"
@@ -51,18 +50,6 @@ import (
 
 func newProviderForTest(e *config.ProviderEntry) (provider.Provider, error) {
 	return NewProviderWithProxy(e, netclient.ProxySpec{Mode: netclient.ModeAuto})
-}
-
-func TestAgentKeepPolicyFromConfig(t *testing.T) {
-	if got := agentKeepPolicy(nil); got != agent.KeepErrors|agent.KeepUserMarked {
-		t.Fatalf("nil keep policy = %v, want KeepErrors|KeepUserMarked", got)
-	}
-	if got := agentKeepPolicy([]string{}); got != 0 {
-		t.Fatalf("empty keep policy = %v, want 0", got)
-	}
-	if got := agentKeepPolicy([]string{"errors", "user_marked"}); got != agent.KeepErrors|agent.KeepUserMarked {
-		t.Fatalf("combined keep policy = %v, want errors|user_marked", got)
-	}
 }
 
 func TestBuildRecordsRuntimeSelectionEffort(t *testing.T) {

@@ -41,12 +41,6 @@ func foldFixture(turns int, cjk, receipts bool) []provider.Message {
 	return msgs
 }
 
-func calibratedFoldAgent(msgs []provider.Message) *Agent {
-	a := &Agent{agentConfig: agentConfig{contextWindow: 128_000, recentKeep: 2}}
-	a.window().setPromptTokenCalibration(64_000, a.window().requestCalibrationShape(provider.Request{Messages: msgs}))
-	return a
-}
-
 // remeasuredTailStart carries one measurement forward instead of re-measuring
 // each candidate tail whole. That is only sound while a request's shape is the
 // sum of its messages' shapes — for every suffix, on a transcript carrying the
@@ -72,30 +66,6 @@ func TestProjectedMessageShapesSumToTheWholeSliceMeasurement(t *testing.T) {
 			if got != want {
 				t.Fatalf("policy %+v start %d: summed %+v, whole-slice %+v", policy, start, got, want)
 			}
-		}
-	}
-}
-
-// The same equivalence one level up, where it decides what a fold keeps: the
-// incremental walk must stop on the message the rescanning walk stopped on.
-func TestRemeasuredTailStartMatchesTheRescanningWalk(t *testing.T) {
-	for _, cjk := range []bool{false, true} {
-		msgs := foldFixture(200, cjk, true)
-		a := calibratedFoldAgent(msgs)
-		head := a.window().pinnedPrefixLen(msgs)
-		budget := a.window().recentTailBudget()
-		from := tailStart(msgs, head, budget, a.window().tokPerChar(), a.window().tailFloor())
-		floor := max(head, len(msgs)-a.window().tailFloor())
-
-		want := from
-		for want < floor && a.window().estimatedPromptTokens(provider.ModelMessages(msgs[want:])) > budget {
-			want++
-			for want < floor && want < len(msgs) && msgs[want].Role == provider.RoleTool {
-				want++
-			}
-		}
-		if got := a.window().remeasuredTailStart(msgs, from, floor, budget); got != want {
-			t.Fatalf("cjk=%v: incremental walk stopped at %d, rescanning walk at %d", cjk, got, want)
 		}
 	}
 }

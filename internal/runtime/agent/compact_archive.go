@@ -61,11 +61,11 @@ func (a *contextWindow) foldToArchive(fold []provider.Message, instructions stri
 		}
 		return res, fmt.Errorf("archive: %w", werr)
 	}
-	res.Text = archivePointer(path, len(fold), instructions, foldedUserWords(fold))
+	res.Text = archivePointer(path, len(fold), instructions)
 	return res, nil
 }
 
-func archivePointer(path string, n int, instructions, userWords string) string {
+func archivePointer(path string, n int, instructions string) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "%d earlier message(s) were moved out of this conversation to free context. They were archived, not summarized: the record is complete and verbatim.\n\n", n)
 	fmt.Fprintf(&b, "Archive: %s\n\n", path)
@@ -73,6 +73,5 @@ func archivePointer(path string, n int, instructions, userWords string) string {
 	if focus := strings.TrimSpace(instructions); focus != "" {
 		b.WriteString("\n\nWhat the user asked you to keep in focus: " + focus)
 	}
-	b.WriteString(userWords)
 	return b.String()
 }

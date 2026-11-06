@@ -27,31 +27,6 @@ func TestCompactTriggerIndependentOfOutputBudget(t *testing.T) {
 	}
 }
 
-func TestRecentTailBudgetClamp(t *testing.T) {
-	cases := []struct {
-		window int
-		want   int
-	}{
-		{128_000, minRecentTailTokens},   // 10% = 12.8K → clamp to 32K
-		{400_000, 40_000},                // 10% = 40K
-		{1_000_000, maxRecentTailTokens}, // 10% = 100K → clamp to 96K
-		{2_000_000, maxRecentTailTokens}, // still 96K
-	}
-	for _, tc := range cases {
-		a := &Agent{agentConfig: agentConfig{contextWindow: tc.window, compactRatio: defaultCompactRatio}}
-		if got := a.window().recentTailBudget(); got != tc.want {
-			t.Fatalf("window %d: recentTailBudget = %d, want %d", tc.window, got, tc.want)
-		}
-	}
-}
-
-func TestRecentTailUsesWindowClampUnderCapacityDefault(t *testing.T) {
-	a := &Agent{agentConfig: agentConfig{contextWindow: 1_000_000, compactRatio: defaultCompactRatio}}
-	if got, want := a.window().recentTailBudget(), maxRecentTailTokens; got != want {
-		t.Fatalf("recentTailBudget = %d, want %d", got, want)
-	}
-}
-
 func TestCheckpointCeilingAndExceptionalSavings(t *testing.T) {
 	a := &Agent{agentConfig: agentConfig{contextWindow: 1_000_000, compactRatio: 0.85}}
 	if got := a.window().checkpointCeiling(); got != 500_000 {

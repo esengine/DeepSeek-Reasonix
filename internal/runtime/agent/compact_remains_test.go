@@ -40,7 +40,7 @@ func TestCompactionDoneCarriesWhatIsLeftWhenItIsStillLarge(t *testing.T) {
 	run := func(window int) event.Compaction {
 		done = nil
 		a := New(&fakeProvider{reply: "## Summary\n- work"}, nil, foldableSessionOverForce(40),
-			Options{ContextWindow: window, CompactRatio: 0.5, RecentKeep: 2, ArchiveDir: testenv.TempDir(t)}, sink)
+			Options{ContextWindow: window, CompactRatio: 0.5, ArchiveDir: testenv.TempDir(t)}, sink)
 		if _, _, err := a.window().compactToProjection(context.Background(), CompactionTriggerManual, "", compactionScope{ignoreThreshold: true, ignoreEconomics: true}, false); err != nil {
 			t.Fatalf("compactToProjection: %v", err)
 		}
@@ -49,7 +49,7 @@ func TestCompactionDoneCarriesWhatIsLeftWhenItIsStillLarge(t *testing.T) {
 		}
 		return done[0]
 	}
-	tight := run(2_000)
+	tight := run(150)
 	if tight.Remains == nil || tight.Remains.Total <= 0 || len(tight.Remains.Parts) == 0 {
 		t.Fatalf("a fold that left most of a small window said nothing about what is left: %+v", tight.Remains)
 	}

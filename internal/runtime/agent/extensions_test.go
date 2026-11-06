@@ -1124,7 +1124,7 @@ func newCompactionAgent(t *testing.T, d *dispatch.Dispatcher) (*mockProvider, *A
 	sess.Add(provider.Message{Role: provider.RoleUser, Content: "next"})
 	sess.Add(provider.Message{Role: provider.RoleAssistant, Content: "ok"})
 	return mp, New(mp, tool.NewRegistry(), sess, Options{
-		ContextWindow: 50_000, CompactRatio: 0.85, RecentKeep: 2, Extensions: d,
+		ContextWindow: 50_000, CompactRatio: 0.85, Extensions: d,
 	}, event.Discard)
 }
 

@@ -24,8 +24,7 @@ func newPressureAgent(t *testing.T, p provider.Provider) *Agent {
 		{Role: provider.RoleAssistant, Content: "tail"},
 	}
 	a := New(p, tool.NewRegistry(), &sessionstore.Session{Messages: msgs}, Options{
-		ContextWindow: 20_000, CompactRatio: 0.5, RecentKeep: 2,
-		WorkspaceID: "workspace", ModelRef: "model",
+		ContextWindow: 20_000, CompactRatio: 0.5, WorkspaceID: "workspace", ModelRef: "model",
 	}, event.Discard)
 	a.BindSessionPath(testenv.TempDir(t)+"/session.jsonl", true)
 	w := a.window()

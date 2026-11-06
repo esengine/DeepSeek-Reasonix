@@ -47,7 +47,6 @@ func agentOverForceWindow(t *testing.T, prov provider.Provider, sess *sessionsto
 	return New(prov, tool.NewRegistry(), sess, Options{
 		ContextWindow: window,
 		CompactRatio:  0.5,
-		RecentKeep:    2,
 		ArchiveDir:    testenv.TempDir(t),
 	}, event.Discard)
 }

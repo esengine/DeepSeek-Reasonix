@@ -134,8 +134,7 @@ func runOne(p provider.Provider, t contextTask, arm ablation.Set, armName, root 
 
 	var usage usageSink
 	a := agent.New(p, reg, sess, agent.Options{
-		ContextWindow: fixtureWindow, CompactRatio: 0.5, RecentKeep: 2,
-		SessionPath: f.Path, KeepPolicy: agent.KeepErrors, Ablation: arm,
+		ContextWindow: fixtureWindow, CompactRatio: 0.5, SessionPath: f.Path, Ablation: arm,
 	}, &usage)
 	a.LoadProjectionSidecar(f.Path)
 	// From here the transcript lives only in memory. On disk it is the answer.

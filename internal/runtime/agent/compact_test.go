@@ -4,11 +4,9 @@ import (
 	"context"
 	"reasonix/internal/runtime/agent/testutil"
 	"reasonix/internal/state/sessionstore"
-	"slices"
 	"strings"
 	"testing"
 
-	"reasonix/internal/base/testenv"
 	"reasonix/internal/contract/event"
 	"reasonix/internal/contract/provider"
 	"reasonix/internal/contract/tool"
@@ -72,75 +70,6 @@ func (f *fakeProvider) Stream(_ context.Context, req provider.Request) (<-chan p
 // visibleContext returns the model-visible projection when present, else the
 // canonical transcript. Compaction tests assert against this view.
 
-func TestTailStart(t *testing.T) {
-	// 10-char content → with tokPerChar 1.0, each non-empty message costs 10
-	// "tokens"; tool-call messages carry name+args instead.
-	msg := func(role provider.Role, n int) provider.Message {
-		return provider.Message{Role: role, Content: strings.Repeat("x", n)}
-	}
-	u := func(n int) provider.Message { return msg(provider.RoleUser, n) }
-	as := func(n int) provider.Message { return msg(provider.RoleAssistant, n) }
-	ac := provider.Message{Role: provider.RoleAssistant, ToolCalls: []provider.ToolCall{{ID: "1", Name: "f", Arguments: "{}"}}}
-	to := func(n int) provider.Message {
-		return provider.Message{Role: provider.RoleTool, ToolCallID: "1", Name: "f", Content: strings.Repeat("x", n)}
-	}
-
-	sys := provider.Message{Role: provider.RoleSystem}
-	cases := []struct {
-		name    string
-		msgs    []provider.Message
-		head    int
-		budget  int
-		minKeep int
-		wantStr int
-	}{
-		// Budget 25 fits the two newest 10-char messages (20) but not a third (30);
-		// the tail stops at the third-from-last.
-		{"budget-bounds-tail", []provider.Message{u(10), as(10), u(10), as(10), u(10)}, 0, 25, 2, 3},
-		// A single huge recent message can't blow the budget below minKeep: the last
-		// two are kept regardless.
-		{"min-keep-floor", []provider.Message{u(10), as(10), u(10), as(10), to(9999)}, 0, 25, 2, 3},
-		// The boundary lands on an orphan tool result and must move back onto its
-		// assistant so the tail begins with the tool_calls.
-		{"align-off-tool", []provider.Message{sys, u(10), ac, to(10), ac, to(10)}, 1, 0, 1, 4},
-		// A generous budget keeps everything down to the first compactable message
-		// after the head.
-		{"budget-keeps-all", []provider.Message{sys, u(10), as(10), u(10)}, 1, 100000, 2, 2},
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			start := tailStart(tc.msgs, tc.head, tc.budget, 1.0, tc.minKeep)
-			if start != tc.wantStr {
-				t.Errorf("start = %d, want %d", start, tc.wantStr)
-			}
-			if tc.msgs[start].Role == provider.RoleTool {
-				t.Errorf("recent tail begins with orphan tool message at %d", start)
-			}
-		})
-	}
-}
-
-func TestTailStartSmallSession(t *testing.T) {
-	sys := provider.Message{Role: provider.RoleSystem}
-	usr := provider.Message{Role: provider.RoleUser, Content: "hi"}
-	for i, msgs := range [][]provider.Message{
-		{sys, usr}, // system + one message: nothing fits the tail; must not index msgs[len]
-		{sys},
-		{usr},
-		{},
-	} {
-		head := 0
-		if len(msgs) > 0 && msgs[0].Role == provider.RoleSystem {
-			head = 1
-		}
-		start := tailStart(msgs, head, 16384, 0.25, 2)
-		if start < head || start > len(msgs) {
-			t.Errorf("case %d: start=%d out of bounds [%d,%d]", i, start, head, len(msgs))
-		}
-	}
-}
-
 func TestPinnedPrefixLen(t *testing.T) {
 	sys := provider.Message{Role: provider.RoleSystem}
 	small := provider.Message{Role: provider.RoleUser, Content: "do X with token T"}
@@ -157,11 +86,11 @@ func TestPinnedPrefixLen(t *testing.T) {
 		msgs []provider.Message
 		want int
 	}{
-		{"pins-system-and-small-task", 0, []provider.Message{sys, small, as, as}, 2},
-		{"summaries-are-not-pinned-A1-merge", 0, []provider.Message{sys, small, sum, sum, as}, 2},
+		{"pins-only-the-system-prompt", 0, []provider.Message{sys, small, as, as}, 1},
+		{"summaries-are-not-pinned-A1-merge", 0, []provider.Message{sys, small, sum, sum, as}, 1},
 		{"large-first-turn-stays-foldable", 0, []provider.Message{sys, big, as, as}, 1},
-		{"tiny-window-wont-pin", 10, []provider.Message{sys, small, as, as}, 1},
-		{"summary-is-not-the-task-turn", 0, []provider.Message{sys, sum, as}, 1},
+		{"tiny-window-pins-the-same", 10, []provider.Message{sys, small, as, as}, 1},
+		{"no-system-prompt-pins-nothing", 0, []provider.Message{small, as}, 0},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -169,250 +98,6 @@ func TestPinnedPrefixLen(t *testing.T) {
 				t.Errorf("pinnedPrefixLen = %d, want %d", got, tc.want)
 			}
 		})
-	}
-}
-
-func TestKeepIndexesKeepsOnlyTheFailedCallsResult(t *testing.T) {
-	region := []provider.Message{
-		{Role: provider.RoleAssistant, ToolCalls: []provider.ToolCall{
-			{ID: "err", Name: "bash", Arguments: `{"cmd":"bad"}`},
-			{ID: "ok", Name: "read_file", Arguments: `{"path":"main.go"}`},
-		}},
-		{Role: provider.RoleTool, ToolCallID: "err", Name: "bash", Content: "error: command failed"},
-		{Role: provider.RoleTool, ToolCallID: "ok", Name: "read_file", Content: "package main"},
-	}
-
-	keep, _ := (&Agent{keepPolicy: KeepErrors}).window().keepIndexes(region, KeepErrors)
-	if want := []bool{true, true, false}; !slices.Equal(keep, want) {
-		t.Fatalf("keep = %v, want %v: the failed pair stays, its sibling folds", keep, want)
-	}
-}
-
-func TestKeepIndexesScopesPolicyAfterLatestSummary(t *testing.T) {
-	priorSummary := provider.Message{Role: provider.RoleUser, Content: SummaryTagOpen + "\nprior digest\n" + SummaryTagClose}
-	region := []provider.Message{
-		{Role: provider.RoleAssistant, ToolCalls: []provider.ToolCall{{ID: "old", Name: "bash", Arguments: `{}`}}},
-		{Role: provider.RoleTool, ToolCallID: "old", Name: "bash", Content: "error: old failure"},
-		priorSummary,
-		{Role: provider.RoleAssistant, ToolCalls: []provider.ToolCall{{ID: "new", Name: "bash", Arguments: `{}`}}},
-		{Role: provider.RoleTool, ToolCallID: "new", Name: "bash", Content: "error: new failure"},
-	}
-
-	keep, _ := (&Agent{keepPolicy: KeepErrors}).window().keepIndexes(region, KeepErrors)
-	want := []bool{false, false, false, true, true}
-	for i := range want {
-		if keep[i] != want[i] {
-			t.Fatalf("keep = %v, want %v", keep, want)
-		}
-	}
-}
-
-// The marker is what lets a user turn exceed the size budget keepUserTurns
-// applies, so it is asserted directly: at keepIndexes level every small user
-// turn is kept regardless, which would hide a broken marker match.
-func TestKeepUserMarkedRequiresUserPrefixMarker(t *testing.T) {
-	cases := []struct {
-		name string
-		msg  provider.Message
-		want bool
-	}{
-		{"assistant marker ignored", provider.Message{Role: provider.RoleAssistant, Content: "[keep] assistant output"}, false},
-		{"marker must lead", provider.Message{Role: provider.RoleUser, Content: "ordinary prose mentioning [keep] later"}, false},
-		{"leading marker after space", provider.Message{Role: provider.RoleUser, Content: "  <keep> exact requirement"}, true},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := isUserMarked(tc.msg); got != tc.want {
-				t.Fatalf("isUserMarked = %v, want %v", got, tc.want)
-			}
-		})
-	}
-}
-
-// TestCompactEmitsEvents covers the card-driving signals: a CompactionStarted
-// (before the summarizer runs) then a CompactionDone carrying the trigger,
-// message count, and summary — in that order.
-func TestCompactEmitsEvents(t *testing.T) {
-	prov := &fakeProvider{reply: "- goal: do X"}
-	sess := &sessionstore.Session{Messages: []provider.Message{
-		{Role: provider.RoleSystem, Content: "sys"},
-		{Role: provider.RoleUser, Content: "task"},
-		{Role: provider.RoleAssistant, Content: strings.Repeat("step one work ", 200)},
-		{Role: provider.RoleUser, Content: "more"},
-		{Role: provider.RoleAssistant, Content: strings.Repeat("step two work ", 200)},
-		{Role: provider.RoleUser, Content: "next"},
-		{Role: provider.RoleAssistant, Content: "ok"},
-	}}
-	var got []event.Event
-	sink := event.FuncSink(func(e event.Event) { got = append(got, e) })
-	a := New(prov, tool.NewRegistry(), sess, Options{ContextWindow: 50_000, RecentKeep: 2}, sink)
-
-	if err := a.window().compact(context.Background(), "auto", "", compactionScope{ignoreThreshold: true, ignoreEconomics: true}); err != nil {
-		t.Fatalf("compact: %v", err)
-	}
-
-	startedAt, doneAt := -1, -1
-	for i, e := range got {
-		switch e.Kind {
-		case event.CompactionStarted:
-			startedAt = i
-			if e.Compaction.Trigger != "auto" {
-				t.Errorf("started trigger = %q, want auto", e.Compaction.Trigger)
-			}
-		case event.CompactionDone:
-			doneAt = i
-			c := e.Compaction
-			if c.Trigger != "auto" || c.Messages == 0 || !strings.Contains(c.Summary, "archived, not summarized") {
-				t.Errorf("done event = %+v", c)
-			}
-		}
-	}
-	if startedAt < 0 {
-		t.Fatal("no CompactionStarted event emitted")
-	}
-	if doneAt < 0 {
-		t.Fatal("no CompactionDone event emitted")
-	}
-	if startedAt > doneAt {
-		t.Errorf("CompactionStarted (%d) must precede CompactionDone (%d)", startedAt, doneAt)
-	}
-}
-
-func TestCompactSkipsSingleSmallMessage(t *testing.T) {
-	prov := &fakeProvider{reply: "- should not be called"}
-	sess := &sessionstore.Session{Messages: []provider.Message{
-		{Role: provider.RoleSystem, Content: "sys"},
-		{Role: provider.RoleUser, Content: "tiny"},
-		{Role: provider.RoleUser, Content: "next"},
-		{Role: provider.RoleAssistant, Content: "ok"},
-	}}
-	a := New(prov, tool.NewRegistry(), sess, Options{RecentKeep: 2, ArchiveDir: testenv.TempDir(t)}, event.Discard)
-
-	if err := a.window().compact(context.Background(), "auto", "", compactionScope{}); err != nil {
-		t.Fatalf("compact: %v", err)
-	}
-	if got := len(sess.Messages); got != 4 {
-		t.Fatalf("small single message should not compact, len = %d", got)
-	}
-	if len(prov.got) != 0 {
-		t.Fatalf("summarizer was called for tiny region: %+v", prov.got)
-	}
-}
-
-func TestMaybeCompactThreshold(t *testing.T) {
-	// compact_ratio is the sole trigger. Use a realistic window so hardInputCeiling
-	// (window−protocolReserve) stays above the fold trigger; tiny synthetic
-	// windows collapse hard to 1 and force every observation.
-	const window = 10_000
-	const ratio = 0.8 // fold trigger = 8000
-	newSess := func() *sessionstore.Session {
-		return &sessionstore.Session{Messages: []provider.Message{
-			{Role: provider.RoleSystem, Content: "sys"},
-			{Role: provider.RoleUser, Content: "task"},
-			{Role: provider.RoleAssistant, Content: strings.Repeat("a ", 5000)},
-			{Role: provider.RoleUser, Content: "c"},
-			{Role: provider.RoleAssistant, Content: strings.Repeat("b ", 5000)},
-			{Role: provider.RoleUser, Content: "e"},
-			{Role: provider.RoleAssistant, Content: "f"},
-		}}
-	}
-	opts := Options{ContextWindow: window, CompactRatio: ratio, RecentKeep: 2}
-
-	// Below compact_ratio: untouched, no summarizer call.
-	sess := newSess()
-	prov := &fakeProvider{reply: "s"}
-	a := New(prov, tool.NewRegistry(), sess, opts, event.Discard)
-	prepareForObservedUsage(a, context.Background(), &provider.Usage{PromptTokens: 7000})
-	if len(sess.Messages) != 7 {
-		t.Errorf("below threshold should not compact, len = %d", len(sess.Messages))
-	}
-	if len(prov.got) != 0 {
-		t.Fatalf("below threshold called summarizer: %+v", prov.got)
-	}
-
-	// 60% is below the sole 80% trigger: still no maintenance.
-	sess = newSess()
-	prov = &fakeProvider{reply: "s"}
-	a = New(prov, tool.NewRegistry(), sess, opts, event.Discard)
-	prepareForObservedUsage(a, context.Background(), &provider.Usage{PromptTokens: 6000})
-	if a.window().currentProjectionVersion() != 0 || len(prov.got) != 0 {
-		t.Fatalf("60%% should not maintain: version=%d calls=%d", a.window().currentProjectionVersion(), len(prov.got))
-	}
-
-	// At/above compact_ratio: one summary projection; canonical stays full.
-	sess = newSess()
-	a = New(&fakeProvider{reply: "s"}, tool.NewRegistry(), sess, opts, event.Discard)
-	prepareForObservedUsage(a, context.Background(), &provider.Usage{PromptTokens: 8500})
-	if !hasCompactionSummary(visibleContext(a)) {
-		t.Errorf("compact threshold should install a summary projection, got: %+v", visibleContext(a))
-	}
-	if len(sess.Messages) != 7 {
-		t.Errorf("canonical should stay full after projection compact, len=%d", len(sess.Messages))
-	}
-
-	// No context window: compaction disabled.
-	sess = newSess()
-	a = New(&fakeProvider{reply: "s"}, tool.NewRegistry(), sess, Options{RecentKeep: 2}, event.Discard)
-	prepareForObservedUsage(a, context.Background(), &provider.Usage{PromptTokens: 1 << 30})
-	if len(sess.Messages) != 7 {
-		t.Errorf("no window should disable compaction, len = %d", len(sess.Messages))
-	}
-}
-
-func TestMaybeCompactForceCeilingBypassesEconomics(t *testing.T) {
-	// Physical hard ceiling (window−reserve) forces a summary even when the fold
-	// is below the minFoldTokens economics floor — but the fold must still be
-	// large enough that the candidate lands under the compact_ratio trigger.
-	const window = 10_000
-	big := strings.Repeat("old analysis detail ", 400)
-	sess := &sessionstore.Session{Messages: []provider.Message{
-		{Role: provider.RoleSystem, Content: "sys"},
-		{Role: provider.RoleUser, Content: "task"},
-		{Role: provider.RoleAssistant, Content: big},
-		{Role: provider.RoleUser, Content: "next"},
-		{Role: provider.RoleAssistant, Content: "ok"},
-	}}
-	prov := &fakeProvider{reply: "archived, not summarized"}
-	a := New(prov, tool.NewRegistry(), sess, Options{ContextWindow: window, CompactRatio: 0.85, RecentKeep: 2}, event.Discard)
-
-	// hard = 10000-256 = 9744; observe just above it.
-	prepareForObservedUsage(a, context.Background(), &provider.Usage{PromptTokens: 9800})
-	if got := len(sess.Messages); got != 5 {
-		t.Fatalf("canonical len = %d, want 5: %+v", got, sess.Messages)
-	}
-	if sess.Messages[1].Content != "task" {
-		t.Fatalf("first user turn not pinned verbatim in canonical: %+v", sess.Messages[1])
-	}
-	proj := visibleContext(a)
-	if !hasCompactionSummary(proj) || !strings.Contains(joinContents(proj), "archived, not summarized") {
-		t.Fatalf("forced compact did not install summary projection: %+v", proj)
-	}
-}
-
-func TestMaybeCompactSkipsLowValueRegionBeforeForceCeiling(t *testing.T) {
-	// Above compact_ratio but below the physical hard ceiling: low-value folds
-	// are rejected by foldEconomics without calling the summarizer.
-	const window = 10_000
-	sess := &sessionstore.Session{Messages: []provider.Message{
-		{Role: provider.RoleSystem, Content: "sys"},
-		{Role: provider.RoleUser, Content: "small old request"},
-		{Role: provider.RoleAssistant, Content: "small old answer"},
-		{Role: provider.RoleUser, Content: "next"},
-		{Role: provider.RoleAssistant, Content: "ok"},
-	}}
-	prov := &fakeProvider{reply: "should not summarize"}
-	a := New(prov, tool.NewRegistry(), sess, Options{ContextWindow: window, CompactRatio: 0.85, RecentKeep: 2}, event.Discard)
-
-	// fold trigger = 8500; hard = 9744. Observe between them.
-	prepareForObservedUsage(a, context.Background(), &provider.Usage{PromptTokens: 8600})
-	if got := len(sess.Messages); got != 5 {
-		t.Fatalf("low-value region should not compact before force ceiling, len = %d", got)
-	}
-	if len(prov.got) != 0 {
-		t.Fatalf("summarizer was called for low-value non-forced region: %+v", prov.got)
-	}
-	if a.window().currentProjectionVersion() != 0 {
-		t.Fatalf("low-value region installed projection version %d", a.window().currentProjectionVersion())
 	}
 }
 
@@ -427,8 +112,7 @@ func TestMaybeCompactFoldsSingleLargeMessageAtThreshold(t *testing.T) {
 		{Role: provider.RoleAssistant, Content: "ok"},
 	}}
 	a := New(&fakeProvider{reply: "archived, not summarized"}, tool.NewRegistry(), sess, Options{
-		ContextWindow: window, CompactRatio: 0.8, RecentKeep: 2,
-	}, event.Discard)
+		ContextWindow: window, CompactRatio: 0.8}, event.Discard)
 
 	prepareForObservedUsage(a, context.Background(), &provider.Usage{PromptTokens: 8500})
 	if got := len(sess.Messages); got != 5 {
@@ -463,62 +147,6 @@ func TestRenderTranscriptRedactsToolCallArgs(t *testing.T) {
 	}
 	if !strings.Contains(out, "task") {
 		t.Fatalf("renderTranscript missing key names:\n%s", out)
-	}
-}
-
-// Display-only output stays verbatim in the canonical transcript by construction
-// (compaction only writes a projection); this pins the other half: it must never
-// reach the summarizer or the model-visible projection.
-func TestInterruptedDisplayStaysOutOfCompactionPromptAndProjection(t *testing.T) {
-	local := provider.Message{
-		Role: provider.RoleTool, ToolCallID: provider.LocalOnlyToolID, Name: provider.LocalOnlyToolName,
-		LocalOnly: true, Content: "partial visible answer", ReasoningContent: "private partial reasoning",
-		InterruptedTurn: &provider.InterruptedTurnRecovery{Pending: true},
-	}
-	a := &Agent{}
-	kept, fold, retention, _ := a.window().partitionFoldForProjection([]provider.Message{local})
-	if len(kept) != 0 || len(fold) != 0 {
-		t.Fatalf("compaction partition kept=%+v fold=%+v, want display-only output in neither", kept, fold)
-	}
-	if retention.Kept != 0 || retention.Dropped != 0 {
-		t.Fatalf("retention = %+v, want display-only output counted as neither kept nor dropped", retention)
-	}
-	if transcript := renderTranscript([]provider.Message{local}); transcript != "" {
-		t.Fatalf("local interrupted output leaked into compaction prompt: %q", transcript)
-	}
-}
-
-func TestCompactKeepsActiveTurnVerbatim(t *testing.T) {
-	const currentCreatedAt int64 = 123456
-	call := provider.Message{
-		Role: provider.RoleAssistant,
-		ToolCalls: []provider.ToolCall{{
-			ID: "write-1", Name: "write_file", Arguments: `{"path":"a.txt","content":"ok"}`,
-		}},
-	}
-	result := provider.Message{Role: provider.RoleTool, ToolCallID: "write-1", Name: "write_file", Content: "wrote a.txt"}
-	sess := &sessionstore.Session{Messages: []provider.Message{
-		{Role: provider.RoleSystem, Content: "sys"},
-		{Role: provider.RoleUser, Content: strings.Repeat("old request ", 200)},
-		{Role: provider.RoleAssistant, Content: strings.Repeat("old answer ", 200)},
-		{Role: provider.RoleUser, Content: "update a.txt", CreatedAt: currentCreatedAt},
-		call,
-		result,
-	}}
-	a := New(&fakeProvider{reply: "old work summary"}, tool.NewRegistry(), sess, Options{
-		ContextWindow: 50_000, CompactRatio: 0.85, RecentKeep: 1,
-	}, event.Discard)
-	a.activeTurnCreatedAt.Store(currentCreatedAt)
-
-	if err := a.window().compact(context.Background(), "auto", "", compactionScope{ignoreThreshold: true, ignoreEconomics: true}); err != nil {
-		t.Fatalf("compact: %v", err)
-	}
-	start := a.window().activeTurnStart(sess.Messages)
-	if start < 0 || len(sess.Messages)-start != 3 {
-		t.Fatalf("active turn boundary = %d in %+v, want three-message verbatim tail", start, sess.Messages)
-	}
-	if sess.Messages[start].Content != "update a.txt" || sess.Messages[start+1].ToolCalls[0].Arguments != call.ToolCalls[0].Arguments || sess.Messages[start+2].Content != result.Content {
-		t.Fatalf("active turn changed during compaction: %+v", sess.Messages[start:])
 	}
 }
 

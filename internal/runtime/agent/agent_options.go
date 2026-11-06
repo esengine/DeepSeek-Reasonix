@@ -93,16 +93,14 @@ type Options struct {
 	// files outside the workspace roots. nil keeps fail-closed behavior.
 	ConfigWriteApprover tool.ConfigWriteApprover
 
-	// Context management. ContextWindow <= 0 disables compaction. Ratios and
-	// RecentKeep fall back to defaults when unset.
+	// Context management. ContextWindow <= 0 disables compaction. Ratios fall
+	// back to defaults when unset.
 	ContextWindow     int
 	CompactRatio      float64
 	CompactionBudgets CompactionBudgets
 	// Deprecated compatibility inputs. New agents ignore these fields; automatic
 	// maintenance is controlled only by CompactRatio.
-	RecentKeep             int
 	ArchiveDir             string
-	KeepPolicy             KeepPolicy
 	SessionPath            string // projection sidecar path; empty = memory only
 	WorkspaceID            string // prompt-cache lineage component
 	StrictAlternatingRoles bool   // merge adjacent user turns for strict providers at request time

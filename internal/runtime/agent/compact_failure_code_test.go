@@ -18,7 +18,7 @@ func failureFixture(t *testing.T, prov provider.Provider) (*Agent, *recordSink) 
 	t.Helper()
 	sink := &recordSink{}
 	a := New(prov, tool.NewRegistry(), foldableSessionOverForce(6), Options{
-		ContextWindow: 5000, CompactRatio: 0.5, RecentKeep: 2, ArchiveDir: testenv.TempDir(t),
+		ContextWindow: 5000, CompactRatio: 0.5, ArchiveDir: testenv.TempDir(t),
 	}, sink)
 	return a, sink
 }

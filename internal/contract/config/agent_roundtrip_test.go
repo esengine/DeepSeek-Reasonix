@@ -23,6 +23,10 @@ var retiredAgentKeys = map[string]bool{
 	"recovery_temperature":   true,
 	"auto_plan":              true,
 	"auto_plan_classifier":   true,
+	"keep":                   true,
+	"recent_keep":            true,
+	"user_turn_keep_tokens":  true,
+	"first_turn_pin_tokens":  true,
 }
 
 // probe fills a field with a value distinguishable from its zero, so a setting

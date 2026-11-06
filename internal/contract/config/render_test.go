@@ -397,12 +397,6 @@ func TestRenderTOMLRoundTrips(t *testing.T) {
 	if got.Agent.CompactRatio != orig.Agent.CompactRatio {
 		t.Errorf("compact_ratio = %v, want %v", got.Agent.CompactRatio, orig.Agent.CompactRatio)
 	}
-	if strings.Join(got.Agent.Keep, ",") != strings.Join(orig.Agent.Keep, ",") {
-		t.Errorf("keep = %v, want %v", got.Agent.Keep, orig.Agent.Keep)
-	}
-	if got.Agent.RecentKeep != orig.Agent.RecentKeep {
-		t.Errorf("recent_keep = %d, want %d", got.Agent.RecentKeep, orig.Agent.RecentKeep)
-	}
 	if got.Agent.SystemPrompt != orig.Agent.SystemPrompt {
 		t.Errorf("system_prompt mismatch:\n got %q\nwant %q", got.Agent.SystemPrompt, orig.Agent.SystemPrompt)
 	}

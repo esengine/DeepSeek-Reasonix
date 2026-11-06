@@ -50,8 +50,7 @@ func TestPrepareThresholdSkipsExtensionInterceptors(t *testing.T) {
 		{Role: provider.RoleAssistant, Content: "ok"},
 	}}
 	a := New(&fakeProvider{reply: "unused"}, tool.NewRegistry(), sess, Options{
-		ContextWindow: 50_000, CompactRatio: 0.85, RecentKeep: 2,
-		Extensions: d, WorkspaceID: "ws", ModelRef: "m",
+		ContextWindow: 50_000, CompactRatio: 0.85, Extensions: d, WorkspaceID: "ws", ModelRef: "m",
 	}, event.Discard)
 
 	// Below fold: Prepare sizes the view and must not touch interceptors.

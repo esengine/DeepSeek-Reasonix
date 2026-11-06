@@ -228,7 +228,6 @@ func TestForceThresholdNoopReturnsCompactionRequired(t *testing.T) {
 	a := New(&fakeProvider{reply: "unused"}, tool.NewRegistry(), sess, Options{
 		ContextWindow: 200,
 		CompactRatio:  0.5,
-		RecentKeep:    2,
 	}, event.Discard)
 
 	_, err := a.window().contextManager().Prepare(context.Background(), ContextPreparePolicy{Trigger: CompactionTriggerPressure})
@@ -251,7 +250,6 @@ func TestCompactInstallsCoveredPrefixHash(t *testing.T) {
 	path := filepath.Join(dir, "s.jsonl")
 	a := New(fp, tool.NewRegistry(), sess, Options{
 		ContextWindow: 2000,
-		RecentKeep:    2,
 		ArchiveDir:    dir,
 		SessionPath:   path,
 		WorkspaceID:   "ws",

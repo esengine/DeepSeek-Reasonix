@@ -34,7 +34,6 @@ type roleWiring struct {
 	sink              event.Sink
 	gate              *control.SharedHeadlessGate
 	reg               *tool.Registry
-	keep              agent.KeepPolicy
 	checkTargetAccess tool.TargetAccessCheck
 	hooks             *hook.Runner // each role fires it under a session of its own
 }
@@ -79,10 +78,8 @@ func (w roleWiring) planner(opts Options, executor *agent.Agent, executorModel, 
 		ModelRef:          modelRefFromEntry(pe),
 		ContextWindow:     pe.ContextWindow,
 		CompactRatio:      w.cfg.Agent.CompactRatio,
-		RecentKeep:        w.cfg.Agent.RecentKeep,
 		CompactionBudgets: compactionBudgets(w.cfg),
 		ArchiveDir:        w.roots.ArchiveDir(),
-		KeepPolicy:        w.keep,
 		ReasoningLanguage: w.cfg.ReasoningLanguage(),
 		CapabilityLedger:  plannerLedger,
 		CapabilityAudit:   plannerAudit,

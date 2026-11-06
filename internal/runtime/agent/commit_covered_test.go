@@ -17,7 +17,7 @@ func commitTestAgent(t *testing.T) *Agent {
 	t.Helper()
 	dir := testenv.TempDir(t)
 	return New(&fakeProvider{reply: "digest"}, tool.NewRegistry(), sessionstore.NewSession("sys"), Options{
-		ContextWindow: 2000, RecentKeep: 2, ArchiveDir: dir,
+		ContextWindow: 2000, ArchiveDir: dir,
 		SessionPath: filepath.Join(dir, "s.jsonl"), WorkspaceID: "ws", ModelRef: "m",
 	}, event.Discard)
 }

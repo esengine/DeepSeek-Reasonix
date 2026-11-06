@@ -28,8 +28,7 @@ func sidecarMessages() []provider.Message {
 func sidecarAgent(t *testing.T, prov provider.Provider, sess *sessionstore.Session, path string, load bool) *Agent {
 	t.Helper()
 	a := New(prov, tool.NewRegistry(), sess, Options{
-		ContextWindow: 20_000, CompactRatio: 0.5, RecentKeep: 2,
-		WorkspaceID: "ws", ModelRef: "p/m",
+		ContextWindow: 20_000, CompactRatio: 0.5, WorkspaceID: "ws", ModelRef: "p/m",
 	}, event.Discard)
 	a.BindSessionPath(path, load)
 	return a
