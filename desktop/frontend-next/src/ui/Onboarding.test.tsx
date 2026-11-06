@@ -21,7 +21,7 @@ function draw(onSkip?: () => void) {
 describe("first-run setup", () => {
   it("walks from the welcome through a listed service to a default model, without asking how it is spoken to", async () => {
     const { save, onDone, user } = draw();
-    expect(screen.getByRole("heading", { name: "交给它一件事，它会做完" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "欢迎使用 Reasonix" })).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "开始设置" }));
     expect(screen.getByRole("radio", { name: /DeepSeek/ }).getAttribute("aria-checked")).toBe("true");
     expect(screen.queryByLabelText("服务地址")).toBeNull();
