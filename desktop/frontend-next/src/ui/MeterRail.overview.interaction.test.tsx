@@ -67,10 +67,15 @@ describe("the session overview behind the cache meter", () => {
     const view = within(card());
     expect(view.getByText("自本次打开此会话起；恢复或分叉会重新计数")).toBeTruthy();
     expect(view.getByText("请求").closest("div")!.textContent).toContain("3");
-    expect(view.getByText("请求").closest("div")!.textContent).toContain("返回了用量与价格的模型响应");
+    expect(view.getByText("请求").closest("div")!.textContent).toContain("主代理 2 · 子代理 0");
     expect(view.getByText("Token").closest("div")!.textContent).toContain("8.5k");
-    expect(view.getByText("工作时长").closest("div")!.textContent).toContain("1 分 12 秒");
-    expect(view.getByText("工作时长").closest("div")!.textContent).toContain("含审批与工具等待");
+  });
+
+  it("puts the work time in the footer, with what it adds up on hover", () => {
+    rail();
+    const foot = card().querySelector(".studio-overview-foot")!;
+    expect(foot.textContent).toContain("工作时长 1 分 12 秒");
+    expect(foot.querySelector("span")?.getAttribute("title")).toContain("含审批与工具等待");
   });
 
   it("states the hit rate over what the endpoint split, and says what it left out", () => {
@@ -90,12 +95,13 @@ describe("the session overview behind the cache meter", () => {
 
   it("lists each source with its own cache and cost, and an unpriced one as unknown", () => {
     rail();
-    const rows = [...card().querySelectorAll(".studio-overview-row")].map((r) => r.textContent);
+    const lines = [...card().querySelectorAll(".studio-overview-row")];
+    const rows = lines.map((r) => r.textContent);
     expect(rows[0]).toContain("压缩");
     expect(rows[0]).toContain("—");
     expect(rows[1]).toContain("主代理");
-    expect(rows[1]).toContain("76%");
     expect(rows[1]).toContain("¥3.20");
+    expect(lines[1]!.getAttribute("title")).toContain("76%");
     const price = card().querySelectorAll(".studio-overview-row")[0]!.querySelector("b[title]");
     expect(price?.getAttribute("title")).toBe("价格未知：no_rate");
   });
@@ -130,30 +136,16 @@ describe("the session overview behind the cache meter", () => {
     expect(button().textContent).toContain("76%");
   });
 
-  it("shows the context window in the same card, as the next request's content and not a running total", () => {
+  it("does not repeat the context window, which has a card of its own", () => {
     rail();
-    const section = within(card()).getByRole("region", { name: "上下文窗口" });
-    expect(section.textContent).toContain("42k");
-    expect(section.textContent).toContain("128k");
-    expect(section.textContent).toContain("33%");
-    expect(section.textContent).toContain("下一次请求会带上的内容，是当前值，不是累计");
-    expect(section.querySelectorAll("[data-part]").length).toBe(5);
-  });
-
-  it("states the automatic fold line only when the kernel has one", () => {
-    rail();
-    expect(within(card()).getByRole("region", { name: "上下文窗口" }).textContent).toContain("自动压缩于 96k");
-    cleanup();
-    rail({ ctx: { ...context, compact_at: 0 } });
-    expect(within(card()).getByRole("region", { name: "上下文窗口" }).textContent).not.toContain("自动压缩于");
-  });
-
-  it("keeps the window section when no request was billed, and omits it when the kernel sent none", () => {
-    rail({ usage: { ...usage, requests: 0, sources: [] } });
-    expect(within(card()).getByRole("region", { name: "上下文窗口" })).toBeTruthy();
-    cleanup();
-    rail({ ctx: null });
     expect(within(card()).queryByRole("region", { name: "上下文窗口" })).toBeNull();
+    expect(card().querySelector("[data-part]")).toBeNull();
+  });
+
+  it("draws each source as a bar sized by what it cost", () => {
+    rail();
+    const bars = [...card().querySelectorAll(".studio-overview-row > i > u")].map((e) => (e as HTMLElement).style.width);
+    expect(bars).toEqual(["0%", "100%"]);
   });
 
   it("hands over to the context details without leaving both cards open", async () => {

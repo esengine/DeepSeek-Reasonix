@@ -57,13 +57,13 @@ export function ContextSummaryCard({ context, mcp, percent, onManage, compact: a
           )}
         </>
       ) : <p>{t("composer.no_context_data_yet")}</p>}
-      {action && <CompactNow action={action} usage={context ? { used: context.used, window: context.window } : undefined} />}
-      <section>
-        <div><b>MCP</b><small>{ready.length} / {active.length} {t("composer.connected")} · {tools} {t("composer.tools")}</small></div>
-        {active.slice(0, 4).map((server) => <div className="chrome-mcp-row" key={server.name}><i data-ready={server.state === "ready" ? "" : undefined} /><span>{server.name}</span><small>{server.state === "ready" ? `${server.tools} ${t("composer.tools")}` : t("composer.waiting_to_connect")}</small></div>)}
-        {!active.length && <p>{t("composer.no_mcp_services_enabled")}</p>}
-        <button data-action="settings.section" data-value="ext" onClick={onManage}>{t("composer.manage_mcp_and_tools")}</button>
-      </section>
+      <footer className="chrome-context-foot">
+        <span title={active.map((server) => `${server.name} · ${server.state === "ready" ? `${server.tools || 0} ${t("composer.tools")}` : t("composer.waiting_to_connect")}`).join("\n") || undefined}>
+          MCP · {ready.length} / {active.length} {t("composer.connected")} · {tools} {t("composer.tools")}
+        </span>
+        {action && <CompactNow action={action} usage={context ? { used: context.used, window: context.window } : undefined} />}
+        <button type="button" className="manage" data-action="settings.section" data-value="ext" onClick={onManage}>{t("composer.manage_mcp_and_tools")}</button>
+      </footer>
     </div>
   );
 }

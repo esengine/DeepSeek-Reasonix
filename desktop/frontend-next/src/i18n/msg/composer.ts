@@ -159,7 +159,6 @@ export const COMPOSER: Messages = {
   "composer.no_git_repository": { zh: "非 Git 仓库", en: "No Git repository" },
   "composer.no_images": { zh: "不发送图片", en: "No images" },
   "composer.no_matching_branches": { zh: "没有匹配的分支", en: "No matching branches" },
-  "composer.no_mcp_services_enabled": { zh: "尚未启用 MCP 服务", en: "No MCP services enabled" },
   "composer.no_model_service_is_connected": { zh: "还没有连接模型服务，发不出去", en: "No model service is connected, so nothing can be sent" },
   "composer.no_models_match": { zh: "没有匹配的模型。", en: "No models match." },
   "composer.no_observable_progress_for_n": { zh: "已连续 {n} 轮没有可观察的进展", en: "No observable progress for {n} rounds" },

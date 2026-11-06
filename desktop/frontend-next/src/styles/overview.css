@@ -17,11 +17,11 @@
 .studio-overview-grid dt { color: var(--ghost); font: var(--w-reg) var(--fs-micro)/1.3 var(--ui); }
 .studio-overview-grid dd { margin: 0; color: var(--text); font: var(--w-med) var(--fs-ui)/1.2 var(--mono); }
 .studio-overview-grid small { color: var(--ghost); font: var(--w-reg) var(--fs-micro)/1.4 var(--ui); }
-.studio-overview-row { display: grid; grid-template-columns: minmax(0, 1.3fr) 3.2ch 5ch 4.5ch minmax(0, 1.2fr); align-items: center; gap: 8px; min-height: 22px; padding: 0 5px; border-radius: var(--r-xs); }
-.studio-overview-row:hover { background: var(--overlay); }
+.studio-overview-row { display: grid; grid-template-columns: 64px minmax(0, 1fr) auto; align-items: center; gap: 8px; min-height: 26px; padding: 4px 0; }
 .studio-overview-row > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); }
-.studio-overview-row > b { color: var(--muted); font: var(--w-reg) var(--fs-micro)/1 var(--mono); text-align: right; }
-.studio-overview-row > small { text-align: right; font-family: var(--mono); }
+.studio-overview-row > b { min-width: 52px; color: var(--muted); font: var(--w-reg) var(--fs-meta)/1 var(--ui); text-align: right; }
+.studio-overview-row > i { display: block; height: 6px; overflow: hidden; border-radius: var(--r-xs); background: var(--overlay); }
+.studio-overview-row > i > u { display: block; height: 100%; background: var(--net); text-decoration: none; }
 @media (hover: hover) {
   .studio-overview-anchor:hover .studio-overview-popover { opacity: 1; visibility: visible; pointer-events: auto; transform: none; transition-delay: 0s; }
   .studio-meterrail:has(.studio-context-anchor[data-open]) .studio-overview-anchor:not([data-open]):hover .studio-overview-popover { opacity: 0; visibility: hidden; pointer-events: none; }
@@ -82,3 +82,16 @@
 .errbar[data-cause="root-missing"] > span > b { font-weight: var(--w-reg); }
 .errbar[data-cause="root-missing"] > span > small { color: var(--muted); font: var(--w-reg) var(--fs-meta)/1.4 var(--ui); }
 .errbar[data-cause="root-missing"] > button { height: 32px; padding: 0 14px; border: 1px solid var(--border); border-radius: var(--r-sm); background: var(--raised); color: var(--text); font: var(--w-reg) var(--fs-ui) var(--ui); text-decoration: none; white-space: nowrap; }
+.studio-overview-foot { display: flex; align-items: center; gap: 8px; margin-top: 6px; padding: 10px 14px; border-top: 1px solid var(--hair); color: var(--muted); font: var(--w-reg) var(--fs-meta)/1.3 var(--ui); }
+.studio-overview-foot > button { margin-left: auto; padding: 0; border: 0; background: none; color: var(--accent-ink); font: inherit; cursor: pointer; }
+.studio-overview-foot > button:hover { text-decoration: underline; text-underline-offset: 2px; }
+.chrome-context-card:not(.studio-overview-card) > .chrome-context-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 8px; padding: 10px 14px; border-top: 1px solid var(--hair); color: var(--muted); font: var(--w-reg) var(--fs-meta)/1.3 var(--ui); }
+.chrome-context-foot > span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chrome-context-foot > .manage { padding: 0; border: 0; background: none; color: var(--accent-ink); font: inherit; cursor: pointer; }
+.chrome-context-foot > .manage:hover { text-decoration: underline; text-underline-offset: 2px; }
+.chrome-context-foot .compact-now:has(.wsconfirm) { order: 5; flex: 1 0 100%; }
+.chrome-context-foot .compact-now > .btn { height: 24px; padding: 0 10px; border: 1px solid transparent; border-radius: var(--r-pill); background: transparent; color: var(--muted); font: var(--w-reg) var(--fs-meta)/1 var(--ui); }
+.chrome-context-foot .compact-now > .btn:hover { background: var(--overlay); color: var(--text); }
+.chrome-context-card .chrome-context-more { display: inline-flex; align-items: center; gap: 5px; height: auto; padding: 0; border: 0; background: none; cursor: pointer; }
+.chrome-context-card .chrome-context-more::after { content: ""; width: 5px; height: 5px; border-top: 1.45px solid var(--faint); border-right: 1.45px solid var(--faint); transform: rotate(45deg); }
+.chrome-context-card .chrome-context-more[aria-expanded="true"]::after { transform: rotate(135deg); }
