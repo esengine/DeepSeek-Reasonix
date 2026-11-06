@@ -4,11 +4,11 @@ import type { RememberedFact } from "../../state/session";
 import { NoteCard } from "./NoteCard";
 
 const ACTIVATION: Record<string, string> = {
-  pinned: "后续每轮均会携带",
-  relevant: "后续相关时会被检索",
+  pinned: "chat.remember_pinned",
+  relevant: "chat.remember_relevant",
 };
 
-const SCOPE: Record<string, string> = { project: "ext.this_project_only", global: "在所有项目里" };
+const SCOPE: Record<string, string> = { project: "chat.remember_scope_project", global: "chat.remember_scope_global" };
 
 export const RememberCard = memo(function RememberCard({
   m, forgotten, onForget,
@@ -28,7 +28,7 @@ export const RememberCard = memo(function RememberCard({
       gone={forgotten}
       lead={t(forgotten ? "chat.forgotten" : "chat.remembered")}
       strong={m.title}
-      meta={`· ${t(SCOPE[m.scope] ?? m.scope)} · ${t(ACTIVATION[m.activation] ?? m.activation)}`}
+      meta={forgotten ? `· ${t(SCOPE[m.scope] ?? m.scope)}` : `· ${t(SCOPE[m.scope] ?? m.scope)} · ${t(ACTIVATION[m.activation] ?? m.activation)}`}
       action={!forgotten && (
         <button className="note-act" data-action="memory.forget" data-target={m.name} disabled={busy} onClick={forget}>
           {t(busy ? "chat.forgetting" : "chat.forget")}

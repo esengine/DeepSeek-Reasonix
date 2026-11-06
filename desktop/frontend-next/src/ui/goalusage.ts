@@ -36,6 +36,15 @@ export const goalStatusText = (status: string): string => (STATUS[status] ? t(ST
 
 export const goalStopText = (cause: string): string => (STOP[cause] ? t(STOP[cause]) : cause);
 
+// The board's one small line: requests, tokens and time, with the rounds only
+// once there is one to count. Thousands are K, as everywhere on the board.
+export function goalUsageLine(r: GoalRuntime): string {
+  const k = (n: number): string => (n >= 1_000_000 ? `${(n / 1_000_000).toFixed(1)}M` : n >= 1_000 ? `${Math.round(n / 100) / 10}K` : String(n));
+  return t("plan.goal.usage_line", { requests: String(r.requestsUsed), tokens: k(r.tokensUsed), time: workTime(r.workDurationMs) });
+}
+
+export const goalTone = (status: string): "live" | "ok" | "warn" => (status === "running" ? "live" : status === "complete" ? "ok" : "warn");
+
 export function goalUsageText(r: GoalRuntime): string {
   return t("plan.turns_turns_requests_requests_tokens", {
     turns: String(r.turnsUsed), requests: String(r.requestsUsed), tokens: tokens(r.tokensUsed), time: workTime(r.workDurationMs),

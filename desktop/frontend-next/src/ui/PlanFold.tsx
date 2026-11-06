@@ -4,7 +4,7 @@ import { currentStep, stepDone, stepLabel, type PlanStep } from "../state/sessio
 import { onPlanProgressChange, showsPlanProgress } from "../state/prefs";
 import { PlanSteps, stepOrdinal } from "./PlanSteps";
 import type { GoalRuntime } from "../port/session";
-import { goalStatusText, goalStopText, goalUsageText } from "./goalusage";
+import { goalStatusText, goalStopText, goalTone, goalUsageLine, goalUsageText, workTime } from "./goalusage";
 import { StudioIcon } from "./StudioIcon";
 import { RMark } from "./RMark";
 import { useDismiss } from "./dismiss";
@@ -21,13 +21,15 @@ interface Props {
   cardInView?: boolean;
   /** Brings the plan's card back; absent when the transcript holds none. */
   onJump?: () => void;
+  /** Pauses, resumes or ends the goal; absent where the window cannot send commands. */
+  onGoal?: (command: "pause" | "resume" | "clear") => void;
 }
 
 /** The plan's stand-in above the input box while its card is out of view. A
  *  question waiting on a person is read at the transcript's end, so the strip
  *  gives way to it. Mounted whether or not it is shown, so the fold survives a
  *  visit to another view. */
-export function PlanFold({ plan, goal, goalStatus, goalRuntime, shown, running, paused, cardInView, onJump }: Props) {
+export function PlanFold({ plan, goal, goalStatus, goalRuntime, shown, running, paused, cardInView, onJump, onGoal }: Props) {
   const [open, setOpen] = useState(false);
   const progress = useSyncExternalStore(onPlanProgressChange, showsPlanProgress, showsPlanProgress);
   const bar = useRef<HTMLButtonElement>(null);
@@ -51,8 +53,12 @@ export function PlanFold({ plan, goal, goalStatus, goalRuntime, shown, running, 
   const now = currentStep(plan);
   const title = plan.length ? t("plan.strip.title", { n: stepOrdinal(plan), total: plan.length }) : t("plan.strip.goal");
   const moving = !!running && !paused;
+  const goalOnly = plan.length === 0 && !!goal;
+  const status = goalOnly && goalStatus ? (
+    <span className="goal-st" data-tone={goalTone(goalStatus)}><i aria-hidden="true" />{goalStatusText(goalStatus)}{goalRuntime && goalRuntime.workDurationMs > 0 ? ` · ${workTime(goalRuntime.workDurationMs)}` : ""}</span>
+  ) : null;
   return (
-    <div className="studio-todo" data-open={open ? "" : undefined} ref={root}>
+    <div className="studio-todo" data-open={open ? "" : undefined} data-goal={goalOnly ? "" : undefined} ref={root}>
       <button
         type="button"
         ref={bar}
@@ -61,9 +67,10 @@ export function PlanFold({ plan, goal, goalStatus, goalRuntime, shown, running, 
         aria-expanded={open}
         onClick={() => setOpen((on) => !on)}
       >
-        {moving && plan.length > 0 ? <RMark className="plan-spin" /> : <StudioIcon name="list" />}
+        {moving && plan.length > 0 ? <RMark className="plan-spin" /> : <StudioIcon name={goalOnly ? "target" : "list"} />}
         <b>{title}</b>
         <span>{plan.length ? stepLabel(plan[now] ?? plan[0]) : goal}</span>
+        {status}
         {progress && plan.length > 0 && (
           <span className="studio-todo-steps" aria-hidden="true">
             {plan.map((step, i) => <i key={i} data-state={stepDone(step) ? "done" : i === now ? "current" : "todo"} />)}
@@ -80,8 +87,9 @@ export function PlanFold({ plan, goal, goalStatus, goalRuntime, shown, running, 
       {open && (
         <div className="studio-todo-body">
           <div className="studio-todo-head">
-            {moving && plan.length > 0 && <RMark className="plan-spin" />}
+            {moving && plan.length > 0 ? <RMark className="plan-spin" /> : goalOnly && <StudioIcon name="target" />}
             <b>{title}</b>
+            {status}
             {onJump && plan.length > 0 && (
               <button type="button" className="studio-todo-jump" data-action="plan.jump"
                 onClick={() => { setOpen(false); onJump(); }}>
@@ -96,9 +104,19 @@ export function PlanFold({ plan, goal, goalStatus, goalRuntime, shown, running, 
           {goal && <p className="studio-todo-goal">{goal}</p>}
           {goal && goalRuntime && (
             <div className="studio-todo-usage" role="group" aria-label={t("plan.goal.usage")}>
-              <p>{goalStatus && <b>{goalStatusText(goalStatus)}</b>}{goalStatus && " · "}{goalUsageText(goalRuntime)}</p>
-              {goalRuntime.stopCause && goalStatus !== "running" && <p>{t("plan.goal.stop_cause", { cause: goalStopText(goalRuntime.stopCause) })}</p>}
+              <p>
+                {goalRuntime.stopCause && goalStatus !== "running" && <span className="goal-why">{goalStopText(goalRuntime.stopCause)}</span>}
+                {goalRuntime.stopCause && goalStatus !== "running" && " · "}{goalOnly ? goalUsageLine(goalRuntime) : <>{goalStatus && <b>{goalStatusText(goalStatus)}</b>}{goalStatus && " · "}{goalUsageText(goalRuntime)}</>}
+              </p>
               {goalRuntime.lastReason && <p>{t("plan.goal.last_reason", { reason: goalRuntime.lastReason })}</p>}
+            </div>
+          )}
+          {goalOnly && onGoal && goalStatus && goalStatus !== "complete" && (
+            <div className="studio-todo-acts">
+              {goalStatus === "running"
+                ? <button type="button" data-action="goal.pause" onClick={() => onGoal("pause")}>{t("plan.goal.pause")}</button>
+                : <button type="button" data-action="goal.resume" onClick={() => onGoal("resume")}>{t("plan.goal.resume")}</button>}
+              <button type="button" data-action="goal.clear" onClick={() => onGoal("clear")}>{t("plan.goal.end")}</button>
             </div>
           )}
           <PlanSteps steps={plan} state={moving ? "moving" : "still"} />
