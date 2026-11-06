@@ -82,7 +82,7 @@ it("lists the other programs once, in the user's language, and not the file mana
     draw();
     await openMenu();
     await screen.findByRole("menuitem", { name: /用 终端 打开/ });
-    expect(screen.getByRole("menuitem", { name: /用 Visual Studio Code 打开/ })).toBeTruthy();
+    expect(screen.getByRole("menuitem", { name: /用 VS Code 打开/ })).toBeTruthy();
     expect(screen.queryByRole("menuitem", { name: /File manager|Terminal/ })).toBeNull();
     expect(screen.queryByRole("menuitem", { name: /用 文件管理器 打开/ })).toBeNull();
   } finally {

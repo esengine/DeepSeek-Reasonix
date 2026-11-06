@@ -39,11 +39,11 @@ const TARGETS: OpenWithTarget[] = [
 it("offers only the programs this machine has, and opens the project in the chosen one", async () => {
   const { openWith } = draw(TARGETS);
   await openMenu();
-  expect(await screen.findByRole("menuitem", { name: /用 Visual Studio Code 打开/ })).toBeTruthy();
+  expect(await screen.findByRole("menuitem", { name: /用 VS Code 打开/ })).toBeTruthy();
   expect(screen.getByRole("menuitem", { name: /用 终端 打开/ })).toBeTruthy();
   expect(screen.queryByRole("menuitem", { name: /Cursor/ })).toBeNull();
 
-  await userEvent.click(screen.getByRole("menuitem", { name: /用 Visual Studio Code 打开/ }));
+  await userEvent.click(screen.getByRole("menuitem", { name: /用 VS Code 打开/ }));
   expect(openWith).toHaveBeenCalledWith("/w", "vscode");
 });
 
@@ -51,7 +51,7 @@ it("shows no entries for a project whose folder is gone, or where no program is 
   const gone = draw(TARGETS, { missing: true });
   await openMenu();
   await waitFor(() => expect(gone.openWithTargets).toHaveBeenCalled());
-  expect(screen.getByRole("menuitem", { name: /用 Visual Studio Code 打开/ }).hasAttribute("disabled")).toBe(true);
+  expect(screen.getByRole("menuitem", { name: /用 VS Code 打开/ }).hasAttribute("disabled")).toBe(true);
   cleanup();
   draw([{ id: "vscode", name: "Visual Studio Code", available: false }]);
   await openMenu();

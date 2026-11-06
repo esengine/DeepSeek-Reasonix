@@ -4,6 +4,8 @@ import type { OpenWithTarget } from "../port/hub";
 export function openWithName(target: OpenWithTarget): string {
   if (target.id === "file-manager") return t("workbench.file_manager");
   if (target.id === "terminal") return t("workbench.terminal");
+  // The board writes the editor's short name, which is what the menu has room for.
+  if (target.id === "vscode") return "VS Code";
   return target.name;
 }
 

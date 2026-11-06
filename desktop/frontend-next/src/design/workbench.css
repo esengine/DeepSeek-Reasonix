@@ -274,7 +274,9 @@ svg.studio-icon[data-lang="sheet"] { color: var(--ok); }
 .openwith-menu > button { display: flex; align-items: center; gap: 9px; min-height: 30px; margin: 0 4px; padding: 4px 10px; border-radius: var(--r-sm); font: var(--w-med) var(--fs-ui)/1.3 var(--ui); }
 .openwith-menu > button:hover:not(:disabled) { background: var(--overlay); }
 .openwith-menu > button:disabled { color: var(--faint); }
-.openwith-menu > button > span:not(.openwith-tile) { flex: 1; min-width: 0; text-align: start; }
+.openwith-menu > button > span:not(.openwith-tile) { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: start; }
+.openwith-menu { max-width: calc(100vw - 24px); }
+.openwith-menu > button > small { flex: none; white-space: nowrap; }
 .openwith-menu > button > small { padding: 0; color: var(--faint); font: var(--w-reg) var(--fs-micro) var(--ui); }
 .openwith-menu > button > .studio-icon { width: 16px; height: 16px; color: var(--faint); }
 .openwith-menu > hr { margin: 4px 0; border: 0; border-top: 1px solid var(--hair); }
