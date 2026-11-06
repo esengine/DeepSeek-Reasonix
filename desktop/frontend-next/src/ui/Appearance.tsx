@@ -3,7 +3,7 @@ import { SettingDeep } from "./SettingDeep";
 import { useCallback, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from "react";
 import { effectsMode, onEffectsChange, setEffectsMode, type EffectsMode } from "../state/prefs";
 import type { AgentPort, Appearance as Look, ThemePack } from "../port/port";
-import { ZOOM_PRESETS } from "./zoom";
+import { SIZE_STEPS, ZOOM_PRESETS } from "./zoom";
 import { chord } from "./keys";
 import { host } from "../port/host";
 import { MONO_FAMILIES, TEXT_STEPS, UI_FAMILIES, installed, readSizeOf, readSteps } from "./look";
@@ -419,7 +419,7 @@ export function Appearance({ port, theme, onTheme, contrast, onContrast, weight,
             <ApplyNote id="font" />
           </section>
         </SettingDeep>
-        <SettingDeep id="size" title={t("look.size")} hint={t("settings.overall_text_size")} act={t("settings.adjust")}>
+        <SettingDeep id="size" title={t("look.size")} hint={t("settings.overall_text_size")} act={t("settings.adjust")} ctl={<SegChoice<string> label={t("look.interface_size")} value={String(look.zoom || 1)} action="appearance.zoom" onPick={(v) => set({ zoom: Number(v) })} options={SIZE_STEPS.map(([v, name]) => [String(v), t(name)] as const)} />}>
       <section className="grp" id="set-size" data-setting="size">
         <div className="grp-hd">
           <h3>{t("look.size")}</h3>

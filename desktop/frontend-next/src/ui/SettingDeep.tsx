@@ -17,9 +17,10 @@ export const SettingDeepContext = createContext<Deep>({ pages: false, open: null
 
 /** A block the catalogue gives a page of its own: on the section it is one row
  *  saying what it holds, and opened it is the whole column under a breadcrumb.
- *  Given `act`, the row is a setting row with a pill; otherwise a link card.
+ *  Given `act`, the row is a setting row with a pill, and `ctl` sits beside it;
+ *  otherwise a link card.
  *  Its contents mount only once it is opened. */
-export function SettingDeep({ id, title, now, hint, act, children }: { id: string; title: string; now?: string; hint?: string; act?: string; children: ReactNode }) {
+export function SettingDeep({ id, title, now, hint, act, ctl, children }: { id: string; title: string; now?: string; hint?: string; act?: string; ctl?: ReactNode; children: ReactNode }) {
   const deep = useContext(SettingDeepContext);
   if (!deep.pages || !SETTING_AT(id)?.page) return <>{children}</>;
   if (deep.open !== id && act) {
@@ -31,6 +32,7 @@ export function SettingDeep({ id, title, now, hint, act, children }: { id: strin
           <ApplyNote id={id} />
         </div>
         <div className="srow-ctl">
+          {ctl}
           <button type="button" className="spill" data-action="settings.open-page" data-target={id} onClick={() => deep.go(id)}>{act}</button>
         </div>
       </div>
