@@ -1,3 +1,4 @@
+import { GearMark } from "./GearMark";
 import { FeedbackBadge, feedbackEntryTab } from "./feedbackentry";
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { t } from "../i18n";
@@ -421,7 +422,7 @@ export function Sidebar({
           <span className="qspace" aria-hidden="true" />
           <TooltipButton className="studio-settings" data-action="chrome.settings" onClick={() => onSettings()} aria-label={t("common.settings")} title={t("common.settings")} shortcut={chord(",")}>
             <svg viewBox="0 0 16 16" width={16} height={16} fill="none" stroke="currentColor" strokeWidth={1.45} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-              <circle cx="8" cy="8" r="2.2" /><path d="M8 1.8v2M8 12.2v2M1.8 8h2M12.2 8h2M3.6 3.6l1.4 1.4M11 11l1.4 1.4M3.6 12.4L5 11M11 5l1.4-1.4" />
+              {GearMark}
             </svg>
             <UpdateDot />
           </TooltipButton>

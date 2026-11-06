@@ -1,3 +1,4 @@
+import { GearMark } from "./GearMark";
 import type { ReactNode } from "react";
 import { MODS_SHOWN } from "./modsgate";
 import { t } from "../i18n";
@@ -13,7 +14,7 @@ export type Section = "common" | "display" | "controls" | "session" | "persona" 
 export const ICON: Record<Section, ReactNode> = {
   display: <><rect x="2" y="3" width="12" height="10" rx="1.5"/><path d="M6 3v10"/></>,
   controls: <><rect x="2" y="3" width="12" height="10" rx="1.5"/><path d="M10 3v10"/></>,
-  common: <><circle cx="8" cy="8" r="2.2"/><path d="M8 1.8v2M8 12.2v2M1.8 8h2M12.2 8h2M3.6 3.6l1.4 1.4M11 11l1.4 1.4M3.6 12.4L5 11M11 5l1.4-1.4"/></>,
+  common: GearMark,
   session: <><path d="M2.5 3.5h11v7h-6l-3 2.5v-2.5h-2z"/></>,
   persona: (
     <>
