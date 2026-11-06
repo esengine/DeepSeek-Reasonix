@@ -57,3 +57,9 @@ it.each(["ref", "slash"] as const)("keeps %s navigation made as soon as the rows
   await act(async () => { render(<Probe />); });
   expect(screen.getByRole("status").textContent).toBe("second");
 });
+
+it("tags each row with its kind so the list can leave the obvious ones unlabelled", () => {
+  render(<CompletionMenu id="m" kind="slash" query="" kb={false} active={0} onPick={() => {}} onHover={() => {}}
+    items={[{ label: "/compact", insert: "/compact", kind: "builtin" }, { label: "/review", insert: "/review", kind: "subagent" }]} />);
+  expect(screen.getAllByRole("option").map((o) => o.getAttribute("data-kind"))).toEqual(["builtin", "subagent"]);
+});

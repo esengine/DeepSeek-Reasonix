@@ -276,6 +276,7 @@ export function CompletionMenu({ id, items, active, kind, query, kb, onPick, onH
               role="option"
               aria-selected={i === active}
               data-on={i === active ? "" : undefined}
+              data-kind={it.kind}
               tabIndex={-1}
               onMouseMove={() => onHover(i)}
               // mousedown, not click: the textarea must not lose focus first.

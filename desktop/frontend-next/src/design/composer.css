@@ -150,3 +150,12 @@
 .composition-menu button.mi { box-sizing: border-box; width: calc(100% - 8px); margin: 0 4px 2px; padding: 7px 10px; }
 .composition-menu button.mi .lb { line-height: 1.4; }
 .composition-menu button.mi .ds { margin-top: 1px; font: var(--w-reg) var(--fs-meta)/1.45 var(--ui); }
+.slashmenu { max-width: 420px; max-height: 300px; padding: 4px; border-radius: var(--r-md); }
+.slashmenu .mi { min-height: 30px; padding: 4px 8px; border-radius: var(--r-sm); align-items: center; }
+.slashmenu .mi .dot { display: none; }
+.slashmenu .mi .tx { display: flex; flex-wrap: wrap; align-items: baseline; column-gap: 12px; }
+.slashmenu .mi .lb { flex: none; min-width: 84px; font: var(--w-semi) var(--fs-micro) var(--mono); }
+.slashmenu .mi .ds { flex: 1; min-width: 0; margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: var(--w-reg) var(--fs-ui)/1.4 var(--ui); }
+.slashmenu .mi .ds ~ .ds { flex-basis: 100%; padding-left: 96px; font-size: var(--fs-meta); color: var(--faint); }
+.slashmenu .mi[data-on]::before { content: none; }
+.slashmenu .mi[data-kind="builtin"] .rt, .slashmenu .mi[data-kind="file"] .rt, .slashmenu .mi[data-kind="dir"] .rt { display: none; }

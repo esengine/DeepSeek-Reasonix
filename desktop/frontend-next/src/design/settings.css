@@ -376,7 +376,10 @@
 .prefs-icon:disabled { opacity: .5; cursor: default; }
 .prefs-icon:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 .prefs-icon .studio-icon { width: 16px; height: 16px; }
-.prefs-card .unit-field { align-items: center; gap: 8px; border: 0; background: none; }
+.prefs-card .unit-field { align-items: center; gap: 6px; height: 28px; padding: 0 10px 0 2px; border: 1px solid var(--hair); border-radius: var(--r-sm); background: transparent; }
+.prefs-card .unit-field input { width: 64px; text-align: right; font: var(--w-reg) var(--fs-meta) var(--mono); }
+.prefs-card .threshold-control { width: auto; justify-content: flex-start; }
+.prefs-card .threshold-control .unit-field { flex: none; }
 .prefs-card .unit-field > i { padding: 0; border: 0; color: var(--faint); font: var(--w-reg) var(--fs-meta) var(--ui); font-style: normal; }
 .prefs-sheet[data-solo="usage"] .prefs-hd h1 { font-size: var(--fs-display); font-weight: var(--w-semi); }
 .usage .uranges button { font: var(--w-reg) var(--fs-meta) var(--ui); }
