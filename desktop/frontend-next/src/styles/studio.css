@@ -22,13 +22,6 @@
   font-display: swap;
 }
 @font-face {
-  font-family: "Studio Mono";
-  src: url("/fonts/studio-mono-400.ttf") format("truetype");
-  font-style: normal;
-  font-weight: var(--w-reg);
-  font-display: swap;
-}
-@font-face {
   font-family: "Reasonix Display";
   src: url("/fonts/InterVariable.woff2") format("woff2-variations");
   font-style: normal;
@@ -1624,7 +1617,7 @@ body { background: var(--page) !important; }
    marking one would outrank the reader's own font and size as well. */
 :root {
   --ui: "Inter Studio", "PingFang SC", "Microsoft YaHei UI", "Noto Studio", "Noto Studio Full", system-ui, sans-serif;
-  --mono: "Studio Mono", "Noto Studio", "Noto Studio Full", Consolas, monospace;
+  --mono: "IBM Plex Mono var", "Noto Studio", "Noto Studio Full", Consolas, monospace;
   --fs-lead: calc(14px * var(--fs-scale, 1));
 }
 body,
