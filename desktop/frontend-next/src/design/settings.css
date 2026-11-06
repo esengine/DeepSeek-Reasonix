@@ -381,7 +381,9 @@
 .prefs-sheet[data-solo="usage"] .prefs-hd h1 { font-size: var(--fs-display); font-weight: var(--w-semi); }
 .usage .uranges button { font: var(--w-reg) var(--fs-meta) var(--ui); }
 .usage .uranges button[aria-pressed="true"] { font-weight: var(--w-med); }
-.usage .uexport { font: var(--w-reg) var(--fs-meta) var(--ui); }
+.usage .uexport { height: 28px; padding: 0 12px; border: 1px solid var(--hair); border-radius: var(--r-pill); background: transparent; color: var(--muted); font: var(--w-reg) var(--fs-meta)/1 var(--ui); cursor: pointer; }
+.usage .uexport:hover { background: var(--overlay); color: var(--text); }
+.usage .uexport:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 .usage .utile .k { font: var(--w-med) var(--fs-meta) var(--ui); text-transform: none; letter-spacing: 0; }
 .usage .utile .v { font-weight: var(--w-med); }
 .usage .ulegend { font: var(--w-reg) var(--fs-meta) var(--ui); }
