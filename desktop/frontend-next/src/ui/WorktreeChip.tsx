@@ -101,10 +101,11 @@ export function WorktreeChip({ sources, workspace, canCreate, selection, branch,
       <div className="workspace-palette-heading"><span id={title}>{t("composer.configure_workspace")}</span><button data-action="workspace.configure" className="workspace-palette-close" aria-label={t("composer.close_workspace_configuration")} onClick={close}><StudioIcon name="close"/></button></div>
       <div className="workspace-palette-identity"><StudioIcon name="folder"/><strong title={sources.sourceRoot}>{workspaceName(sources.sourceRoot)}</strong>{(selection || isolated) && <span title={directoryDescription}>{t("common.isolated_worktree")}</span>}</div>
       {canCreate && <div className="worktree-modes">
-        <button data-action="workspace.worktree-toggle" title={workspaceDirectoryDescription(false)} aria-pressed={!selection} disabled={busy || moving !== null} onClick={() => { onSelect(null); setQuery(""); }}><StudioIcon name="folder"/>{t("composer.current_folder")}{!selection && <StudioIcon name="check"/>}</button>
-        <button data-action="workspace.worktree-toggle" title={creationDescription} aria-pressed={!!selection} disabled={busy || moving !== null || !sources.available} onClick={selectWorktree}><StudioIcon name="branch"/>{t("common.isolated_worktree")}{selection && <StudioIcon name="check"/>}</button>
+        <button data-action="workspace.worktree-toggle" title={workspaceDirectoryDescription(false)} aria-pressed={!selection} disabled={busy || moving !== null} onClick={() => { onSelect(null); setQuery(""); }}>{t("composer.current_folder")}</button>
+        <button data-action="workspace.worktree-toggle" title={creationDescription} aria-pressed={!!selection} disabled={busy || moving !== null || !sources.available} onClick={selectWorktree}>{t("common.isolated_worktree")}</button>
       </div>}
-      {selection && <div className="workspace-palette-base"><span>{t("common.source_branch")}</span><strong title={label}>{compactWorkspaceValue(label)}</strong><small>{t("composer.a_task_branch_will_be")}</small></div>}
+      {canCreate && <p className="workspace-palette-desc">{selection ? creationDescription : workspaceDirectoryDescription(false)}</p>}
+      {selection && <div className="workspace-palette-label">{t("common.source_branch")}</div>}
       <div className="workspace-palette-search"><StudioIcon name="search"/><input data-action-change="workspace.source-search" data-action-keydown="workspace.source-navigate" ref={search} type="search" aria-label={t("composer.search_branches")} placeholder={t(selection ? "composer.search_source_branches" : "composer.search_local_branches")} value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={(event) => {
         if (event.key === "ArrowDown") { event.preventDefault(); panel.current?.querySelector<HTMLElement>('[role="option"]:not(:disabled)')?.focus(); }
       }}/></div>
@@ -115,12 +116,12 @@ export function WorktreeChip({ sources, workspace, canCreate, selection, branch,
         if (next !== at) { event.preventDefault(); items[(next + items.length) % items.length]?.focus(); }
         if (event.key === "Home" || event.key === "End") { event.preventDefault(); (event.key === "Home" ? items[0] : items.at(-1))?.focus(); }
       }}>
-        {[false, true].map((remote) => <div key={String(remote)}>{remote && shown.some((source) => source.remote) && <small className="workspace-palette-group">{t("composer.remote_branches")}</small>}{shown.filter((source) => source.remote === remote).map((source) => <button data-action={selection ? "workspace.source-select" : "git.branch"} key={source.ref} type="button" role="option" aria-label={source.name} aria-selected={selected(source)} disabled={!selection && (!!source.worktree || moving !== null)} title={source.worktree ? `${source.name}\n${source.worktree}` : source.name} onClick={() => {
+        {[false, true].map((remote) => <div key={String(remote)}>{selection && shown.some((source) => source.remote) && shown.some((source) => source.remote === remote) && <small className="workspace-palette-group">{t(remote ? "composer.remote_branches" : "composer.local_branches")}</small>}{shown.filter((source) => source.remote === remote).map((source) => <button data-action={selection ? "workspace.source-select" : "git.branch"} key={source.ref} type="button" role="option" aria-label={source.name} aria-selected={selected(source)} disabled={!selection && (!!source.worktree || moving !== null)} title={source.worktree ? `${source.name}\n${source.worktree}` : source.name} onClick={() => {
           if (selection) onSelect({ ref: source.ref, sourceRoot: sources.sourceRoot }); else switchTo(source.name);
-        }}><StudioIcon name="branch"/><span className="workspace-palette-branch"><WorkspaceBranchName value={source.name}/></span>{source.worktree ? <small>{t("composer.used_by_another_worktree")}</small> : selected(source) && <small>{t(selection ? "composer.source" : "common.now")}</small>}<StudioIcon name={selected(source) ? "check" : "chevron"}/></button>)}</div>)}
+        }}><StudioIcon name="branch"/><span className="workspace-palette-branch"><WorkspaceBranchName value={source.name}/></span>{source.worktree ? <small>{t("composer.used_by_another_worktree")}</small> : selected(source) && <small>{t(selection ? "composer.source" : "common.now")}</small>}</button>)}</div>)}
         {shown.length === 0 && <p className="workspace-palette-empty">{t("composer.no_matching_branches")}</p>}
       </div>}
-      <p className="workspace-palette-note">{t(selection ? "composer.create_from_the_committed_version" : "composer.switches_immediately_other_sessions_in")}</p>
+      <p className="workspace-palette-note">{selection ? `${t("composer.a_task_branch_will_be")} · ${t("composer.create_from_the_committed_version")}` : t("composer.switches_immediately_other_sessions_in")}</p>
       <div className="workspace-palette-footer"><WorkspacePath path={sources.sourceRoot} onResize={put}/></div>
     </div>, document.body)}
   </div>;
