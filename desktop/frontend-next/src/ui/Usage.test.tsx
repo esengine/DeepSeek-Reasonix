@@ -65,6 +65,21 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+describe("the charts, as the Usage-Page board lays them out", () => {
+  it("keeps every currency's spend chart in one column beside the usage chart", async () => {
+    const two: UsageReport = {
+      ...REPORT,
+      cost: [{ amount: "1.23", currency: "CNY" }, { amount: "0.01", currency: "USD" }],
+      daily: REPORT.daily.map((d, i) => ({ ...d, cost: [{ amount: "0.50", currency: i === 0 ? "CNY" : "USD" }] })),
+    };
+    render(<Usage port={makePort({ usage: vi.fn().mockResolvedValue(two) })} />);
+    await screen.findByRole("table", { name: t("usage.daily_details") });
+    const grid = document.querySelector(".ucharts")!;
+    expect([...grid.children].map((c) => c.className)).toEqual(["ucard", "ucharts-spend"]);
+    expect(grid.querySelectorAll(".ucharts-spend > .ucard")).toHaveLength(2);
+  });
+});
+
 describe("usage is exact on every device", () => {
   it("lists each day's full count instead of leaving it to a hover", async () => {
     render(<Usage port={makePort()} />);

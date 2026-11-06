@@ -337,6 +337,7 @@ export function Usage({ port }: { port: AgentPort }) {
       {/* One chart per currency, for the same reason tokens and money get their
           own: two currencies do not share an axis either, and the panel keeping
           them apart everywhere else would be undone by one merged plot. */}
+      <div className="ucharts-spend">
       {currencies.map((code, at) => (
         <section className="ucard" key={code}>
           <div className="ucard-h"><h3>{hourView ? t("usage.hourly_spend") : t("usage.daily_spend")}</h3><span className="hint">{code}</span></div>
@@ -356,6 +357,7 @@ export function Usage({ port }: { port: AgentPort }) {
           )}
         </section>
       ))}
+      </div>
       </div>
 
       <BreakdownTable rows={hourView ? hourRows : dayRows} hourly={hourView} />

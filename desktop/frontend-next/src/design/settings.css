@@ -438,3 +438,6 @@
 .srow-meta > .apply:not([data-usual]) { display: none; }
 .prefs-strip { position: fixed; inset: 0 0 auto; height: var(--chrome-h, 39px); z-index: 50; background: color-mix(in srgb, var(--page) 40%, transparent); -webkit-backdrop-filter: blur(14px) saturate(.92); backdrop-filter: blur(14px) saturate(.92); pointer-events: none; }
 :root[data-fold~="scene"] .prefs-strip { display: none; }
+.usage .ucharts-spend { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.usage .utable th { font: var(--w-med) var(--fs-micro) var(--ui); }
+.usage .utable th, .usage .utable td { padding-block: 9px; }
