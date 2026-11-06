@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { t } from "../i18n";
 import type { ShellChoice } from "../port/terminal";
 import { listenAction } from "./listen";
+import { TerminalHostContext } from "./terminal_host";
 import { StudioIcon } from "./StudioIcon";
 
 // Closes a dropdown when the press lands outside it or Escape is pressed.
@@ -41,6 +42,7 @@ export interface TerminalHeadProps {
 // The shell is named here and picked here; choosing another one opens a
 // terminal in it beside this one, so nothing running is cut off.
 export function TerminalHead({ shell, dir, shells, onLoadShells, onShell, onClear, onReconnect, onCopyAll, onSize }: TerminalHeadProps) {
+  const machine = useContext(TerminalHostContext);
   return (
     <div className="term-head">
       <Drop label={t("terminal.pick_a_shell")} onOpen={onLoadShells}
@@ -61,6 +63,7 @@ export function TerminalHead({ shell, dir, shells, onLoadShells, onShell, onClea
           </>
         )}
       </Drop>
+      {machine && <span className="term-host"><StudioIcon name="server" />{t("terminal.on_host", { host: machine })}</span>}
       <span className="term-dir" title={dir}>{dir}</span>
       <span className="term-grow" />
       <button type="button" className="term-tool" data-action="terminal.clear" aria-label={t("terminal.clear")} title={t("terminal.clear")} onClick={onClear}><StudioIcon name="eraser" /></button>

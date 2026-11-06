@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"reasonix/internal/base/testenv"
 	"runtime"
 	"strings"
 	"testing"
@@ -151,5 +152,39 @@ func TestATerminalOpensTakesInputAndStreamsItsOutputToTheEnd(t *testing.T) {
 	}
 	if last.Kind != "exit" || last.Code == nil || *last.Code != 0 {
 		t.Fatalf("the stream must end with the exit code, got %+v", last)
+	}
+}
+
+// A remote pane's terminals run on the far machine: the host's requests are
+// forwarded to its kernel, and a paired device's never reach it.
+func TestARemotePanesTerminalsAreForwardedForTheHostAndNeverForADevice(t *testing.T) {
+	t.Setenv("REASONIX_HOME", testenv.TempDir(t))
+	rk := fakeRemoteKernel(t)
+	h := NewHub(HubOptions{})
+	rt := remotePane(t, h, rk.Listener.Addr().String())
+	prefix := rt.view().Base
+	serve := func(method, path string, device bool) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(method, prefix+path, strings.NewReader("{}"))
+		if device {
+			req = req.WithContext(withDeviceReach(req.Context(), "phone-1", 1))
+		}
+		rec := httptest.NewRecorder()
+		rt.handler.ServeHTTP(rec, req)
+		return rec
+	}
+	for len(rk.cookies) > 0 {
+		<-rk.cookies
+	}
+	for _, p := range []string{"/terminals", "/terminals/shells"} {
+		if rec := serve(http.MethodGet, p, true); rec.Code != http.StatusNotFound || !strings.Contains(rec.Body.String(), codeDeviceHostOnly) {
+			t.Errorf("device GET %s = %d %s", p, rec.Code, rec.Body.String())
+		}
+	}
+	if len(rk.cookies) != 0 {
+		t.Fatal("a device's request reached the far kernel")
+	}
+	serve(http.MethodGet, "/terminals", false)
+	if len(rk.cookies) != 1 {
+		t.Fatalf("the host's request was forwarded %d times, want once", len(rk.cookies))
 	}
 }

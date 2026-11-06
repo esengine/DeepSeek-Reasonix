@@ -6,6 +6,7 @@ import "./testkit";
 import { PostureNote, postureNote } from "./PostureNote";
 import { HttpError } from "../port/port";
 import type { AgentPort, ApprovalDefault, SessionStatus } from "../port/port";
+import { MockPort } from "../port/mock";
 
 afterEach(cleanup);
 beforeEach(() => localStorage.clear());
@@ -78,7 +79,7 @@ describe("the folder-trust question", () => {
 describe("the no-sandbox note", () => {
   it("switches to auto in one click", async () => {
     const { port, onChanged } = draw(status({ writesConfined: false }));
-    await userEvent.click(screen.getByRole("button", { name: "切换到自动批准" }));
+    await userEvent.click(screen.getByRole("button", { name: "自动批准" }));
     expect(port.setApprovalMode).toHaveBeenCalledWith("auto");
     await waitFor(() => expect(onChanged).toHaveBeenCalled());
   });
@@ -86,16 +87,25 @@ describe("the no-sandbox note", () => {
   it("stays dismissed once read", async () => {
     const { unmount } = draw(status({ writesConfined: false }));
     await userEvent.click(screen.getByRole("button", { name: "知道了" }));
-    expect(screen.queryByRole("button", { name: "切换到自动批准" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "自动批准" })).toBeNull();
     unmount();
     draw(status({ writesConfined: false }));
-    expect(screen.queryByRole("button", { name: "切换到自动批准" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "自动批准" })).toBeNull();
   });
 
   it("still draws when storage is unavailable", () => {
     const get = vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => { throw new Error("blocked"); });
     draw(status({ writesConfined: false }));
-    expect(screen.getByRole("button", { name: "切换到自动批准" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "自动批准" })).toBeTruthy();
     get.mockRestore();
   });
+});
+
+it("is one line: the long explanation is the hover text, not a second paragraph", () => {
+  const port = new MockPort();
+  render(<PostureNote port={port} status={{ toolApprovalMode: "ask", approvalDefault: { defaulted: true, writesConfined: false, trust: "", trustable: false } } as never} onChanged={() => {}} />);
+  const note = document.querySelector(".posturenote")!;
+  expect(note.querySelector(".why")).toBeNull();
+  expect(note.querySelector(".t")?.textContent).toBe("没有系统沙盒，执行前都会先问你");
+  expect(note.querySelector(".t")?.getAttribute("title")).toContain("命令的写入不受限制");
 });

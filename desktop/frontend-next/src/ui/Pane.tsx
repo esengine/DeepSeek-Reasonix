@@ -46,6 +46,7 @@ import { useBroughtResults } from "./useBroughtResults";
 import { RunLine } from "./RunLine";
 import { AgentCompositionPicker } from "./AgentCompositionPicker";
 import type { PaneProps, PaneReport } from "./panetypes";
+import { TerminalHostContext } from "./terminal_host";
 import { useRate, useTrail } from "./num";
 import { useCompactNow } from "./CompactNow";
 import { DOCK, Gutter } from "./Gutter";
@@ -592,6 +593,7 @@ function PaneView({ port, hub, rt, title, active, visible, sideHost, side, onFoc
       )}
       <div className="scroll" data-pane="browser" hidden={tab === "analysis"} inert={!workbench}>
           <JobsLiveContext.Provider value={jobsLive}>
+          <TerminalHostContext.Provider value={rt.host ?? ""}>
           <WorkbenchPanel
             port={port}
             hub={hub}
@@ -617,6 +619,7 @@ function PaneView({ port, hub, rt, title, active, visible, sideHost, side, onFoc
             onSettings={onSettings}
             onShowCall={(call) => setLandAt((was) => ({ call, n: (was?.n ?? 0) + 1 }))}
           />
+          </TerminalHostContext.Provider>
           </JobsLiveContext.Provider>
       </div>
 
@@ -637,7 +640,7 @@ function PaneView({ port, hub, rt, title, active, visible, sideHost, side, onFoc
         <div className="composeaux">
           <PeerHeldBar port={port} project={rt.host ? undefined : { path: rt.root, name: rt.name }} />
           {connect && <ConnectNote offer={connect} />}
-          <PostureNote port={port} status={status} onChanged={refreshStatus} />
+          {!connect && <PostureNote port={port} status={status} onChanged={refreshStatus} />}
         {/* Views the user (or the extension) put next to the composer. They sit
             above it rather than inside it: the input box is the one thing an
             extension must never be able to crowd out. */}

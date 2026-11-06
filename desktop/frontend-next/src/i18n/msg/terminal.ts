@@ -17,6 +17,7 @@ export const TERMINAL: Messages = {
   "terminal.n": { zh: "终端 {n}", en: "Terminal {n}" },
   "terminal.name": { zh: "终端", en: "Terminal" },
   "terminal.not_the_models": { zh: "这是你自己的终端：以你的身份运行，不经过模型的权限和沙盒。模型看不到这里，除非你把内容发给它。", en: "This is your own terminal: it runs as you, outside the model's permissions and sandbox. The model cannot see it unless you send it something." },
+  "terminal.on_host": { zh: "在 {host} 上", en: "On {host}" },
   "terminal.open": { zh: "打开终端", en: "Open the terminal" },
   "terminal.open_in_browser": { zh: "在内置浏览器打开", en: "Open in the built-in browser" },
   "terminal.pick_a_shell": { zh: "选择终端程序", en: "Choose a shell" },

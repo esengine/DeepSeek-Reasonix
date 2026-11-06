@@ -2,6 +2,7 @@ import { useState } from "react";
 import { t } from "../i18n";
 import { reason } from "../i18n/kernel";
 import type { AgentPort, SessionStatus } from "../port/port";
+import { StudioIcon } from "./StudioIcon";
 
 export type PostureNoteKind = "trust" | "unconfined";
 
@@ -54,10 +55,8 @@ export function PostureNote({ port, status, onChanged }: {
   if (kind === "trust") {
     return (
       <div className="rtbar posturenote" data-kind="trust" role="group" aria-label={t("composer.trust_this_folder")}>
-        <span className="t">{t("composer.trust_this_folder_2")}</span>
-        <span className="why">
-          {refused || t("composer.once_trusted_edits_and_commands")}
-        </span>
+        <StudioIcon name="shield" />
+        <span className="t" title={refused || t("composer.once_trusted_edits_and_commands")}>{refused || t("composer.trust_this_folder_2")}</span>
         <button data-action="workspace.trust" data-value="trusted" disabled={busy} onClick={() => act(() => port.decideWorkspaceTrust("trusted"))}>{t("common.trust_this_folder")}</button>
         <button data-action="workspace.trust" data-value="declined" disabled={busy} onClick={() => act(() => port.decideWorkspaceTrust("declined"))}>{t("composer.not_now")}</button>
       </div>
@@ -65,11 +64,9 @@ export function PostureNote({ port, status, onChanged }: {
   }
   return (
     <div className="rtbar posturenote" data-kind="unconfined" data-lvl="warn" role="status">
-      <span className="t">{t("composer.new_sessions_ask_first")}</span>
-      <span className="why">
-        {refused || t("composer.no_os_sandbox_is_in")}
-      </span>
-      <button data-action="tool-approval.mode" data-value="auto" disabled={busy} onClick={() => act(() => port.setApprovalMode("auto"))}>{t("composer.switch_to_auto_approve")}</button>
+      <StudioIcon name="info" />
+      <span className="t" title={refused || t("composer.no_os_sandbox_is_in")}>{refused || t("composer.no_sandbox_ask_first")}</span>
+      <button data-action="tool-approval.mode" data-value="auto" disabled={busy} onClick={() => act(() => port.setApprovalMode("auto"))}>{t("composer.auto_approve")}</button>
       <button data-action="posture-note.dismiss" onClick={() => { markUnconfinedSeen(); setHidden(true); }}>{t("common.got_it")}</button>
     </div>
   );

@@ -42,3 +42,5 @@
 .term-exit > button[data-primary] { height: 32px; padding: 0 14px; border: 1px solid var(--border); border-radius: var(--r-sm); background: var(--raised); color: var(--text); font: var(--w-med) var(--fs-ui)/1 var(--ui); }
 
 .workbench-tab-busy { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--net); box-shadow: 0 0 0 3px var(--net-wash); }
+.term-host { display: inline-flex; flex: none; align-items: center; gap: 4px; height: 22px; padding: 0 8px; border-radius: var(--r-pill); background: color-mix(in srgb, var(--warn) 14%, transparent); color: var(--warn-ink); font: var(--w-med) var(--fs-meta)/1 var(--ui); white-space: nowrap; }
+.term-host .studio-icon { width: 12px; height: 12px; }

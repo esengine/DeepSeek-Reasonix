@@ -48,6 +48,7 @@ globalThis.ResizeObserver ??= class { observe() {} disconnect() {} unobserve() {
 import { MockPort } from "../port/mock";
 import type { TerminalInfo } from "../port/terminal";
 import { TerminalView, type TerminalViewProps } from "./TerminalView";
+import { TerminalHostContext } from "./terminal_host";
 
 beforeEach(() => { localStorage.clear(); screens.length = 0; fake.link.open = null; });
 afterEach(cleanup);
@@ -164,4 +165,12 @@ it("opens a terminal in the picked shell beside this one, and does nothing for t
   await userEvent.click(screen.getByRole("button", { name: "终端程序" }));
   await userEvent.click(screen.getByRole("menuitem", { name: /PowerShell/ }));
   expect(shell).toHaveBeenCalledWith("pwsh");
+});
+
+it("says which machine a remote project's terminal is on, and says nothing for this one", async () => {
+  const { props, view } = await setup();
+  expect(document.querySelector(".term-host")).toBeNull();
+  view.unmount();
+  render(<TerminalHostContext.Provider value="gpu-box"><TerminalView {...props} /></TerminalHostContext.Provider>);
+  expect(document.querySelector(".term-host")?.textContent).toBe("在 gpu-box 上");
 });
