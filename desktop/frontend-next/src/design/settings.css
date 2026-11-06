@@ -446,3 +446,6 @@
 .usage .ucharts-spend { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
 .usage .utable th { font: var(--w-med) var(--fs-micro) var(--ui); }
 .usage .utable th, .usage .utable td { padding-block: 9px; }
+.ext-foot { display: flex; align-items: center; gap: 8px; margin-top: 12px; padding: 10px 14px; border: 1px solid var(--border); border-radius: var(--r-md); color: var(--muted); font: var(--w-reg) var(--fs-meta)/1.5 var(--ui); }
+.ext-foot > .studio-icon { flex: none; width: 14px; height: 14px; }
+.ext-foot > span { flex: 1; min-width: 0; }

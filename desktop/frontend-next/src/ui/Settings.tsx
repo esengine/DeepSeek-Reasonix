@@ -545,13 +545,12 @@ export function Settings({ hub, onError, port, networkPort, localWorkspacePort, 
                   {extErrors.skills && <div className="rnote" data-s="bad" role="alert">{extErrors.skills} <button className="act" data-action="extensions.refresh" disabled={extRefreshing} onClick={reloadExt}>{t("common.retry")}</button></div>}
                   {looseSkills.length === 0 && !extRefreshing && !extErrors.skills && <div className="empty">{t("settings.no_skills_in_this_working")}</div>}
                 </Group>
-                <Group id="ext-runtime"
-                  title={t("settings.runtime")}
-                  hint={t("settings.changes_apply_from_the_next_turn")}
-                  action={reload.action}
-                >
-                  {reload.note}
-                </Group>
+                <div className="ext-foot" role="note">
+                  <StudioIcon name="refresh" />
+                  <span>{t("settings.changes_apply_from_the_next_turn")}</span>
+                  {reload.action}
+                </div>
+                {reload.note}
               </ExtSplit>
               </>
               )}

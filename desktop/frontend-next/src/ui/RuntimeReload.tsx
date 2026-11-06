@@ -53,6 +53,7 @@ export function useRuntimeReload(port: AgentPort, onDone: () => void) {
   }, [feedback]);
 
   return {
+    state,
     applied: () => {
       attempts.current++;
       setFeedback({ state: "ok", note: t("app.live_the_next_turn_runs") });

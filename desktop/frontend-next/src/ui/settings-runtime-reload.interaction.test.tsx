@@ -3,10 +3,9 @@ import { afterEach, expect, it, vi } from "vitest";
 import { act, cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import "./testkit";
-import { Settings } from "./Settings";
+import { useRuntimeReload } from "./RuntimeReload";
 import { MockPort } from "../port/mock";
-import { MockHub } from "../port/mock_hub";
-import type { AgentPort, SessionStatus } from "../port/port";
+import type { AgentPort } from "../port/port";
 
 afterEach(cleanup);
 
@@ -20,15 +19,15 @@ function pendingReload(port: AgentPort) {
   return { reload, settle: (outcome: string) => outcome === "success" ? finish() : fail(new Error("old reload failed")) };
 }
 
+// The reload control lives in the settings page only as a retry after a failure,
+// so its states are driven through the hook that owns them.
+function Probe({ port, onChanged }: { port: AgentPort; onChanged: () => void }) {
+  const reload = useRuntimeReload(port, onChanged);
+  return <>{reload.action}{reload.note}</>;
+}
+
 function draw(port: AgentPort, onChanged: () => void) {
-  return <Settings
-    hub={new MockHub() as never} port={port}
-    status={{ preset: "balanced", toolApprovalMode: "ask" } as SessionStatus}
-    theme="light" onTheme={() => {}} contrast="" onContrast={() => {}} weight="" onWeight={() => {}}
-    look={{} as never} onLook={() => {}} reloadThemes={() => {}}
-    onClose={() => {}} onChanged={onChanged} onError={() => {}} at="ext:installed"
-    account={null} accountUnread="" reloadAccount={() => {}}
-  />;
+  return <Probe port={port} onChanged={onChanged} />;
 }
 
 function expectReady() {

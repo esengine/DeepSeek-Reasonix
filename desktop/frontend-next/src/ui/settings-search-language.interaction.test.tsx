@@ -44,7 +44,7 @@ async function draw() {
   return { calls, onClose, find: () => screen.getByRole<HTMLInputElement>("textbox", { name: t("settings.search_settings") }) };
 }
 
-it.each(["market", "plugins", "mcp", "skills", "ext-runtime", "hooks", "composition-picker"])(
+it.each(["market", "plugins", "mcp", "skills", "hooks", "composition-picker"])(
   "finds the unmounted %s block by its displayed English title and lands on it",
   async (anchor) => {
     language("en");
