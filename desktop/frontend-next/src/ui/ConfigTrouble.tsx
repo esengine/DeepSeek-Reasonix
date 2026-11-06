@@ -3,6 +3,7 @@ import { t } from "../i18n";
 import { reason } from "../i18n/kernel";
 import type { AgentPort, ConfigProblem } from "../port/port";
 import { CopyButton } from "./CopyButton";
+import { StudioIcon } from "./StudioIcon";
 
 // The file every panel here writes to, when it is the file that is wrong.
 //
@@ -43,41 +44,43 @@ export function ConfigTrouble({ port, onRepaired }: { port: AgentPort; onRepaire
     }
   };
 
+  const repairable = !!problem.repair;
   return (
-    <div className="find cfgbad" data-lvl="warn" role="status">
-      <span className="t">
-        {problem.line ? t("app.line_line_of_the_config", { line: problem.line }) : t("app.the_config_file_does_not")}
-      </span>
-      <span className="why">
-        {problem.recovered === "last-known-good"
-          ? t("app.what_is_shown_below_is")
-          : t("app.what_is_shown_below_is_2")}
-      </span>
-      <div className="term">
-        <div className="term-l dim">{problem.path}</div>
-        {problem.excerpt && (
-          <div className="term-l er">
-            {problem.line} | {problem.excerpt}
+    <div className="cfgbad" role="status">
+      {busy && <div className="cfg-busy"><StudioIcon name="refresh" />{t("app.repairing")}</div>}
+      <div className="cfg-card" data-lvl={repairable ? "err" : "warn"}>
+        <div className="cfg-hd">
+          <StudioIcon name={repairable ? "fail" : "warning"} />
+          <div>
+            <b>{problem.line ? t("app.line_line_of_the_config", { line: problem.line }) : t("app.the_config_file_does_not")}</b>
+            <div className="sub">
+              {problem.recovered === "last-known-good"
+                ? t("app.what_is_shown_below_is")
+                : t("app.what_is_shown_below_is_2")}
+            </div>
+          </div>
+        </div>
+        <div className="cfg-bd">
+          <div className="cfg-path"><span>{problem.path}</span><CopyButton text={problem.path} label={t("common.copy_path")} /></div>
+          {problem.excerpt && (
+            <div className="cfg-diff">
+              <div className="er"><span>{problem.line}</span>{problem.excerpt}</div>
+              {/* The repair is the same bytes said in a way TOML accepts, not a
+                  guess at what was meant: it is only offered when the file parses
+                  afterwards. */}
+              {problem.repair && <div className="ok"><span>{t("app.becomes")}</span>{problem.repair}</div>}
+            </div>
+          )}
+        </div>
+        {repairable && (
+          <div className="cfg-ft">
+            <button className="btn" data-primary="" data-action="config.repair" disabled={busy} onClick={() => void repair()}>
+              {t("app.keep_a_copy_and_repair")}
+            </button>
           </div>
         )}
-        {/* The repair is the same bytes said in a way TOML accepts, not a
-            guess at what was meant — it is only offered when the file parses
-            afterwards. */}
-        {problem.repair && (
-          <div className="term-l ok">
-            {t("app.becomes")} | {problem.repair}
-          </div>
-        )}
+        {failed && <div className="cfg-fail" role="alert">{failed}</div>}
       </div>
-      <div className="acts">
-        {problem.repair && (
-          <button className="act" data-action="config.repair" disabled={busy} onClick={() => void repair()}>
-            {busy ? t("app.repairing") : t("app.keep_a_copy_and_repair")}
-          </button>
-        )}
-        <CopyButton text={problem.path} label={t("common.copy_path")} />
-      </div>
-      {failed && <span className="why nwhy">{failed}</span>}
     </div>
   );
 }

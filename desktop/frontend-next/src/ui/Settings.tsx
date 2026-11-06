@@ -408,11 +408,11 @@ export function Settings({ hub, onError, port, networkPort, localWorkspacePort, 
           </div>
         )}
       </div>
-      <ConfigTrouble port={port} onRepaired={onChanged} />
       <div className="prefs-body">
         {!solo && <SettingsNav at={at} values={nav} shown={shown} danger={danger} disabled={updatingPkg.applying} onSelect={(section) => { if (section !== at || deepAt) navigation.leave(() => { setLanded(""); setDeep(null); setAt(section); }); }} page={pageNow} onPage={(section, page) => navigation.leave(() => { setLanded(""); setPages((p) => ({ ...p, [section]: page })); })} />}
 
         <div className="prefs-main" key={at} role="tabpanel" aria-labelledby={pageNow ? `prefs-${at}-${pageNow}` : `prefs-${at}`} data-sec={at}>
+          <ConfigTrouble port={port} onRepaired={onChanged} />
           {!solo && <SettingsTitle at={at} />}
           <Boundary
             fallback={

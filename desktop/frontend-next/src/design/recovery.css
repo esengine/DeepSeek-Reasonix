@@ -1,0 +1,26 @@
+.cfgbad { margin: 10px 0 14px; font: var(--w-reg) var(--fs-ui)/1.6 var(--ui); }
+.cfgbad .cfg-busy { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; padding: 10px 12px; border-radius: var(--r-md); background: var(--page); color: var(--muted); font-size: var(--fs-meta); }
+.cfgbad .cfg-busy .studio-icon { width: 14px; height: 14px; }
+.cfgbad .cfg-card { overflow: hidden; border: 1px solid var(--border); border-radius: var(--r-md); background: var(--raised); }
+.cfgbad .cfg-hd { display: flex; align-items: flex-start; gap: 10px; padding: 12px 14px; border-bottom: 1px solid var(--hair); }
+.cfgbad .cfg-card[data-lvl="err"] .cfg-hd { background: color-mix(in srgb, var(--err) 8%, transparent); }
+.cfgbad .cfg-card[data-lvl="warn"] .cfg-hd { background: color-mix(in srgb, var(--warn) 12%, transparent); }
+.cfgbad .cfg-hd > .studio-icon { flex: none; width: 16px; height: 16px; margin-top: 1px; }
+.cfgbad .cfg-card[data-lvl="err"] .cfg-hd > .studio-icon { color: var(--err-ink); }
+.cfgbad .cfg-card[data-lvl="warn"] .cfg-hd > .studio-icon { color: var(--warn-ink); }
+.cfgbad .cfg-hd > div { flex: 1; min-width: 0; }
+.cfgbad .cfg-hd b { font: var(--w-semi) var(--fs-lead)/1.4 var(--ui); }
+.cfgbad .cfg-hd .sub { margin-top: 2px; color: var(--muted); font-size: var(--fs-meta); }
+.cfgbad .cfg-bd { padding: 10px 14px; }
+.cfgbad .cfg-path { display: flex; align-items: center; gap: 8px; color: var(--muted); font: var(--w-reg) var(--fs-meta) var(--mono); }
+.cfgbad .cfg-path > span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.cfgbad .cfg-diff { margin-top: 8px; overflow: hidden; border: 1px solid var(--hair); border-radius: var(--r-sm); font: var(--w-reg) var(--fs-meta)/1.8 var(--mono); }
+.cfgbad .cfg-diff > div { display: flex; white-space: pre-wrap; overflow-wrap: anywhere; }
+.cfgbad .cfg-diff > div > span { flex: none; width: 30px; padding-right: 8px; text-align: right; color: var(--faint); }
+.cfgbad .cfg-diff .er { background: color-mix(in srgb, var(--err) 10%, transparent); }
+.cfgbad .cfg-diff .ok { background: color-mix(in srgb, var(--ok) 10%, transparent); }
+.cfgbad .cfg-ft { display: flex; justify-content: flex-end; gap: 8px; padding: 10px 14px; border-top: 1px solid var(--hair); }
+.cfgbad .cfg-ft .btn { height: 32px; padding: 0 14px; border: 1px solid var(--border); border-radius: var(--r-sm); background: var(--raised); color: var(--text); font: var(--w-reg) var(--fs-ui)/1 var(--ui); cursor: pointer; }
+.cfgbad .cfg-ft .btn[data-primary] { border-color: var(--accent); background: var(--accent); color: var(--accent-fg); }
+.cfgbad .cfg-ft .btn:disabled { opacity: .55; cursor: default; }
+.cfgbad .cfg-fail { padding: 8px 14px; border-top: 1px solid var(--hair); color: var(--err-ink); font-size: var(--fs-meta); }
