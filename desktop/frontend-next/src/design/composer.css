@@ -43,7 +43,7 @@
 .compose :is(.mode, .studio-branch, .model-picker):focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 .compose .compose-context { box-sizing: border-box; min-height: 34px; margin: 0; padding: 6px 0 0 12px; }
 .compose .compose-context > .studio-runstate { min-height: 0; padding: 0 12px 0 0; }
-.compose .mode.composition-trigger { height: 24px; min-height: 24px; border-radius: var(--r-sm); color: var(--text); font-weight: var(--w-med); }
+.compose .mode.composition-trigger { height: 24px; min-height: 24px; border-radius: var(--r-sm); color: var(--text); font-weight: var(--w-reg); }
 .compose .mode.composition-trigger:is(:hover, [aria-expanded="true"]):not(:disabled) { border-color: var(--border); }
 .compose .mode.composition-trigger.locked { color: var(--muted); }
 .compose .mode.composition-trigger.unavailable { border-color: var(--border); color: var(--warn); }

@@ -15,13 +15,13 @@
 .tfind input::-webkit-search-decoration { -webkit-appearance: none; appearance: none }
 .tfind input {
   flex: 1; min-width: 0; border: 0; background: none; outline: 0; color: var(--text);
-  font: var(--w-med) var(--fs-ui) var(--ui);
+  font: var(--w-reg) var(--fs-ui) var(--ui);
 }
 .tfind input::placeholder { color: var(--ghost) }
 .tfind .n {
   flex: none; height: 20px; padding: 0 7px; border-radius: var(--r-pill); background: var(--overlay);
   display: inline-grid; place-items: center; white-space: nowrap;
-  font: var(--w-med) var(--fs-micro) var(--ui); color: var(--muted); font-variant-numeric: tabular-nums;
+  font: var(--w-reg) var(--fs-micro) var(--ui); color: var(--muted); font-variant-numeric: tabular-nums;
 }
 .tfind .n:empty { display: none }
 .tfind .n[data-empty] { background: none; padding: 0; font-size: var(--fs-meta); color: var(--err-ink) }
@@ -35,17 +35,17 @@
 .tfind .sep { flex: none; width: 1px; height: 18px; background: var(--hair) }
 .tfind .mode-toggle {
   flex: none; display: inline-grid; place-items: center; height: 24px; padding: 0 7px; border: 0; border-radius: var(--r-xs);
-  background: none; cursor: pointer; color: var(--muted); font: var(--w-semi, 600) var(--fs-meta) var(--mono);
+  background: none; cursor: pointer; color: var(--muted); font: var(--w-med) var(--fs-meta) var(--mono);
 }
 .tfind .mode-toggle:hover { color: var(--text) }
 .tfind .mode-toggle[aria-pressed="true"] { background: var(--overlay); color: var(--text) }
 .tfind-scope { display: inline-flex; gap: 2px; padding: 2px; border-radius: var(--r-sm); background: var(--overlay) }
 .tfind-scope button {
   height: 24px; padding: 0 10px; border: 0; border-radius: var(--r-xs); background: none; cursor: pointer;
-  color: var(--muted); font: var(--w-med) var(--fs-meta) var(--ui); white-space: nowrap;
+  color: var(--muted); font: var(--w-reg) var(--fs-meta) var(--ui); white-space: nowrap;
 }
-.tfind-scope button[aria-pressed="true"] { background: var(--raised); color: var(--text); font-weight: var(--w-semi, 600); box-shadow: 0 1px 2px rgb(0 0 0 / .08) }
-.tfind-hint { font: var(--w-med) var(--fs-meta) var(--ui); color: var(--faint); text-align: right }
+.tfind-scope button[aria-pressed="true"] { background: var(--raised); color: var(--text); font-weight: var(--w-med); box-shadow: 0 1px 2px rgb(0 0 0 / .08) }
+.tfind-hint { font: var(--w-reg) var(--fs-meta) var(--ui); color: var(--faint); text-align: right }
 @container conversation (max-width: 460px) {
   .tfindbox { right: 12px; left: 12px; width: auto }
 }

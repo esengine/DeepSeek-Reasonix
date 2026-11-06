@@ -7,9 +7,9 @@
   border-radius: var(--r-md);
   background: var(--hair);
 }
-.refine-card header { display: flex; align-items: center; gap: 6px; color: var(--muted); font: var(--w-med) var(--fs-micro)/1.4 var(--ui); }
+.refine-card header { display: flex; align-items: center; gap: 6px; color: var(--muted); font: var(--w-reg) var(--fs-micro)/1.4 var(--ui); }
 .refine-card header .studio-icon { width: 13px; height: 13px; stroke-width: 1.6; }
-.refine-card header b { color: var(--text); font-weight: var(--w-med); }
+.refine-card header b { color: var(--text); font-weight: var(--w-reg); }
 .refine-card header small { color: var(--faint); font: var(--w-reg) var(--fs-meta)/1.4 var(--ui); }
 .refine-card header { font-size: var(--fs-ui); }
 .refine-card header b { color: var(--text); font-weight: var(--w-semi); }
@@ -21,7 +21,7 @@
   min-width: 0;
   overflow: hidden;
   color: var(--faint);
-  font: var(--w-med) var(--fs-meta)/1.4 var(--ui);
+  font: var(--w-reg) var(--fs-meta)/1.4 var(--ui);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
