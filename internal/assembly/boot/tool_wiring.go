@@ -84,7 +84,7 @@ func hookRuntime(shell sandbox.Shell) hook.RuntimeOptions {
 // registerSessionTools adds the product-docs, session and memory tools every
 // role carries. The retrieval ablation drops only the BM25-backed history and
 // recall, so a lost solve is attributable to retrieval, not a missing reader.
-func registerSessionTools(reg *tool.Registry, set ablation.Set, roots config.Roots, sessionDir string, store memory.Store) {
+func registerSessionTools(reg *tool.Registry, set ablation.Set, roots config.Roots, sessionDir string, store memory.Store, proactive string) {
 	reg.Add(productdocs.NewTool())
 	retrievalOff := set.Off(ablation.Retrieval)
 	if !retrievalOff {
@@ -95,7 +95,9 @@ func registerSessionTools(reg *tool.Registry, set ablation.Set, roots config.Roo
 	if !retrievalOff {
 		reg.Add(memory.NewRecallTool(store))
 	}
-	reg.Add(memory.NewRememberTool(store))
+	if proactive != "off" {
+		reg.Add(memory.NewRememberTool(store))
+	}
 	reg.Add(memory.NewForgetTool(store))
 	addTurnExitTools(reg)
 }

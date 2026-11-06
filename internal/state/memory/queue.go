@@ -14,6 +14,13 @@ type Queue interface {
 	QueueMemory(note string, delivered ...Memory)
 }
 
+// Suggester holds a fact the model wants to keep instead of writing it: the
+// user decides whether it becomes a memory. A Queue that also implements it
+// puts remember into ask-first mode; the returned id names the held suggestion.
+type Suggester interface {
+	SuggestMemory(m Memory) (id string, held bool)
+}
+
 type autoMemoryWriteClaimer interface {
 	ClaimAutoMemoryWrite(args json.RawMessage) bool
 }
@@ -47,4 +54,15 @@ func ClaimAutoMemoryWriteFromContext(ctx context.Context, args json.RawMessage) 
 	}
 	claimer, ok := q.(autoMemoryWriteClaimer)
 	return ok && claimer.ClaimAutoMemoryWrite(args)
+}
+
+// SuggesterFromContext returns the suggestion holder when the session asks
+// before remembering.
+func SuggesterFromContext(ctx context.Context) (Suggester, bool) {
+	q, ok := QueueFromContext(ctx)
+	if !ok {
+		return nil, false
+	}
+	s, ok := q.(Suggester)
+	return s, ok
 }

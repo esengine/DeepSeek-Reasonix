@@ -43,6 +43,8 @@ type Options struct {
 	PinnedBudgetChars int
 	RecallLimit       int
 	RecallMaxChars    int
+	// Proactive is ask, auto or off; empty keeps the approval-gated writes.
+	Proactive string
 }
 
 // Load discovers all memory for a session: the hierarchical docs and the

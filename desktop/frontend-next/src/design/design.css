@@ -18,5 +18,6 @@
 @import "./feedback.css" layer(design);
 @import "./seltools.css" layer(design);
 @import "./onboarding.css" layer(design);
+@import "./suggest.css" layer(design);
 @import "./controls.css" layer(design);
 @import "./motion.css" layer(design);

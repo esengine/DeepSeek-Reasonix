@@ -33,6 +33,7 @@ func buildMemoryAssembly(opts Options, cfg *config.Config, root, sysPrompt strin
 		PinnedBudgetChars: cfg.Memory.PinnedBudgetChars,
 		RecallLimit:       cfg.Memory.RecallLimit,
 		RecallMaxChars:    cfg.Memory.RecallMaxChars,
+		Proactive:         cfg.MemoryProactive(),
 	})
 	return memoryAssembly{
 		set:       set,

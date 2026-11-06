@@ -197,6 +197,9 @@ type MemoryControl interface {
 	SaveMemory(m memory.Memory) (string, error)
 	ForgetMemory(name string) error
 	ConfirmMemory(name string) error
+	MemorySuggestions() []MemorySuggestion
+	AcceptMemorySuggestion(id string, edited *memory.Memory) (string, error)
+	DismissMemorySuggestion(id string) error
 	QueueMemory(note string, delivered ...memory.Memory)
 	MemoryRevisions(ref string) ([]memory.Memory, error)
 	RestoreMemory(ref string, revision int) (memory.Memory, error)
@@ -328,6 +331,8 @@ type RuntimeSettings interface {
 	SaveObservabilitySettings(patch ObservabilityPatch) (ObservabilitySettings, error)
 	FoldWorkSettings() FoldWorkSettings
 	SaveFoldWorkSettings(fold bool) error
+	MemoryProactiveSettings() MemoryProactiveSettings
+	SaveMemoryProactive(mode string) error
 	ChangedSettings() ChangedSettings
 	TurnNarrationSettings() TurnNarrationSettings
 	SaveTurnNarrationSettings(level string) error

@@ -54,6 +54,11 @@ func renderMemoryConfig(b *strings.Builder, m MemoryConfig) {
 	} else {
 		b.WriteString("# recall_limit = 4   # facts automatic recall may inject per turn\n")
 	}
+	if strings.TrimSpace(m.Proactive) != "" {
+		fmt.Fprintf(b, "proactive = %q   # ask|auto|off; whether the model asks before remembering, writes on its own, or is not offered the remember tool\n", m.Proactive)
+	} else {
+		b.WriteString("# proactive = \"ask\"   # ask|auto|off; whether the model asks before remembering\n")
+	}
 	if m.RecallMaxChars > 0 {
 		fmt.Fprintf(b, "recall_max_chars = %d   # total size of that injection\n\n", m.RecallMaxChars)
 	} else {

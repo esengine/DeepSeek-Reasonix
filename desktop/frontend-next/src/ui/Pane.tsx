@@ -64,6 +64,7 @@ import { speedOf } from "./speed";
 import { RuntimeBar } from "./RuntimeBar";
 import { PeerHeldBar } from "./PeerHeldBar";
 import { PostureNote, postureNote } from "./PostureNote";
+import { MemorySuggestRow } from "./MemorySuggestRow";
 import { SidePanel } from "./SidePanel";
 import { cancelJob } from "./jobcancel";
 import { JobsLiveContext } from "./JobRunView";
@@ -643,6 +644,7 @@ function PaneView({ port, hub, rt, title, active, visible, sideHost, side, onFoc
           <PeerHeldBar port={port} project={rt.host ? undefined : { path: rt.root, name: rt.name }} />
           {connect && <ConnectNote offer={connect} />}
           {!connect && <PostureNote port={port} status={status} onChanged={refreshStatus} />}
+          {!connect && !rt.readOnly && <MemorySuggestRow port={port} running={running} onError={notify} />}
         {/* Views the user (or the extension) put next to the composer. They sit
             above it rather than inside it: the input box is the one thing an
             extension must never be able to crowd out. */}

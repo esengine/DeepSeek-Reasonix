@@ -2,7 +2,7 @@ import { reason } from "../i18n/kernel";
 import { HttpError } from "./http_error";
 import type { KeptText } from "./attachment";
 import type { ChangeDiff, GitHistory, StageRequest, WorkspaceChange, WorkspaceChanges, WorkspaceGit, WorkspaceBranches } from "./workspace";
-import { MockTerminal } from "./mock_terminal";
+import { MockMemoryHold } from "./mock_memory_hold";
 
 export function mockWorkspaces(root: string): import("./workspace").WorkspaceInfo {
   return { current: root, canSwitch: true, canIsolate: true, recents: [
@@ -19,7 +19,7 @@ export function mockWorktreeSources(root: string, branch: string): import("./wor
   ] };
 }
 
-export class MockWorkspace extends MockTerminal {
+export class MockWorkspace extends MockMemoryHold {
   async workspaceFile(path: string, _root?: string): Promise<import("./workspace").WorkspaceFile> { return { path, content: `// ${path}\n`, revision: "fixture" }; }
   async workspacePreviewInfo(ref: import("./workspace").FileRef): Promise<import("./workspace").PreviewInfo> {
     const file = await this.workspaceFile(ref.path, ref.root);

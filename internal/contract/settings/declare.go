@@ -221,6 +221,7 @@ var table = []Entry{
 	{ID: "skills.suppress_warnings", Class: Preference, Effect: OnOpen},
 	{ID: "skills.max_depth", Class: Preference, Effect: OnOpen},
 	{ID: "memory.pinned_budget_chars", Class: Preference, Effect: OnOpen},
+	{ID: "memory.proactive", Class: Preference, Effect: OnOpen},
 	{ID: "memory.recall_limit", Class: Preference, Effect: OnOpen},
 	{ID: "memory.recall_max_chars", Class: Preference, Effect: OnOpen},
 	{ID: "statusline.command", Class: Guarded, Effect: OnOpen},

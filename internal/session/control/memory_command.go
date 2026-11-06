@@ -531,6 +531,9 @@ func (c *Controller) rememberProjectNote(note string) {
 }
 
 func (c *Controller) allowLowRiskRemember(args json.RawMessage) bool {
+	if c.asksBeforeRemembering() && !rememberTargetsExisting(args) {
+		return true
+	}
 	mem := c.Memory()
 	if mem != nil {
 		if assessment := memory.AssessRememberWrite(mem.Store, args); assessment.AutoAllow {
@@ -641,4 +644,13 @@ func ruleSubject(rule string) string {
 		return parsed.Tool
 	}
 	return parsed.Tool + " · " + strings.TrimSpace(parsed.Subject)
+}
+
+// rememberTargetsExisting reports whether a remember call names an existing
+// fact by id; only new facts are held as suggestions.
+func rememberTargetsExisting(args json.RawMessage) bool {
+	var in struct {
+		ID string `json:"id"`
+	}
+	return json.Unmarshal(args, &in) == nil && in.ID != ""
 }

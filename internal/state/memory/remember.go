@@ -113,7 +113,7 @@ func (t rememberTool) Execute(ctx context.Context, args json.RawMessage) (string
 	if in.Verified {
 		verifiedAt = time.Now().UTC()
 	}
-	result, err := t.store.SaveWithOptions(Memory{
+	candidate := Memory{
 		ID:             in.ID,
 		Name:           name,
 		Title:          in.Title,
@@ -129,7 +129,13 @@ func (t rememberTool) Execute(ctx context.Context, args json.RawMessage) (string
 		Galaxy:         NormalizeGalaxy(in.Galaxy),
 		Importance:     NormalizeImportance(in.Importance),
 		Body:           in.Body,
-	}, SaveOptions{
+	}
+	if sg, ok := SuggesterFromContext(ctx); ok && in.ID == "" {
+		if id, held := sg.SuggestMemory(candidate); held {
+			return fmt.Sprintf("Held as suggestion %s: the user has not saved it yet and will accept, edit or dismiss it. Do not repeat it and do not assume it is remembered.", id), nil
+		}
+	}
+	result, err := t.store.SaveWithOptions(candidate, SaveOptions{
 		ExpectedRevision:        in.ExpectedRevision,
 		RequireExpectedRevision: in.ExpectedRevision > 0,
 		RequireCreate:           autoCreate,

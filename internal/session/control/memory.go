@@ -49,6 +49,9 @@ type memoryManager struct {
 	// made the prefix diverge per project, and they need same-session freshness.
 	instructions projectionDebt
 
+	// book holds the facts the model proposed and the user has not decided on.
+	book suggestionBook
+
 	// writeMu serializes memory writes so each write+reload+swap is atomic with
 	// respect to the others. Taken OFF mu, so a read (current/drainPending) never
 	// blocks behind a write's disk I/O.
@@ -146,7 +149,8 @@ func (m *memoryManager) lastRecallResult() memory.RecallResult {
 }
 
 func newMemoryManager(set *memory.Set) memoryManager {
-	return memoryManager{set: set}
+	proactive := set.LoadOptions().Proactive
+	return memoryManager{set: set, book: suggestionBook{ask: proactive == "ask"}}
 }
 
 // memoryRecallAudit strips a recall decision to its content-free fingerprint

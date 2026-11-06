@@ -1,3 +1,4 @@
+import { MemoryProactiveRow } from "./MemoryProactiveRow";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { t } from "../i18n";
 import { tx } from "../i18n/rich";
@@ -184,6 +185,7 @@ function MemoryPanel({ port }: { port: AgentPort }) {
 
   return (
     <div className="mem" data-view={filter.kind}>
+      <MemoryProactiveRow port={port} />
       {unreadableNotice}
       {query && (
         <p className="recall">

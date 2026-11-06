@@ -1,6 +1,7 @@
 import type { SurfaceActionRequest, SurfaceActionRecord } from "./surface";
 import { PLAN_ACTIONS, type PlanAction } from "./session";
 import type { AccountState, AgentPort, ChipCall, CompactionSettings, Completion, DeviceGrant, UpdateProgress, StudioLogs, VersionHub, VersionNotes, ApprovalMode, ApprovalVerdict, Checkpoint, RewindPlan, RewindResult, RewindUndo, RewindScope, HistoryMessage, HostTodo, BrowserTab, ModelEntry, Preset, ProviderSetup, RoleAssignments, RoleOverride, SessionEntry, SessionStatus, WalletReading, MemoryCatalog, MemoryEdit, MemoryEntry, UsageQuery, UsageReport, UploadReport, Queue, Queued, NotifyPrefs, TrayPrefs, WorkspaceInfo } from "./port";
+import type { MemoryProactive, MemorySuggestion } from "./memory";
 import { HttpError, type CommitProposal, type CommitRequest, type CommitResult, type WorkspaceFile, type WorkspaceFiles } from "./port";
 import { SseTerminal } from "./sse_terminal";
 import type { StoragePlan, StorageQuery, StorageState } from "./storage";
@@ -104,6 +105,23 @@ export class SsePort extends SseTerminal implements AgentPort {
   }
   confirmMemory(name: string) {
     return this.post("/memory/confirm", { name });
+  }
+  async memoryProactive() {
+    const r = await this.get<{ mode: MemoryProactive }>("/memory/proactive");
+    return r.mode;
+  }
+  async setMemoryProactive(mode: MemoryProactive) {
+    await this.post("/memory/proactive", { mode });
+  }
+  async memorySuggestions() {
+    const r = await this.get<{ suggestions: MemorySuggestion[] }>("/memory/suggestions");
+    return r.suggestions ?? [];
+  }
+  acceptMemorySuggestion(id: string, edit?: { title?: string; description?: string; body?: string }) {
+    return this.post("/memory/suggestions/accept", { id, ...edit });
+  }
+  dismissMemorySuggestion(id: string) {
+    return this.post("/memory/suggestions/dismiss", { id });
   }
   async memoryRevisions(name: string) {
     const r = await this.get<{ revisions: MemoryEntry[] }>("/memory/revisions?name=" + encodeURIComponent(name));

@@ -38,6 +38,30 @@ export interface UnreadableMemory {
   error: string;
 }
 
+// What the model may do on its own with memory: nothing, ask first, or write.
+export type MemoryProactive = "off" | "ask" | "auto";
+
+// A fact the model proposed and the user has not decided on.
+export interface MemorySuggestion {
+  id: string;
+  name: string;
+  title?: string;
+  description: string;
+  body: string;
+  type?: string;
+  scope?: string;
+}
+
+// What the model may propose to keep, and the user's say over it.
+export interface MemoryHoldPort {
+  memoryProactive(): Promise<MemoryProactive>;
+  setMemoryProactive(mode: MemoryProactive): Promise<void>;
+  memorySuggestions(): Promise<MemorySuggestion[]>;
+  /** Saves a held suggestion; fields given replace the model's wording. */
+  acceptMemorySuggestion(id: string, edit?: { title?: string; description?: string; body?: string }): Promise<void>;
+  dismissMemorySuggestion(id: string): Promise<void>;
+}
+
 export interface MemoryCatalog {
   memories: MemoryEntry[];
   recallQuery: string;
