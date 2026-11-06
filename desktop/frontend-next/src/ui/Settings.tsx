@@ -64,7 +64,7 @@ const ELSEWHERE: string[] = [];
 // label. A failed server keeps its error on the row that names it.
 const NET_MODE: Record<string, string> = { auto: "look.follow_the_system", env: "settings.environment_variables", custom: "about.manual", off: "models.direct" };
 
-const TWO_COLUMN: readonly Section[] = ["session", "tools", "ext", "display", "controls", "appearance", "storage"];
+const TWO_COLUMN: readonly Section[] = ["common", "session", "tools", "ext", "display", "controls", "appearance", "storage"];
 
 const homeFor = (section: Section, anchor: string): Section => {
   const entry = SETTING_AT(anchor);

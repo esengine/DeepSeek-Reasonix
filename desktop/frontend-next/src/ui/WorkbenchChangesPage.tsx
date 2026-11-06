@@ -22,6 +22,10 @@ interface Props {
 // saying what is inside; a file that was edited shows its diff at once.
 const startsOpen = (c: WorkspaceChange) => c.status !== "A" && c.status !== "??";
 
+// Past this many files the folded note under each new or untracked file would
+// double the list, so it becomes a tag in the file's own header.
+const MANY_FILES = 8;
+
 /** Every changed file of the workspace's own repository on one page, each with
  *  its diff under a header that stages it, opens it or throws the change away. */
 export function WorkbenchChangesPage({ port, changes, branch, shown, remote, onOpen, onChanged }: Props) {
@@ -33,6 +37,8 @@ export function WorkbenchChangesPage({ port, changes, branch, shown, remote, onO
   const settled = changes.length > 0 && changes.every((c) => c.staged && !c.unstaged);
   const added = changes.reduce((n, c) => n + (c.insertions ?? 0), 0);
   const removed = changes.reduce((n, c) => n + (c.deletions ?? 0), 0);
+  const many = changes.length > MANY_FILES;
+  const untracked = changes.filter((c) => c.status === "??").length;
   const run = async (work: () => Promise<void>) => {
     setBusy(true);
     setFailure("");
@@ -50,7 +56,7 @@ export function WorkbenchChangesPage({ port, changes, branch, shown, remote, onO
       <div className="wb-changes-head">
         <StudioIcon name="branch" />
         {branch && <b>{branch}</b>}
-        <span>{t("common.n_files", { n: changes.length })} <i data-tone="add">+{added}</i> <i data-tone="del">−{removed}</i></span>
+        <span>{t("common.n_files", { n: changes.length })}{many && ` ${t("workbench.modified_untracked", { m: changes.length - untracked, u: untracked })}`} <i data-tone="add">+{added}</i> <i data-tone="del">−{removed}</i></span>
         <span className="wb-changes-fill" />
         <button type="button" className="wb-changes-btn" data-action="workbench.stage-all" disabled={busy || changes.length === 0}
           onClick={() => void run(() => port.stageChanges({ all: true, unstage: settled }))}>
@@ -65,7 +71,7 @@ export function WorkbenchChangesPage({ port, changes, branch, shown, remote, onO
       <div className="wb-changes-body">
         {changes.length === 0 && <p className="workbench-empty">{t("workbench.no_changes")}</p>}
         {changes.map((c) => (
-          <ChangedFile key={c.path} port={port} change={c} shown={shown} busy={busy} onOpen={onOpen}
+          <ChangedFile key={c.path} port={port} change={c} shown={shown} busy={busy} many={many} onOpen={onOpen}
             onStage={(unstage) => void run(() => port.stageChanges({ paths: [c.path], unstage }))}
             onDiscard={() => void run(() => port.discardChange({ path: c.path }))} />
         ))}
@@ -75,8 +81,8 @@ export function WorkbenchChangesPage({ port, changes, branch, shown, remote, onO
   );
 }
 
-function ChangedFile({ port, change: c, shown, busy, onOpen, onStage, onDiscard }: {
-  port: AgentPort; change: WorkspaceChange; shown: boolean; busy: boolean;
+function ChangedFile({ port, change: c, shown, busy, many, onOpen, onStage, onDiscard }: {
+  port: AgentPort; change: WorkspaceChange; shown: boolean; busy: boolean; many: boolean;
   onOpen: (path: string) => void; onStage: (unstage: boolean) => void; onDiscard: () => void;
 }) {
   const [open, setOpen] = useState(() => startsOpen(c));
@@ -113,12 +119,13 @@ function ChangedFile({ port, change: c, shown, busy, onOpen, onStage, onDiscard 
             </button>
           )}
         </span>
+        {many && !startsOpen(c) && <span className="wb-change-tag">{t(c.status === "??" ? "workbench.tag_untracked" : "workbench.tag_new")}</span>}
         <span className="wb-change-count">
           {c.insertions !== undefined && <i data-tone="add">+{c.insertions}</i>}
           {c.deletions !== undefined && <i data-tone="del">−{c.deletions}</i>}
         </span>
       </div>
-      {!open && !startsOpen(c) && (
+      {!open && !startsOpen(c) && !many && (
         <button type="button" className="wb-change-peek" data-action="workbench.change-fold" data-target={c.path} onClick={() => setOpen(true)}>
           {t(c.status === "??" ? "workbench.untracked_open_to_see" : "workbench.new_file_open_to_see")}
         </button>

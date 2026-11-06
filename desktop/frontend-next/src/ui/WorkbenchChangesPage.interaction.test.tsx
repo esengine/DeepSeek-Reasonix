@@ -69,6 +69,32 @@ describe("the changes page, as the WB-Frame board draws it", () => {
   });
 });
 
+describe("the changes page with many files, as the WB-Changes-Many board draws it", () => {
+  const many: WorkspaceChange[] = [
+    { path: "internal/config/credentials.go", status: "M", unstaged: true, insertions: 12, deletions: 4 },
+    { path: "internal/provider/openai/chunk_decoder.go", status: "A", staged: true, insertions: 42 },
+    ...Array.from({ length: 8 }, (_, i) => ({ path: `bench/__pycache__/m${i}.pyc`, status: "??", unstaged: true }) as WorkspaceChange),
+  ];
+
+  it("puts what a new or untracked file is into its own header instead of a row under it", async () => {
+    draw({ changes: many });
+    await waitFor(() => expect(document.querySelectorAll(".wb-diff")).toHaveLength(1));
+    expect(document.querySelectorAll(".wb-change-peek")).toHaveLength(0);
+    expect([...document.querySelectorAll(".wb-change-tag")].map((e) => e.textContent)).toEqual(["新增", ...Array(8).fill("未跟踪")]);
+  });
+
+  it("says in the top line how many files are modified and how many are untracked", () => {
+    draw({ changes: many });
+    expect(document.querySelector(".wb-changes-head")!.textContent).toContain("10 个文件 已修改 2　未跟踪 8");
+  });
+
+  it("keeps the folded note under each file while there are few", () => {
+    draw();
+    expect(document.querySelectorAll(".wb-change-peek")).toHaveLength(1);
+    expect(document.querySelectorAll(".wb-change-tag")).toHaveLength(0);
+  });
+});
+
 describe("the explorer's changes section", () => {
   it("opens the changes page from its title and folds its rows from its arrow", async () => {
     const { WorkbenchChanges } = await import("./WorkbenchChanges");
