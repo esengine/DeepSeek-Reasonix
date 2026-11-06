@@ -6,6 +6,7 @@ import { createPortal } from "react-dom";
 import { t } from "../i18n";
 import type { HubPort, RuntimeView, TreeSession, TreeWorkspace } from "../port/hub";
 import { workspaceContains } from "../port/hub";
+import { HttpError } from "../port/http_error";
 import type { Adder } from "./addws";
 import { pinToViewport } from "./place";
 import { useRailQuery } from "./railsearch";
@@ -94,6 +95,11 @@ const rowLabel = (session: TreeSession) =>
 function WorkspacesView({ hub, tree, treeRead, answered = null, runtimes, active, folded, reload, retry, paging = NO_PAGING, previewLimit = Infinity, onFold, onToggleAll, onRecent, allFolded, canFold, opening = "", onOpen, onFocus, onClose, liveIds, listedIds = liveIds, runs, scope = "all", pinned = new Set(), onPin = () => {}, onPause = () => {}, onBranch, onArchive = async () => {}, onRename, onError, adder, children, hasOtherRows }: Props) {
   const [busy, setBusy] = useState("");
   const [confirm, setConfirm] = useState("");
+  // The project whose folder an open just found gone: the question is asked about it, not about a removal chosen from the menu.
+  const [gone, setGone] = useState("");
+  const failIn = (ws: TreeWorkspace, e: unknown) => {
+    if (e instanceof HttpError && e.reason?.code === "workspace.folder_missing") { setGone(ws.root); setConfirm(ws.root); } else onError(e);
+  };
   const [selection, setSelection] = useState<Set<string> | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   // The row a Delete key asked about. The question replaces that row, so focus
@@ -190,7 +196,7 @@ function WorkspacesView({ hub, tree, treeRead, answered = null, runtimes, active
     try {
       await onOpen({ root: session.workspaceRoot || ws.root, sessionPath: session.path });
     } catch (e) {
-      onError(e);
+      failIn(ws, e);
     }
   };
 
@@ -199,7 +205,7 @@ function WorkspacesView({ hub, tree, treeRead, answered = null, runtimes, active
     try {
       await onOpen({ root: ws.root });
     } catch (e) {
-      onError(e);
+      failIn(ws, e);
     } finally {
       setBusy("");
     }
@@ -222,10 +228,12 @@ function WorkspacesView({ hub, tree, treeRead, answered = null, runtimes, active
 
   const dropWorkspace = async (ws: TreeWorkspace) => {
     if (confirm !== ws.root) {
+      setGone("");
       setConfirm(ws.root);
       return;
     }
     setConfirm("");
+    setGone("");
     try {
       // Closed here for the same reason dropSession does it: the kernel will not
       // pull a folder out from under a pane that is writing, and leaving that to
@@ -381,12 +389,12 @@ function WorkspacesView({ hub, tree, treeRead, answered = null, runtimes, active
               <div className="wsnode" key={ws.root} data-current={panesOf(ws.root).includes(active) ? "" : undefined} data-missing={ws.missing ? "" : undefined}>
                 {confirm === ws.root ? (
                   <Confirm
-                    what={t("session.remove_name_from_the_list", { name: ws.name })}
+                    what={gone === ws.root ? t("session.folder_gone_remove_from_list", { name: ws.name }) : t("session.remove_name_from_the_list", { name: ws.name })}
                     hint={removeHint(doomed.length, busyPanes)}
                     go={t("common.remove")}
                     danger={busyPanes > 0}
                     onGo={() => void dropWorkspace(ws)}
-                    onCancel={() => setConfirm("")}
+                    onCancel={() => { setConfirm(""); setGone(""); }}
                   />
                 ) : (
                   <div

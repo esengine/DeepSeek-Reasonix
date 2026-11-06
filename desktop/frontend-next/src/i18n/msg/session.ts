@@ -68,6 +68,7 @@ export const SESSION: Messages = {
   "session.expand_all_projects": { zh: "展开所有项目", en: "Expand all projects" },
   "session.export_session": { zh: "导出会话", en: "Export session" },
   "session.extra_folders_for_this_project": { zh: "此项目的额外文件夹", en: "Extra folders for this project" },
+  "session.folder_gone_remove_from_list": { zh: "「{name}」的文件夹已经不在磁盘上了，要把它从列表里移除吗？", en: "The folder of “{name}” is no longer on disk. Remove it from the list?" },
   "session.folder_is_gone": { zh: "文件夹已不在磁盘上", en: "Folder is gone" },
   "session.folder_path_to_add": { zh: "要添加的文件夹路径", en: "Folder path to add" },
   "session.folders_are_managed_in_the": { zh: "在左栏管理文件夹：底部添加，展开后可新建会话。会话归属于创建它的文件夹，不会移动到其他位置。", en: "Folders are managed in the left column: add at the bottom, expand to start a session. A session belongs to the folder it was created in and does not move." },
