@@ -146,7 +146,7 @@ export const SETTINGS: Messages = {
   "settings.shortcut_binding": { zh: "快捷键组合", en: "Shortcut binding" },
   "settings.shortcuts_tabs_sending_while_running": { zh: "快捷键、标签、运行中发消息、性能", en: "Shortcuts, tabs, sending while running, performance" },
   "settings.show_a_status_icon_in": { zh: "在托盘显示图标", en: "Show a status icon in the tray" },
-  "settings.show_file_changes_above_the": { zh: "在输入框上方显示文件改动", en: "Show file changes above the input box" },
+  "settings.show_file_changes_above_the": { zh: "在输入框顶部显示文件改动", en: "Show file changes at the top of the input box" },
   "settings.show_name": { zh: "显示：{name}", en: "Show: {name}" },
   "settings.sign_in_status_could_not": { zh: "无法读取登录状态", en: "Sign-in status could not be read" },
   "settings.sign_out": { zh: "退出登录", en: "Sign out" },
@@ -273,6 +273,6 @@ export const SETTINGS: Messages = {
   "settings.while_running_card": { zh: "运行中", en: "While running" },
   "settings.performance_card": { zh: "性能", en: "Performance" },
   "settings.tool_calls_and_thinking_fold": { zh: "回复里工具调用和思考默认收起，只留最后的结论", en: "Tool calls and thinking fold by default, leaving the final answer" },
-  "settings.show_n_files_changed_above_input": { zh: "输入框上方显示「n 个文件已更改」", en: "Show “n files changed” above the composer" },
+  "settings.show_n_files_changed_above_input": { zh: "输入框顶部显示「n 个文件已更改」", en: "Show “n files changed” at the top of the composer" },
   "settings.notice_when_feedback_adopted": { zh: "反馈被采纳、等级提升时提示你", en: "Tell you when feedback is adopted or your level rises" },
 };
