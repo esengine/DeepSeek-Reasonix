@@ -189,3 +189,6 @@
 .activity-group .activity-errors { font-size: var(--fs-micro); }
 .activity-body .hl .tag { display: none; }
 .activity-body .hl > .tool-fold { display: none; }
+.rc[data-worked] { display: flex; justify-content: flex-end; margin: 2px 0 0; }
+.rc[data-worked] .rc-ok { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font: var(--w-reg) var(--fs-meta)/1.4 var(--ui); }
+.rc[data-worked] .rc-tick { width: 14px; height: 14px; color: var(--ok-ink); }

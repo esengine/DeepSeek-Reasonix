@@ -6,7 +6,7 @@ import "./testkit";
 import { Settings } from "./Settings";
 import { MockPort } from "../port/mock";
 import { MockHub } from "../port/mock_hub";
-import type { CapabilityScope, SkillCatalog } from "../port/port";
+import type { AgentPort, CapabilityScope, SkillCatalog } from "../port/port";
 
 afterEach(cleanup);
 
