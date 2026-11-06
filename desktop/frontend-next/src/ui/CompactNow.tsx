@@ -99,7 +99,7 @@ export function CompactNow({
             </span>
             {usage && usage.window > 0 && (
               <span className="u">
-                {t("common.used")} {tokenLabel(usage.used)}
+                {t("composer.in_use_now")} {tokenLabel(usage.used)}
                 <small>
                   {" "}
                   · {t("common.model_capacity")} {tokenLabel(usage.window)}

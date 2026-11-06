@@ -58,3 +58,15 @@ it("offers no list for a class with no holders named, nor at all from a kernel t
   expect(document.querySelector('[data-action="context.largest"]')).toBeNull();
   expect(document.querySelectorAll(".chrome-context-parts b")).toHaveLength(5);
 });
+
+it("says where the window folds on its own, beside the capacity", () => {
+  render(card(breakdown({ window: 128_000, compact_at: 115_000 })));
+  const total = document.querySelector(".chrome-context-total")!;
+  expect(total.textContent).toContain("模型容量");
+  expect(total.textContent).toContain("到 115k 自动压缩");
+});
+
+it("says nothing about a fold the kernel has no threshold for", () => {
+  render(card(breakdown({ compact_at: 0 })));
+  expect(document.querySelector(".chrome-context-total")!.textContent).not.toContain("自动压缩");
+});

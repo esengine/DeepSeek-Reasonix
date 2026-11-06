@@ -33,7 +33,7 @@ export function ContextSummaryCard({ context, mcp, percent, onManage, compact: a
       <header><span><b>{t("common.context_details")}</b><small>{t("composer.content_sent_to_the_model")}</small></span><strong>{percent ?? 0}%</strong></header>
       {context ? (
         <>
-          <div className="chrome-context-total"><span>{t("common.used")} <b>{compact(context.used)}</b></span><span>{t("common.model_capacity")} <b>{compact(context.window)}</b></span></div>
+          <div className="chrome-context-total"><span>{t("common.used")} <b>{compact(context.used)}</b></span><span>{t("common.model_capacity")} <b>{compact(context.window)}</b>{context.compact_at > 0 && <> · {t("composer.auto_compacts_at", { n: compact(context.compact_at) })}</>}</span></div>
           <div className="chrome-context-bar">{parts.map(([label, value, key]) => <i key={key} data-part={key} title={`${label} ${compact(value)}`} style={{ width: `${context.used ? Math.max(1, (value / context.used) * 100) : 0}%` }} />)}</div>
           <div className="chrome-context-parts">{parts.map(([label, value, key]) => (
             <div key={key}>
