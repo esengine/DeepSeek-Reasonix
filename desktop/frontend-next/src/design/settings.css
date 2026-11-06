@@ -14,7 +14,7 @@
 .prefs-pagetitle { margin: 0 0 12px; gap: 10px; max-width: none; align-items: baseline; }
 .prefs-pagetitle h2 { font: var(--w-semi) var(--fs-title)/1.3 var(--ui); }
 .prefs-pagetitle .desc { font: var(--w-reg) var(--fs-meta)/1.4 var(--ui); color: var(--faint); }
-.prefs-col { max-width: 760px; margin-inline: auto; }
+.prefs-col { max-width: 880px; margin-inline: auto; }
 .prefs-card { margin: 0 0 14px; padding: 12px 18px 4px; border: 1px solid var(--hair); border-radius: var(--r-lg); background: var(--raised); overflow: visible; }
 .prefs-card > header { padding: 0; margin: 0 0 4px; }
 .prefs-card > header h3 { margin: 0; font: var(--w-semi) var(--fs-ui)/1.4 var(--ui); }
@@ -30,7 +30,7 @@
 .prefs-col .prefs-card > .grp .grp-hd h3 { font-size: var(--fs-ui); font-weight: var(--w-med); }
 .prefs-main { container: prefsmain / inline-size; }
 @container prefsmain (min-width: 860px) {
-  .prefs-col[data-cols="2"] { max-width: 1160px; column-count: 2; column-gap: 16px; }
+  .prefs-col[data-cols="2"] { max-width: 1400px; column-count: 2; column-gap: 16px; }
   .prefs-col[data-cols="2"] > .prefs-card { break-inside: avoid; }
 }
 .prefs-card > .srow { display: flex; align-items: center; gap: 16px; padding: 10px 0; border-top: 1px solid var(--hair); }
@@ -420,9 +420,9 @@
 .changed-keys { display: flex; flex-direction: column; gap: 4px; margin: 4px 0 0; padding: 8px 0 2px; border-top: 1px solid var(--hair); list-style: none; }
 .changed-keys li { color: var(--muted); font: var(--w-reg) var(--fs-meta) var(--mono); }
 .prefs-card > .grp { grid-template-columns: minmax(0, 1fr) fit-content(320px); }
-.prefs-main > .prefs-pagetitle { max-width: 760px; margin-inline: auto; }
+.prefs-main > .prefs-pagetitle { max-width: 880px; margin-inline: auto; }
 @container prefsmain (min-width: 860px) {
-  .prefs-main:has(.prefs-col[data-cols="2"]) > .prefs-pagetitle { max-width: 1160px; }
+  .prefs-main:has(.prefs-col[data-cols="2"]) > .prefs-pagetitle { max-width: 1400px; }
 }
 .apply[data-usual] { display: none; }
 .prefs-card > .grp > .apply { display: none; }
