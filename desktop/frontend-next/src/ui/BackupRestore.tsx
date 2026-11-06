@@ -1,8 +1,10 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { t } from "../i18n";
 import { reason } from "../i18n/kernel";
 import type { AgentPort, BackupApplyResult, BackupCategory, BackupEntry, BackupPlan, BackupPlanItem, BackupPluginRef } from "../port/port";
 import { AddPlugin } from "./AddPlugin";
+import { StudioIcon } from "./StudioIcon";
 
 export const CATEGORY_LABEL: Record<BackupCategory, string> = {
   settings: "data.models_and_interface",
@@ -25,6 +27,25 @@ const CONSENT_LABEL: Record<string, string> = {
   replaces_secret: "data.i_allow_the_key_in",
   imports: "data.i_have_read_this_instruction",
 };
+
+// A restore is asked for and read in a dialog; what it did is said afterwards,
+// in the page, in one strip per outcome.
+function RestoreDialog({ title, onClose, footer, wide, children }: { title: string; onClose: () => void; footer: ReactNode; wide?: boolean; children: ReactNode }) {
+  return createPortal(
+    <div className="ns-veil" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="ns-dlg bk-dlg" data-wide={wide ? "" : undefined} role="dialog" aria-modal="true" aria-label={title}
+        onKeyDown={(e) => { if (e.key === "Escape") { e.stopPropagation(); onClose(); } }}>
+        <header>
+          <h3>{title}</h3>
+          <button type="button" className="ns-x" aria-label={t("common.close")} title={t("common.close")} onClick={onClose}><StudioIcon name="close" /></button>
+        </header>
+        <div className="bk-dlg-body">{children}</div>
+        <footer>{footer}</footer>
+      </div>
+    </div>,
+    document.body,
+  );
+}
 
 // The preview is the kernel's: which rows need consent, and why, is decided
 // there and rechecked on apply. This panel only collects two separate answers
@@ -100,35 +121,28 @@ export function BackupRestore({ port, source, onClose }: { port: AgentPort; sour
 
   if (result) {
     return (
-      <div className="bk-restore" data-action="backup.result">
-        <p className="acct-note">{t("data.restored_n_items", { n: result.applied.length })}</p>
-        {result.failed?.map((f) => (
-          <p key={f.id} className="acct-note" data-err="">
-            {f.id}：{f.error}
-          </p>
-        ))}
-        {result.reloadError && <p className="acct-note">{t("data.the_setup_was_written_but", { e: result.reloadError })}</p>}
-        {!!result.plugins?.length && (
-          <>
-            <p className="acct-note">{t("data.these_plugins_go_through_the")}</p>
-            <ul className="bk-list">
-              {result.plugins.map((p) => (
-                <li key={p.name} className="bk-row">
-                  <div className="who">
-                    <span className="nm">{p.name}</span>
-                    <code className="meta">{p.source}{p.version ? " · " + p.version : ""}</code>
-                  </div>
-                  <button className="btn sm" data-action="backup.install-plugin" data-target={p.name} disabled={installing?.name === p.name} onClick={() => setInstalling({ ...p })}>
-                    {t("data.install")}
-                  </button>
-                </li>
-              ))}
-            </ul>
-          </>
-        )}
-        <div className="bk-acts">
-          <button className="act" data-action="backup.done" onClick={onClose}>{t("common.done")}</button>
+      <div className="bk-result" data-action="backup.result">
+        <div className="bk-strip" data-tone="ok">
+          <StudioIcon name="check" /><span>{t("data.restored_n_items", { n: result.applied.length })}</span>
+          <button type="button" className="ns-cancel" data-action="backup.done" onClick={onClose}>{t("common.done")}</button>
         </div>
+        {result.failed?.map((f) => (
+          <div key={f.id} className="bk-strip" data-tone="warn" role="alert"><StudioIcon name="warning" /><span>{f.id}：{f.error}</span></div>
+        ))}
+        {result.reloadError && <div className="bk-strip" data-tone="warn"><StudioIcon name="warning" /><span>{t("data.the_setup_was_written_but", { e: result.reloadError })}</span></div>}
+        {!!result.plugins?.length && (
+          <div className="bk-strip" data-tone="plain" data-plugins="">
+            <span>{t("data.these_plugins_go_through_the")}</span>
+            {result.plugins.map((p) => (
+              <span key={p.name} className="bk-plug">
+                <code>{p.name}{p.version ? " " + p.version : ""}</code>
+                <button className="btn sm" data-action="backup.install-plugin" data-target={p.name} disabled={installing?.name === p.name} onClick={() => setInstalling({ ...p })}>
+                  {t("data.install")}
+                </button>
+              </span>
+            ))}
+          </div>
+        )}
         {installing && (
           <AddPlugin key={installing.name} port={port} source={installing.source} onClose={() => setInstalling(null)} onInstalled={() => setInstalling((current) => current === installing ? null : current)} />
         )}
@@ -138,27 +152,33 @@ export function BackupRestore({ port, source, onClose }: { port: AgentPort; sour
 
   if (!plan) {
     return (
-      <div className="bk-restore">
+      <RestoreDialog title={t("data.restore_a_backup")} onClose={onClose} footer={<>
+        <button type="button" className="ns-cancel" data-action="backup.cancel" onClick={onClose}>{t("common.cancel")}</button>
+        <button type="button" className="btn" data-primary data-action="backup.preview" disabled={!pass || busy} onClick={() => void open()}>
+          <StudioIcon name="lock" />{t(busy ? "data.decrypting" : "data.preview_differences")}
+        </button>
+      </>}>
         <p className="acct-note">{t("data.enter_the_passphrase_for_name", { name: source.name })}</p>
-        <div className="bk-fields">
+        <div className="bk-fields" data-one="">
           <label className="grow">
             <span>{t("data.passphrase")}</span>
-            <input data-action="backup.passphrase" data-target="open" type="password" autoComplete="current-password" disabled={busy} value={pass} onChange={(e) => setPass(e.target.value)} />
+            <input autoFocus data-action="backup.passphrase" data-target="open" type="password" autoComplete="current-password" disabled={busy} value={pass} onChange={(e) => setPass(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter" && pass && !busy) void open(); }} />
           </label>
         </div>
-        <div className="bk-acts">
-          <button className="act" data-primary data-action="backup.preview" disabled={!pass || busy} onClick={() => void open()}>
-            {t(busy ? "data.decrypting" : "data.preview_differences")}
-          </button>
-          <button className="act" data-action="backup.cancel" onClick={onClose}>{t("common.cancel")}</button>
-        </div>
         {error && <p className="acct-note" data-err="">{error}</p>}
-      </div>
+      </RestoreDialog>
     );
   }
 
   return (
-    <div className="bk-restore">
+    <RestoreDialog title={t("data.restore_a_backup")} onClose={onClose} wide footer={<>
+      {blocked.length > 0 && <span className="acct-note">{t("data.n_items_still_need_confirmation", { n: blocked.length })}</span>}
+      <button type="button" className="ns-cancel" data-action="backup.cancel" onClick={onClose}>{t("common.cancel")}</button>
+      <button type="button" className="btn" data-primary data-action="backup.apply" disabled={busy || picked.size === 0 || blocked.length > 0} onClick={() => void apply()}>
+        {t(busy ? "data.restoring" : "data.restore_n_selected", { n: picked.size })}
+      </button>
+    </>}>
       {!plan.samePlatform && (
         <div className="find" data-lvl="warn" role="note">
           <span className="t">{t("data.this_backup_comes_from_p", { p: plan.platform })}</span>
@@ -195,14 +215,7 @@ export function BackupRestore({ port, source, onClose }: { port: AgentPort; sour
         ))}
       </ul>
       {!!plan.omitted?.length && <p className="acct-note">{t("data.n_files_were_too_large", { n: plan.omitted.length })}</p>}
-      <div className="bk-acts">
-        <button className="act" data-primary data-action="backup.apply" disabled={busy || picked.size === 0 || blocked.length > 0} onClick={() => void apply()}>
-          {t(busy ? "data.restoring" : "data.restore_n_selected", { n: picked.size })}
-        </button>
-        <button className="act" data-action="backup.cancel" onClick={onClose}>{t("common.cancel")}</button>
-        {blocked.length > 0 && <span className="acct-note">{t("data.n_items_still_need_confirmation", { n: blocked.length })}</span>}
-      </div>
       {error && <p className="acct-note" data-err="">{error}</p>}
-    </div>
+    </RestoreDialog>
   );
 }

@@ -113,6 +113,7 @@ export const DATA: Messages = {
   "data.repeat_it": { zh: "再输一次", en: "Repeat it" },
   "data.repeat_the_passphrase_to_confirm": { zh: "请再输一次口令", en: "Repeat the passphrase to confirm it" },
   "data.restore": { zh: "恢复…", en: "Restore…" },
+  "data.restore_a_backup": { zh: "恢复备份", en: "Restore a backup" },
   "data.restore_n_selected": { zh: "恢复所选 {n} 项", en: "Restore {n} selected" },
   "data.restored_n_items": { zh: "已恢复 {n} 项。", en: "Restored {n} items." },
   "data.restoring": { zh: "正在恢复…", en: "Restoring…" },
