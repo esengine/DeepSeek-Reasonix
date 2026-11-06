@@ -393,7 +393,6 @@ export const ACTIONS: UIAction[] = [
   // the row's own action, so this one never writes anything itself.
   { id: "tree.navigate", kind: "view", target: "none", proof: "interaction" },
   { id: "settings.close", kind: "navigation", target: "none", proof: "interaction" },
-  { id: "settings.expand", kind: "view", target: "none", proof: "interaction" },
   { id: "pane.activate", kind: "navigation", target: "none", proof: "interaction" },
   // How this session is being read. One id across a bar button and a menu row,
   // because reaching a view from the bar and from the detail menu is one intent

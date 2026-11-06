@@ -1,6 +1,4 @@
-import { WindowControls } from "./WindowControls";
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
-import { onSettingsWideChange, setSettingsWide, settingsWide } from "../state/settingsWide";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { StudioIcon } from "./StudioIcon";
 import { useModalFocus } from "./useModalFocus";
 import { SettingsLeaveContext, useSettingsLeave } from "./SettingsLeave";
@@ -77,7 +75,6 @@ const SOLO_TITLE: Record<string, string> = { ext: "ext.extension", usage: "app.u
 export function Settings({ hub, onError, port, networkPort, localWorkspacePort, networkHost, status, theme, onTheme, contrast, onContrast, weight, onWeight, look, onLook, onClose, onChanged, onSessionsRecovered, reloadThemes, at: opened, account: acct, accountUnread, reloadAccount, workspaceRoot }: Props) {
   const navigation = useSettingsLeave();
   const close = useCallback(() => navigation.leave(onClose), [navigation.leave, onClose]);
-  const wide = useSyncExternalStore(onSettingsWideChange, settingsWide, settingsWide);
   const homePort = networkPort ?? port;
   const localPort = localWorkspacePort ?? homePort;
   const [openedName, namedAnchor = ""] = (opened ?? "").split(":", 2);
@@ -348,7 +345,7 @@ export function Settings({ hub, onError, port, networkPort, localWorkspacePort, 
       onMouseUp={(e) => { if (veiled.current && e.target === e.currentTarget && !updatingPkg.applying) close(); }}
       data-action-mouseup="settings.close"
     >
-      <div className="prefs-sheet" role="dialog" aria-modal="true" aria-labelledby="prefs-title" data-wide={wide || undefined} data-solo={soloSection}>
+      <div className="prefs-sheet" role="dialog" aria-modal="true" aria-labelledby="prefs-title" data-solo={soloSection}>
       <div className="prefs-hd">
         <h1 id="prefs-title">{t(solo ? SOLO_TITLE[soloSection] : "common.settings")}</h1>
         {/* 原来这里挂着一句「改动立刻生效；需要重建运行时的……」。它对三档里的
@@ -374,13 +371,9 @@ export function Settings({ hub, onError, port, networkPort, localWorkspacePort, 
           }}
         />
         <div className="prefs-actions">
-        <button className="prefs-icon" type="button" data-action="settings.expand" aria-pressed={wide} aria-label={t("settings.enlarge_the_settings_window")} title={t(wide ? "settings.shrink_the_settings_window" : "settings.enlarge_the_settings_window")} onClick={() => setSettingsWide(!wide)}>
-          <StudioIcon name={wide ? "collapseAll" : "expand"} />
-        </button>
         <button className="prefs-icon" type="button" data-action="settings.close" disabled={updatingPkg.applying} onClick={close} aria-label={`${t("common.close")} Esc`} title={`${t("common.close")} Esc`}>
           <StudioIcon name="close" />
         </button>
-        {wide && <WindowControls />}
         </div>
         {found !== null && (
           <div className="prefs-found" role="listbox" aria-label={t("settings.search_settings")}>

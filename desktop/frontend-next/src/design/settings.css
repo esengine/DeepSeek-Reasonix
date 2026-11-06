@@ -353,7 +353,7 @@
 .ustack .utip .r { display: flex; justify-content: space-between; gap: 12px; color: var(--muted); font: var(--w-med) var(--fs-micro) var(--ui); }
 .ustack .utip .r b { color: var(--text); font-weight: var(--w-semi); }
 .prefs { padding: 24px; }
-.prefs-sheet:not([data-wide]) { width: 100%; height: 100%; }
+.prefs-sheet { width: 100%; height: 100%; }
 .srow-ctl .unit-field input { width: 72px; }
 .srow-val { color: var(--muted); font: var(--w-reg) var(--fs-meta) var(--ui); max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .srow-val > * { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

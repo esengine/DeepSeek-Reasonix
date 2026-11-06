@@ -2139,8 +2139,6 @@
     background: var(--float); box-shadow: var(--shadow-float);
     animation: m-panel var(--t-panel) var(--ease-spring) both;
   }
-  .prefs-sheet[data-wide] { width: 100%; height: 100% }
-  .prefs-sheet[data-wide] .prefs-main .prefs-col { max-width: min(1200px, 100%); margin-inline: auto }
 
     
   @supports (view-transition-name: none) {

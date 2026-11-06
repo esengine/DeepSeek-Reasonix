@@ -7,7 +7,7 @@
     "commented-code": 0,
     "complexity": 666,
     "css-important": 127,
-    "css-size": 8878,
+    "css-size": 8876,
     "doc-language": 0,
     "doc-owner": 27,
     "doc-prose": 1434,
@@ -78,7 +78,7 @@
     },
     "desktop/frontend-next/src/styles/app.css": {
       "css-important": 24,
-      "css-size": 5260
+      "css-size": 5258
     },
     "desktop/frontend-next/src/styles/studio.css": {
       "css-important": 103,
