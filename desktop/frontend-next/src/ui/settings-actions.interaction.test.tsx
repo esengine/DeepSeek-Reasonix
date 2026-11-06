@@ -31,3 +31,10 @@ it("has one control in its corner, the one that closes it", async () => {
   await userEvent.click(buttons[0]!);
   await vi.waitFor(() => expect(onClose).toHaveBeenCalled());
 });
+
+it("blurs the title bar behind it too, without taking its clicks", () => {
+  draw();
+  const strip = document.querySelector(".prefs-strip");
+  expect(strip?.getAttribute("aria-hidden")).toBe("true");
+  expect(strip?.nextElementSibling?.classList.contains("prefs")).toBe(true);
+});

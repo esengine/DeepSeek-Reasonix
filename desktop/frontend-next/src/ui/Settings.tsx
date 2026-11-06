@@ -335,7 +335,7 @@ export function Settings({ hub, onError, port, networkPort, localWorkspacePort, 
   useSettingLanding(root, landed, at, setLanded);
 
   return (
-    <SettingsLeaveContext.Provider value={navigation.register}><div
+    <SettingsLeaveContext.Provider value={navigation.register}><div className="prefs-strip" aria-hidden="true" /><div
       className="prefs"
       ref={root}
       tabIndex={-1}

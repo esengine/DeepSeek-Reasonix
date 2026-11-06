@@ -436,3 +436,5 @@
 .prefs-pagetitle > .usual { flex-basis: 100%; margin: 0; color: var(--faint); font: var(--w-reg) var(--fs-meta)/1.4 var(--ui); }
 .srow-name { display: flex; align-items: center; gap: 8px; }
 .srow-meta > .apply:not([data-usual]) { display: none; }
+.prefs-strip { position: fixed; inset: 0 0 auto; height: var(--chrome-h, 39px); z-index: 50; background: color-mix(in srgb, var(--page) 40%, transparent); -webkit-backdrop-filter: blur(14px) saturate(.92); backdrop-filter: blur(14px) saturate(.92); pointer-events: none; }
+:root[data-fold~="scene"] .prefs-strip { display: none; }
