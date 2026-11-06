@@ -3,7 +3,7 @@ import { t } from "../i18n";
 import type { ContextBreakdown, McpEntry } from "../port/port";
 import { CompactNow, type CompactAction } from "./CompactNow";
 
-const compact = (n: number): string => n >= 1_000_000 ? `${(n / 1_000_000).toFixed(1)}M` : n >= 1_000 ? `${Math.round(n / 100) / 10}k` : String(n);
+const compact = (n: number): string => n >= 1_000_000 ? `${(n / 1_000_000).toFixed(1)}M` : n >= 1_000 ? `${Math.round(n / 100) / 10}K` : String(n);
 
 export function ContextSummaryCard({ context, mcp, percent, onManage, compact: action, className = "" }: {
   context: ContextBreakdown | null;
@@ -43,6 +43,7 @@ export function ContextSummaryCard({ context, mcp, percent, onManage, compact: a
                 : <b>{compact(value)}</b>}
             </div>
           ))}</div>
+          {!opened && parts.some(([, , key]) => holdersOf(key).length > 0) && <p className="chrome-context-hint">{t("composer.open_a_class_for_its_largest")}</p>}
           {opened && (
             <ul className="chrome-context-items" aria-labelledby="chrome-context-items-title">
               <li id="chrome-context-items-title" className="head">{t("composer.largest_items_in_name", { name: opened[0] })}</li>
@@ -59,10 +60,10 @@ export function ContextSummaryCard({ context, mcp, percent, onManage, compact: a
       ) : <p>{t("composer.no_context_data_yet")}</p>}
       <footer className="chrome-context-foot">
         <span title={active.map((server) => `${server.name} · ${server.state === "ready" ? `${server.tools || 0} ${t("composer.tools")}` : t("composer.waiting_to_connect")}`).join("\n") || undefined}>
-          MCP · {ready.length} / {active.length} {t("composer.connected")} · {tools} {t("composer.tools")}
+          MCP · {ready.length} {t("composer.connected")} · {tools} {t("composer.tools")}
         </span>
         {action && <CompactNow action={action} usage={context ? { used: context.used, window: context.window } : undefined} />}
-        <button type="button" className="manage" data-action="settings.section" data-value="ext" onClick={onManage}>{t("composer.manage_mcp_and_tools")}</button>
+        <button type="button" className="manage" data-action="settings.section" data-value="ext" onClick={onManage}>{t("composer.manage_mcp")}</button>
       </footer>
     </div>
   );

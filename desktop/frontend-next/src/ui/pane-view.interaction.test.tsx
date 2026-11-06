@@ -72,7 +72,7 @@ describe("a pane's view", () => {
     vi.spyOn(port, "context").mockImplementation(async () => ({ ...await context(), window }));
     const all = { ...props, rt: rtOf("p1"), port: port as AgentPort };
     const view = render(<Pane {...all} />);
-    await waitFor(() => expect(document.querySelector(".chrome-context-total")?.textContent).toContain("160k"));
+    await waitFor(() => expect(document.querySelector(".chrome-context-total")?.textContent).toContain("160K"));
 
     window = 1_000_000;
     view.rerender(boxOf("p1", <Harness {...all} pulse={1} />));

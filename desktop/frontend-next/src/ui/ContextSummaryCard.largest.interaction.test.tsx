@@ -63,7 +63,7 @@ it("says where the window folds on its own, beside the capacity", () => {
   render(card(breakdown({ window: 128_000, compact_at: 115_000 })));
   const total = document.querySelector(".chrome-context-total")!;
   expect(total.textContent).toContain("模型容量");
-  expect(total.textContent).toContain("到 115k 自动压缩");
+  expect(total.textContent).toContain("到 115K 自动压缩");
 });
 
 it("says nothing about a fold the kernel has no threshold for", () => {
