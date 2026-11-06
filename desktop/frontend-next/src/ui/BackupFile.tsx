@@ -4,6 +4,7 @@ import { reason } from "../i18n/kernel";
 import type { AgentPort, BackupCategory, BackupFileCatalog } from "../port/port";
 import { BackupRestore, CATEGORY_LABEL, type RestoreSource } from "./BackupRestore";
 import { CATEGORY_NOTE } from "./Backup";
+import { StudioIcon } from "./StudioIcon";
 
 // The same sealed envelope the account keeps, written to a file the person
 // chooses. It asks nothing of the account: the passphrase is the only secret,
@@ -91,15 +92,16 @@ export function BackupFile({ port }: { port: AgentPort }) {
       <p className="acct-note">
         {t("data.the_file_is_encrypted_on")}
       </p>
-      <div className="bk-cats" role="group" aria-label={t("data.what_to_export")}>
+      <div className="bk-cats bk-chips" role="group" aria-label={t("data.what_to_export")}>
         {catalog.categories.map((c) => (
-          <label key={c.id} className="bk-cat" data-warn={c.id === "secrets" && chosen.has(c.id) ? "" : undefined}>
+          <label key={c.id} className="bk-chip" data-on={chosen.has(c.id) ? "" : undefined} data-warn={c.id === "secrets" && chosen.has(c.id) ? "" : undefined} title={t(c.id === "secrets" ? "data.off_by_default_if_ticked" : CATEGORY_NOTE[c.id])}>
             <input type="checkbox" checked={chosen.has(c.id)} disabled={busy} onChange={() => toggle(c.id)} data-action="backup.category" data-target={c.id} />
-            <span className="nm">{t(CATEGORY_LABEL[c.id])}</span>
-            <span className="why">{t(c.id === "secrets" ? "data.off_by_default_if_ticked" : CATEGORY_NOTE[c.id])}</span>
+            <span className="box" aria-hidden="true">{chosen.has(c.id) && <StudioIcon name="check" />}</span>
+            {t(CATEGORY_LABEL[c.id])}
           </label>
         ))}
       </div>
+      {chosen.has("secrets") && <p className="acct-note bk-warn">{t("data.off_by_default_if_ticked")}</p>}
       <div className="bk-fields">
         <label className="grow">
           <span>{t("data.passphrase_at_least_n_characters", { n: min })}</span>
@@ -115,7 +117,7 @@ export function BackupFile({ port }: { port: AgentPort }) {
         <button className="act" data-primary data-action="backup.file-export" disabled={!ready} aria-describedby={!ready && wait ? "bkf-wait" : undefined} onClick={() => void exportFile()}>
           {t(busy ? "data.encrypting" : "data.export_to_file")}
         </button>
-        {!ready && !busy && wait && <span id="bkf-wait" className="acct-note" aria-live="polite" data-action="backup.wait">{wait}</span>}
+        {!ready && !busy && wait && <span id="bkf-wait" className="acct-note bk-wait" aria-live="polite" data-action="backup.wait">{wait}</span>}
         <button className="act" data-action="backup.file-import" disabled={busy} onClick={() => chooser.current?.click()}>{t("data.import_from_file")}</button>
         <input ref={chooser} type="file" accept=".rxcb,text/plain" hidden data-action="backup.file-choose" onChange={(e) => { void choose(e.target.files?.[0]); e.target.value = ""; }} />
       </div>

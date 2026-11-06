@@ -22,3 +22,17 @@ describe("the config banner follows the board", () => {
     expect(rule(".cfgbad .cfg-diff .ok")).toMatch(/var\(--ok\) 10%/);
   });
 });
+
+describe("the export chips follow the board", () => {
+  it("are 28px pills whose selected state is the accent border and a filled 16px box", () => {
+    expect(rule(".bk-chip")).toMatch(/height:\s*28px/);
+    expect(rule(".bk-chip")).toMatch(/border-radius:\s*var\(--r-pill\)/);
+    expect(rule(".bk-chip[data-on]")).toMatch(/border-color:\s*var\(--accent\)/);
+    expect(rule(".bk-chip .box")).toMatch(/width:\s*16px/);
+    expect(rule(".bk-chip[data-on] .box")).toMatch(/background:\s*var\(--accent\)/);
+  });
+
+  it("lays the two passphrase fields side by side", () => {
+    expect(rule(".bk-fields")).toMatch(/grid-template-columns:\s*1fr 1fr/);
+  });
+});

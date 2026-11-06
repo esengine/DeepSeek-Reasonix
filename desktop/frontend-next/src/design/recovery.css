@@ -24,3 +24,19 @@
 .cfgbad .cfg-ft .btn[data-primary] { border-color: var(--accent); background: var(--accent); color: var(--accent-fg); }
 .cfgbad .cfg-ft .btn:disabled { opacity: .55; cursor: default; }
 .cfgbad .cfg-fail { padding: 8px 14px; border-top: 1px solid var(--hair); color: var(--err-ink); font-size: var(--fs-meta); }
+.bk-chips { flex-direction: row; flex-wrap: wrap; gap: 6px; border-top: 0; }
+.bk-chip { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; border: 1px solid var(--border); border-radius: var(--r-pill); font: var(--w-reg) var(--fs-meta)/1 var(--ui); color: var(--text); cursor: pointer; user-select: none; }
+.bk-chip[data-on] { border-color: var(--accent); }
+.bk-chip[data-warn] { border-color: var(--warn-ink); }
+.bk-chip > input { position: absolute; opacity: 0; width: 0; height: 0; }
+.bk-chip .box { display: grid; place-items: center; flex: none; width: 16px; height: 16px; box-sizing: border-box; border: 1.5px solid var(--border); border-radius: var(--r-xs); }
+.bk-chip[data-on] .box { border-color: var(--accent); background: var(--accent); color: var(--accent-fg); }
+.bk-chip .box .studio-icon { width: 11px; height: 11px; }
+.bk-chip:has(> input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; }
+.bk-chip:has(> input:disabled) { opacity: .55; cursor: default; }
+.bk .bk-warn { color: var(--warn-ink); }
+.bk .bk-wait { color: var(--warn-ink); }
+.bk-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.bk-fields > label { display: block; }
+.bk-fields > label > span { display: block; margin: 10px 0 6px; font: var(--w-med) var(--fs-meta)/1.4 var(--ui); color: var(--muted); }
+.bk-fields input { width: 100%; height: 32px; box-sizing: border-box; padding: 0 10px; border: 1px solid var(--border); border-radius: var(--r-sm); background: var(--surface); color: var(--text); font: var(--w-reg) var(--fs-ui) var(--ui); }
