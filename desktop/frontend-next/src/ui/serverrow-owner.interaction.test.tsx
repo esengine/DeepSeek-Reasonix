@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, expect, it, vi } from "vitest";
-import { act, cleanup, render, screen, within } from "@testing-library/react";
+import { act, cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import "./testkit";
 import { ServerRow } from "./ServerRow";
@@ -137,6 +137,16 @@ it.each(["port", "root"].flatMap((change) => [false, true].map((tools) => [chang
   },
 );
 
+// The project is chosen on the Permissions page, then the extension page is
+// opened again: it names whose list it shows only when that is not the running project.
+async function pickProject(from: string, to: string) {
+  await userEvent.click(screen.getByRole("tab", { name: /权限与安全/ }));
+  await userEvent.click(await screen.findByRole("button", { name: new RegExp(from) }));
+  await userEvent.click(screen.getByRole("option", { name: new RegExp(to) }));
+  await screen.findByText(`/workspace/${to}`);
+  await userEvent.click(screen.getByRole("tab", { name: /^扩展/ }));
+}
+
 it("dismisses removal confirmation when choosing another managed project", async () => {
   const port = new MockPort() as unknown as AgentPort;
   const scopes: CapabilityScope[] = [
@@ -156,9 +166,7 @@ it("dismisses removal confirmation when choosing another managed project", async
   />);
   await userEvent.click(await screen.findByRole("button", { name: "移除 docs" }));
   expect(screen.getByRole("button", { name: "取消" })).toBeTruthy();
-  await userEvent.click(within(document.querySelector<HTMLElement>(".scopebar")!).getByRole("button", { name: "main" }));
-  await userEvent.click(screen.getByRole("option", { name: /other/ }));
-  await screen.findByText("/workspace/other");
+  await pickProject("main", "other");
   expect(screen.queryByRole("button", { name: "取消" })).toBeNull();
   expect(screen.queryByRole("button", { name: "移除" })).toBeNull();
   expect(remove).not.toHaveBeenCalled();

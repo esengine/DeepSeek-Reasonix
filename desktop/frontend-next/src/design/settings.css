@@ -449,3 +449,13 @@
 .ext-foot { display: flex; align-items: center; gap: 8px; margin-top: 12px; padding: 10px 14px; border: 1px solid var(--border); border-radius: var(--r-md); color: var(--muted); font: var(--w-reg) var(--fs-meta)/1.5 var(--ui); }
 .ext-foot > .studio-icon { flex: none; width: 14px; height: 14px; }
 .ext-foot > span { flex: 1; min-width: 0; }
+.scoperow .scopeinfo { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 10px; margin: 8px 0 12px; padding: 8px 12px; border-radius: var(--r-md); background: var(--page); color: var(--muted); font: var(--w-reg) var(--fs-meta)/1.6 var(--ui); }
+.scoperow .scopeinfo .pt { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--mono); }
+.scoperow .scopeinfo .br { padding: 1px 7px; border-radius: var(--r-pill); background: var(--overlay); font: var(--w-reg) var(--fs-micro) var(--mono); }
+.scoperow .scopeanchor { position: relative; }
+.scoperow .scopeanchor .scope-pick { top: calc(100% + 4px); right: 0; left: auto; }
+.scoperow .who .cv { margin-left: 6px; font-style: normal; font-size: var(--fs-micro); color: var(--faint); }
+.scopeaway { display: flex; align-items: center; gap: 8px; margin: 0 0 12px; padding: 8px 10px 8px 12px; border-radius: var(--r-md); background: color-mix(in srgb, var(--warn) 12%, transparent); font: var(--w-reg) var(--fs-meta)/1.5 var(--ui); }
+.scopeaway > span { flex: 1; min-width: 0; }
+.scopeaway .act { height: 24px; padding: 0 10px; border: 1px solid var(--border); border-radius: var(--r-pill); background: transparent; color: var(--text); font: var(--w-reg) var(--fs-meta)/1 var(--ui); cursor: pointer; }
+.scopeaway .act:hover { background: var(--overlay); }

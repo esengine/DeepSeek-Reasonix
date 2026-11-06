@@ -36,10 +36,14 @@ function settings(port: AgentPort, onChanged = vi.fn()) {
   />;
 }
 
+// The project is chosen on the Permissions page, then the extension page is
+// opened again: it names whose list it shows only when that is not the running project.
 async function chooseProject(from: string, to: string) {
-  await userEvent.click(within(document.querySelector<HTMLElement>(".scopebar")!).getByRole("button", { name: from }));
+  await userEvent.click(screen.getByRole("tab", { name: /权限与安全/ }));
+  await userEvent.click(await screen.findByRole("button", { name: new RegExp(from) }));
   await userEvent.click(screen.getByRole("option", { name: new RegExp(to) }));
   await screen.findByText(`/workspace/${to}`);
+  await userEvent.click(screen.getByRole("tab", { name: /^扩展/ }));
 }
 
 function deferred() {
@@ -142,7 +146,7 @@ it.each(["success", "failure"])("isolates a skill %s after choosing another proj
   expect(control.disabled).toBe(false);
   expect(onChanged).toHaveBeenCalledTimes(2);
   expect(skills).toHaveBeenLastCalledWith("/workspace/other");
-  expect(within(document.querySelector<HTMLElement>(".scopebar")!).getByText("other")).toBeTruthy();
+  expect(within(document.querySelector<HTMLElement>(".scopeaway")!).getByText(/other/)).toBeTruthy();
 });
 
 it("refreshes a completed skill change after returning to its project", async () => {

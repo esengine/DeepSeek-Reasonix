@@ -14,44 +14,65 @@ export function Exception({ onClear, busy }: { onClear: () => void; busy: boolea
   );
 }
 
-// Which folder this page is answering for. The shell holds several projects at
-// once and the pane follows whichever one is in front, so the heading has to
-// name it — otherwise switching tabs silently changes the list under an
-// unchanged title. Worktrees of one repository share one answer, and saying how
-// many is what stops "my settings vanished on a new branch". The name is also
-// the way out: a project can be managed without the session moving to it.
-export function ScopeBar({
+// Which folder the extension lists answer for. The shell holds several projects
+// at once and the pane follows whichever one is in front, so this is chosen on
+// purpose here rather than inferred from the tab in front. Worktrees of one
+// repository share one answer, and saying how many is what stops "my settings
+// vanished on a new branch". Choosing a project manages it without the session
+// moving to it.
+export function ScopeRow({
   scope, scopes, onPick,
 }: {
   scope: CapabilityScope; scopes: CapabilityScope[]; onPick: (root: string) => void;
 }) {
   const [open, setOpen] = useState(false);
   const shared = scope.repo && (scope.trees ?? 1) > 1;
-  const elsewhere = !scope.current;
   return (
-    <div className="scopebar" data-away={elsewhere ? "" : undefined}>
-      <button className="who" aria-expanded={open} onClick={() => setOpen(!open)}>
-        {scope.label || scope.name}
-        <i className="cv" aria-hidden>▾</i>
-      </button>
-      <span className="pt" title={scope.root}>{scope.root}</span>
-      {scope.branch && <span className="br">{scope.branch}</span>}
-      {shared && <span className="sh">{t("ext.n_worktrees_share_this_setting", { n: scope.trees ?? 1 })}</span>}
-      {!scope.repo && <span className="sh">{t("ext.not_a_git_repository_kept")}</span>}
-      <span className="ov">
-        {scope.overrides ? t("ext.n_settings_apply_only_here", { n: scope.overrides }) : t("ext.no_exceptions_for_this_project")}
-      </span>
-      {elsewhere && <span className="away">{t("ext.not_the_project_this_session")}</span>}
-      {open && (
-        <ScopePicker
-          scopes={scopes}
-          at={scope.root}
-          onPick={(root) => {
-            setOpen(false);
-            onPick(root);
-          }}
-        />
-      )}
+    <div className="scoperow">
+      <div className="srow" data-setting="ext-scope">
+        <div className="srow-meta">
+          <span className="srow-name">{t("ext.manage_which_project")}</span>
+          <span className="srow-desc">{t("ext.scope_hint")}</span>
+        </div>
+        <div className="srow-ctl scopeanchor">
+          <button type="button" className="spill who" data-action="ext.scope" aria-expanded={open} onClick={() => setOpen(!open)}>
+            {scope.label || scope.name}
+            <i className="cv" aria-hidden>▾</i>
+          </button>
+          {open && (
+            <ScopePicker
+              scopes={scopes}
+              at={scope.root}
+              onPick={(root) => {
+                setOpen(false);
+                onPick(root);
+              }}
+            />
+          )}
+        </div>
+      </div>
+      <div className="scopeinfo">
+        <span className="pt" title={scope.root}>{scope.root}</span>
+        {scope.branch && <span className="br">{scope.branch}</span>}
+        <span className="ds">
+          {[
+            shared ? t("ext.n_worktrees_share_this_setting", { n: scope.trees ?? 1 }) : null,
+            !scope.repo ? t("ext.not_a_git_repository_kept") : null,
+            scope.overrides ? t("ext.n_settings_apply_only_here", { n: scope.overrides }) : t("ext.no_exceptions_for_this_project"),
+          ].filter(Boolean).join(" · ")}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+// The extension page names whose list it is only when that is not the running
+// project, so the same heading never quietly changes owner.
+export function ScopeAway({ scope, onBack }: { scope: CapabilityScope; onBack: () => void }) {
+  return (
+    <div className="scopeaway" role="note">
+      <span>{t("ext.managing_other_project", { name: scope.label || scope.name })}</span>
+      <button type="button" className="act" data-action="ext.scope-back" onClick={onBack}>{t("ext.back_to_the_current_project")}</button>
     </div>
   );
 }

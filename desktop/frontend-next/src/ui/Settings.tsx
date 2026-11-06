@@ -47,7 +47,8 @@ import { planProtocolSwitch } from "./protocolswitch";
 import { Boundary } from "./Boundary";
 import { DEFAULT_DAYS } from "./Usage";
 import { Appearance, SCHEMES } from "./Appearance";
-import { ScopeBar } from "./CapabilityScope";
+import { ScopeAway, ScopeRow } from "./CapabilityScope";
+import { SectionCard } from "./SectionCard";
 import { savedNotApplied, reason } from "../i18n/kernel";
 import type { SettingsProps as Props } from "./SettingsProps";
 import { approvalName } from "./approvals";
@@ -457,8 +458,15 @@ export function Settings({ hub, onError, port, networkPort, localWorkspacePort, 
           )}
 
           {at === "tools" && (
-            <SafetySettings port={port} mode={status?.toolApprovalMode} busy={busy} onChanged={onChanged}
-              onMode={(id) => run(id, () => port.setApprovalMode(id))} />
+            <>
+              <SafetySettings port={port} mode={status?.toolApprovalMode} busy={busy} onChanged={onChanged}
+                onMode={(id) => run(id, () => port.setApprovalMode(id))} />
+              {scope && (
+                <SectionCard title={t("ext.extension_scope")}>
+                  <ScopeRow scope={scope} scopes={scopes} onPick={setScopeAt} />
+                </SectionCard>
+              )}
+            </>
           )}
 
           {at === "display" && <ChatDisplaySettings port={port} />}
@@ -480,7 +488,7 @@ export function Settings({ hub, onError, port, networkPort, localWorkspacePort, 
                   updating={updatingPkg.name} onChanged={afterExtChange} onReloadError={reload.report} onReloaded={reload.applied}
                   onUpdate={(name) => setUpdatingPkg((p) => ({ ...p, name, applying: false }))} onFailed={setFailed} />
               }>
-                {scope && <ScopeBar scope={scope} scopes={scopes} onPick={setScopeAt} />}
+                {scope && !scope.current && <ScopeAway scope={scope} onBack={() => setScopeAt("")} />}
                 <ModHost port={port} />
                 <Group id="plugins"
                   title={t("settings.plugin_packages")}

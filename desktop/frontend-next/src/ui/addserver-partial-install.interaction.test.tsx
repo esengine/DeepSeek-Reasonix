@@ -92,6 +92,16 @@ it.each(["first-exception", "issue-exception", "all-issues", "all-ready"])("noti
   } else expect(screen.getByText(failure)).toBeTruthy();
 });
 
+// The project is chosen on the Permissions page, then the extension page is
+// opened again: it names whose list it shows only when that is not the running project.
+async function pickProject(from: string, to: string) {
+  await userEvent.click(screen.getByRole("tab", { name: /权限与安全/ }));
+  await userEvent.click(await screen.findByRole("button", { name: new RegExp(from) }));
+  await userEvent.click(screen.getByRole("option", { name: new RegExp(to) }));
+  await screen.findByText(`/workspace/${to}`);
+  await userEvent.click(screen.getByRole("tab", { name: /^扩展/ }));
+}
+
 it("refreshes the current managed project after an unmounted batch partially finishes", async () => {
   const port = new MockPort() as unknown as AgentPort;
   let fail!: (error: Error) => void;
@@ -106,9 +116,7 @@ it("refreshes the current managed project after an unmounted batch partially fin
   await userEvent.click(await screen.findByRole("button", { name: "添加…" }));
   await userEvent.click(await screen.findByRole("menuitem", { name: /接入外部服务/ }));
   await preview();
-  await userEvent.click(within(document.querySelector<HTMLElement>(".scopebar")!).getByRole("button", { name: "main" }));
-  await userEvent.click(screen.getByRole("option", { name: /other/ }));
-  await screen.findByText("/workspace/other");
+  await pickProject("main", "other");
   expect(document.querySelector(".addsrv")).toBeNull();
   const reads = skills.mock.calls.length;
   await act(async () => fail(new Error(failure)));

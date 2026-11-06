@@ -29,8 +29,10 @@ it("keeps the selected project's skills when the previous read finishes late", a
     accountUnread="" reloadAccount={() => {}}
   />);
 
+  await userEvent.click(await screen.findByRole("tab", { name: /权限与安全/ }));
   await userEvent.click(await screen.findByRole("button", { name: /Project A/ }));
   await userEvent.click(screen.getByRole("option", { name: /Project B/ }));
+  await userEvent.click(screen.getByRole("tab", { name: /^扩展/ }));
   await screen.findByText("only-b");
   await act(async () => finishA({ implicit: true, skills: [{ name: "only-a", enabled: true }] }));
   expect(screen.getByText("only-b")).toBeTruthy();
