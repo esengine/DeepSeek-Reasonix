@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { StudioIcon } from "./StudioIcon";
 import { t } from "../i18n";
 import type { TreeWorkspace } from "../port/hub";
 
@@ -29,6 +30,7 @@ export function AutoArchiveNotice({ tree }: { tree: TreeWorkspace[] }) {
   };
   return (
     <div className="errbar" data-kind="note" role="status">
+      <StudioIcon name="archive" />
       <span>{t("data.n_conversations_were_archived_automatically", { n: fresh.length })}</span>
       <button data-action="auto-archive.notice-dismiss" onClick={dismiss}>{t("common.got_it")}</button>
     </div>

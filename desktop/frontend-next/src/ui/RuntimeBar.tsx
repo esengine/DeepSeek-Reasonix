@@ -4,6 +4,7 @@ import { leftoverDetail, noticeWording } from "../i18n/notice_wording";
 import type { RuntimeNotice } from "../state/session";
 import type { SessionState } from "../state/session_types";
 import { stallShown } from "../state/stall";
+import { StudioIcon } from "./StudioIcon";
 import { StallBar, type StallAction } from "./StallBar";
 
 // Something the runtime has to report about itself. It sits with the composer
@@ -27,6 +28,7 @@ export function RuntimeBar({ notices, onSeen, watch, onStall, onSettings }: {
         const why = leftoverDetail(n.code, n.detail, wording?.vars);
         return (
           <div key={n.id} className="rtbar" data-lvl={n.level} role="status">
+            <StudioIcon name={n.level === "warn" ? "warning" : "info"} />
             <span className="t">{wording ? t(wording.text, wording.vars) : n.text}</span>
             {why && <span className="why">{why}</span>}
             {n.code === EXTENSION_SKIPPED && wording?.vars && onSettings && (

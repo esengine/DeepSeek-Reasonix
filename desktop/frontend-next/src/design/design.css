@@ -3,6 +3,7 @@
 @import "./sidebar.css" layer(design);
 @import "./rows.css" layer(design);
 @import "./queue.css" layer(design);
+@import "./notices.css" layer(design);
 @import "./shell.css" layer(design);
 @import "./composer.css" layer(design);
 @import "./turn.css" layer(design);

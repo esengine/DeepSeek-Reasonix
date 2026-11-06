@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { StudioIcon } from "./StudioIcon";
 import { t } from "../i18n";
 import type { FeedbackMine } from "../port/feedback";
 import type { AgentPort } from "../port/port";
@@ -62,6 +63,7 @@ export function LevelUpNotice({ port, tick, fallback }: { port: AgentPort | null
   };
   return (
     <div className="errbar" data-kind="note" role="status">
+      <StudioIcon name="info" />
       <span>
         {t("about.your_feedback_level_went_up", { n: up.to, name: levelName(up.to) })}
         {next != null && mine?.profile?.remaining != null ? " " + t("about.r_more_shipped_to_reach", { r: mine.profile.remaining, next: levelName(next) }) : ""}
