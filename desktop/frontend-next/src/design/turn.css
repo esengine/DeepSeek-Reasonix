@@ -10,19 +10,19 @@
 .flow .call[data-call] > .c { margin-bottom: 7px; padding: 7px 9px 8px; border: 1px solid var(--hair); border-radius: var(--r-md); background: var(--surface); }
 .flow .call[data-call][data-running] > .c { border-color: var(--border); }
 
-.activity-group { margin: 8px 0 0; padding: 3px 4px; border: 1px solid var(--hair); border-radius: var(--r-md); overflow: clip; }
+.activity-group { margin: 8px 0 0; padding: 0; border: 0; overflow: clip; }
 .activity-group > summary {
-  height: 30px; min-height: 30px; padding: 0 10px; gap: 8px; box-sizing: border-box; border-radius: var(--r-sm);
-  background: transparent; color: var(--muted); font: var(--w-med) var(--fs-meta)/1 var(--ui);
+  height: 26px; min-height: 26px; padding: 0 6px; margin: 0 -6px; gap: 7px; box-sizing: border-box; border-radius: var(--r-xs);
+  background: transparent; color: var(--muted); font: var(--w-reg) var(--fs-ui)/1 var(--ui);
 }
 .activity-group[open] > summary { background: transparent; border-bottom: 0; }
-.activity-group > summary:hover { color: var(--text); }
+.activity-group > summary:hover { background: var(--overlay); color: var(--text); }
 .activity-group > summary .studio-icon { width: 12px; height: 12px; color: var(--faint); }
 .activity-group .activity-title { color: inherit; font: inherit; }
-.activity-group .activity-running { display: inline-flex; align-items: center; gap: 4px; height: 20px; padding: 0 8px; box-sizing: border-box; border-radius: var(--r-pill); background: var(--net-wash); color: var(--net-ink); font: var(--w-med) var(--fs-micro)/1 var(--ui); white-space: nowrap; }
+.activity-group .activity-running { padding: 0; background: none; color: var(--faint); font: var(--w-reg) var(--fs-meta)/1 var(--ui); white-space: nowrap; }
 .activity-group .activity-count { color: var(--faint); font: var(--w-reg) var(--fs-meta)/1 var(--ui); }
 
-.activity-body { margin: 0; padding: 0; }
+.activity-body { margin: 2px 0 4px 5px; padding: 0 0 0 13px; border-left: 1px solid var(--hair); }
 .activity-body .call { min-height: 0; }
 .flow .activity-body .call > .c { margin: 0; padding: 0; border: 0; border-radius: 0; background: transparent; box-shadow: none; }
 .activity-body .hl {
@@ -92,22 +92,22 @@
   .caret, .md[data-live] > * ::after, .md[data-live] > ::after { animation: none; }
 }
 
-.activity-group > summary { font: var(--w-semi) var(--fs-ui)/1 var(--ui); }
 .activity-group > summary .activity-fold-icon { order: -1; margin: 0; transform: rotate(-90deg); transition: transform var(--t-line) ease; }
 .activity-group[open] > summary .activity-fold-icon { transform: none; }
-.activity-group .activity-title { font-weight: var(--w-med); }
-.activity-now { display: inline-flex; align-items: center; gap: 5px; min-width: 0; overflow: hidden; color: var(--net-ink); font-weight: var(--w-med); white-space: nowrap; }
-.activity-now code { min-width: 0; overflow: hidden; text-overflow: ellipsis; font: var(--w-med) var(--fs-meta)/1 var(--mono); }
+.activity-group .activity-title { font-weight: var(--w-reg); }
+.activity-group:not([open], [data-failed]) .activity-title { display: none; }
+.activity-now {
+  display: inline-flex; align-items: center; gap: 5px; min-width: 0; overflow: hidden; white-space: nowrap; font-weight: var(--w-reg); color: transparent;
+  background: linear-gradient(90deg, var(--muted) 0%, var(--muted) 40%, var(--text) 50%, var(--muted) 60%, var(--muted) 100%) 150% 0 / 250% 100%;
+  -webkit-background-clip: text; background-clip: text; animation: activity-shimmer 1.6s linear infinite;
+}
+.activity-now .step-spin { display: none; }
+@keyframes activity-shimmer { from { background-position: 150% 0; } to { background-position: -50% 0; } }
+.activity-now code { min-width: 0; overflow: hidden; text-overflow: ellipsis; font: var(--w-reg) var(--fs-meta)/1 var(--mono); }
 .activity-fill { flex: 1; }
 .activity-group > summary .activity-ok { color: var(--ok-ink); }
-.activity-group .activity-errors { color: var(--err-ink); font: var(--w-med) var(--fs-meta)/1 var(--ui); white-space: nowrap; }
-.activity-group .activity-running { font-weight: var(--w-med); }
+.activity-group .activity-errors { display: inline-flex; align-items: center; height: 18px; padding: 0 7px; border-radius: var(--r-pill); background: color-mix(in srgb, var(--err) 14%, transparent); color: var(--err-ink); font: var(--w-med) var(--fs-micro)/1 var(--ui); white-space: nowrap; }
 .activity-group .activity-count { font: var(--w-reg) var(--fs-meta)/1 var(--ui); white-space: nowrap; }
-.activity-group[data-running]:not([open]) > summary {
-  background: linear-gradient(90deg, transparent 0%, color-mix(in srgb, var(--net) 12%, transparent) 50%, transparent 100%) no-repeat;
-  background-size: 40% 100%; animation: activity-sweep 1.8s linear infinite;
-}
-@keyframes activity-sweep { from { background-position: -40% 0; } to { background-position: 140% 0; } }
 .activity-group::details-content { transition: block-size 240ms var(--ease-out), opacity 240ms var(--ease-out), content-visibility var(--t-panel) allow-discrete; }
 
 .bump { display: inline-block; overflow: hidden; vertical-align: bottom; }
@@ -132,10 +132,10 @@
 .step-wait { margin: -2px 10px 6px 32px; color: var(--faint); font: var(--w-med) var(--fs-meta)/1.5 var(--ui); }
 .step-stop { padding: 0; border: 0; background: none; color: var(--text); font: var(--w-med) var(--fs-meta)/1.5 var(--ui); cursor: pointer; }
 .step-stop:hover { text-decoration: underline; text-underline-offset: 2px; }
-.pane[data-off] :is(.step-spin, .activity-group > summary) { animation-play-state: paused; }
+.pane[data-off] :is(.step-spin, .activity-now) { animation-play-state: paused; }
 
 @media (prefers-reduced-motion: reduce) {
-  .activity-group[data-running]:not([open]) > summary { animation: none; background: none; }
+  .activity-now { animation: none; background: none; color: var(--muted); }
   .bump > [data-moved], .activity-body .enterbox[data-enter] > .call, .activity-body .tool-state[data-pop], .activity-body .call[data-shake] > .c, .step-spin { animation: none; }
   .activity-group::details-content, .activity-group > summary .activity-fold-icon { transition: none; }
 }

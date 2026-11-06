@@ -7,7 +7,7 @@ const SHARED = ["m-fade", "m-card", "m-panel", "m-exit", "m-spin", "m-pulse"];
 
 const REGISTERED: Record<string, string> = {
   "step-in": "Think-Exec", "step-pop": "Think-Exec", "step-shake": "Think-Exec",
-  "activity-sweep": "Think-Exec", "think-sweep": "Think-Exec", "bump-up": "Think-Exec", "caret-blink": "Think-Exec",
+  "activity-shimmer": "Think-Exec", "think-sweep": "Think-Exec", "bump-up": "Think-Exec", "caret-blink": "Think-Exec",
   "onb-step-in": "Onb-Motion", "onb-step-back": "Onb-Motion", "onb-tile": "Onb-Motion", "onb-shake": "Onb-Motion",
   oobebrand: "Onb-Flow", oobecollapse: "Onb-Flow", oobefill: "Onb-Flow", oobegone: "Onb-Flow", oobelume: "Onb-Flow", oobeout: "Onb-Flow", oobesay: "Onb-Flow", oobeshrink: "Onb-Flow",
   "plan-spin-stem": "Chat-Plan", "plan-spin-bowl": "Chat-Plan", "plan-spin-leg": "Chat-Plan",
