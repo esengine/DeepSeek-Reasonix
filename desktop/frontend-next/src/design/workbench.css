@@ -312,3 +312,7 @@ svg.studio-icon[data-lang="sheet"] { color: var(--ok); }
 .workbench-history .gh-row:has(.gh-lanes) { padding-left: 12px; }
 .workbench-history .gh-hash { width: auto; font: var(--w-med) var(--fs-micro)/1 var(--mono); }
 .workbench-history .gh-meta { font: var(--w-med) var(--fs-micro)/1 var(--ui); }
+.wb-changes-head > b { flex: 0 1 auto; min-width: 0; max-width: 28%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wb-changes-head > span:not(.wb-changes-fill) { flex: 1 1 0; min-width: 6em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wb-changes-head > .wb-changes-fill { flex: 0 0 0; }
+.wb-changes-head > :is(button, .btn) { flex: none; white-space: nowrap; }

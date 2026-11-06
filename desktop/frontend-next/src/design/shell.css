@@ -102,3 +102,4 @@
 .chrome-context-card:not(.studio-overview-card) > .chrome-context-foot > .manage { color: var(--link); font: var(--w-med) var(--fs-meta)/1 var(--ui); white-space: nowrap; }
 .chrome-context-card:not(.studio-overview-card) > .chrome-context-foot { font: var(--w-med) var(--fs-meta)/1.4 var(--ui); }
 .chrome-context-card:not(.studio-overview-card) > .chrome-context-parts :is(b, .chrome-context-more) { color: var(--muted); font: var(--w-med) var(--fs-meta)/1 var(--ui); }
+.chrome-context-card:not(.studio-overview-card) > .chrome-context-parts { gap: 0; }
