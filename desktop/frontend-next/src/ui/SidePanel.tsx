@@ -129,6 +129,9 @@ export function SidePanel({
       since: Date.now(),
     });
     setError("");
+    // What was asked leaves the box the moment it is sent, and comes back only if the ask fails.
+    setDraft("");
+    setQuotes([]);
     try {
       opened.current ??= port.openSide().then((held) => {
         id.current = held;
@@ -158,10 +161,10 @@ export function SidePanel({
         { role: "side", text: answer },
       ]);
       setPending(null);
-      setDraft("");
-      setQuotes([]);
     } catch (e) {
       if (!live.current) return;
+      setDraft((now) => now || question);
+      setQuotes((now) => (now.length ? now : sent));
       opened.current = id.current ? opened.current : null;
       setError(reason(e));
       setPending((current) => current && { ...current, phase: "failed" });

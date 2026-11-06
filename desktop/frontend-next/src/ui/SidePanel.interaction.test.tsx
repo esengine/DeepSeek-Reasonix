@@ -177,6 +177,18 @@ describe("the side conversation panel", () => {
     expect(screen.getAllByText("explain the failure")).toHaveLength(1);
   });
 
+  it("empties the input as soon as the question is sent, and gives it back only if the ask fails", async () => {
+    const { port } = draw();
+    const pending = deferred();
+    vi.spyOn(port, "askSide").mockImplementation(() => pending.promise);
+    const box = () => screen.getByRole("textbox", { name: "向辅助会话提问" }) as HTMLTextAreaElement;
+    await userEvent.type(box(), "这个是什么");
+    await userEvent.click(screen.getByRole("button", { name: "发送" }));
+    expect(box().value).toBe("");
+    pending.reject(new Error("offline"));
+    await waitFor(() => expect(box().value).toBe("这个是什么"));
+  });
+
   it("renders Markdown while an answer is streaming and keeps the question literal", async () => {
     const { port } = draw();
     const pending = deferred();
