@@ -1646,7 +1646,6 @@ export const EN: Record<string, string> = {
   "用于最复杂的问题，等待时间与消耗最高": "For the hardest problems, with the longest wait and highest usage",
   "思考仍开启并计费，该模型无法关闭思考": "Thinking stays on and is billed; this model cannot turn it off",
   "仅显示当前模型实际支持的档位。": "Only levels actually supported by this model are shown.",
-  "按模型生效": "Per model",
   "查看上下文与压缩": "View context and compaction",
   "立即压缩": "Compact now",
   "确认压缩": "Confirm compaction",

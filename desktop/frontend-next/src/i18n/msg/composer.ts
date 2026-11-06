@@ -182,7 +182,6 @@ export const COMPOSER: Messages = {
   "composer.paused_by_your_setting_the": { zh: "任务已按设置暂停：模型卡在重复输出同一段文字", en: "Paused by your setting: the model is stuck repeating the same text" },
   "composer.peak": { zh: "高峰", en: "Peak" },
   "composer.pending": { zh: "待送达", en: "Pending" },
-  "composer.per_model": { zh: "按模型生效", en: "Per model" },
   "composer.plan_steps_before_changing_files": { zh: "先整理步骤，不写入文件", en: "Plan steps before changing files" },
   "composer.press_esc_again_to_stop": { zh: "再按一次 Esc 停止当前任务", en: "Press Esc again to stop the current task" },
   "composer.pro_mode": { zh: "Pro 模式", en: "Pro mode" },

@@ -135,6 +135,6 @@ export function effortMenu(efforts: string[], modelLabel: string, onDeclare: str
       toggle: mode.active,
       divide: i === 0,
     })),
-    ...(declared ? [{ value: "__effort-note", label: t("composer.only_levels_actually_supported_by"), right: t("composer.per_model"), header: true }] : []),
+    ...(declared ? [{ value: "__effort-note", label: t("composer.only_levels_actually_supported_by"), header: true }] : []),
   ];
 }
