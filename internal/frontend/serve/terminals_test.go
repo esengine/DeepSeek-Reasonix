@@ -4,8 +4,10 @@ import (
 	"bufio"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"reasonix/internal/base/testenv"
 	"runtime"
 	"strings"
@@ -186,5 +188,16 @@ func TestARemotePanesTerminalsAreForwardedForTheHostAndNeverForADevice(t *testin
 	serve(http.MethodGet, "/terminals", false)
 	if len(rk.cookies) != 1 {
 		t.Fatalf("the host's request was forwarded %d times, want once", len(rk.cookies))
+	}
+}
+
+func TestAMissingProjectFolderIsRefusedByCodeNotByTheSystemsSentence(t *testing.T) {
+	_, err := resolveWorkspaceDir(filepath.Join(t.TempDir(), "gone", "worktree"))
+	var c *coded
+	if !errors.As(err, &c) || c.reason.Code != codeWorkspaceMissing || c.status != http.StatusBadRequest {
+		t.Fatalf("a folder that is not there = %v, want a %s refusal with 400", err, codeWorkspaceMissing)
+	}
+	if c.reason.Params["path"] == "" {
+		t.Fatal("the refusal must carry the path so the page can say which folder")
 	}
 }
