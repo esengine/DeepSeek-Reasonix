@@ -107,3 +107,12 @@ describe("the explorer's changes section", () => {
     expect(document.querySelectorAll(".workbench-change")).toHaveLength(0);
   });
 });
+
+it("gives the full branch name and the full count as hover text, since the header truncates them", () => {
+  const port = new MockPort();
+  render(<WorkbenchChangesPage port={port} branch="docs/memory-index-not-in-prefix" changes={[{ path: "a.go", status: "M", added: 3, removed: 1 } as never]} shown remote onOpen={() => {}} />);
+  const head = document.querySelector(".wb-changes-head")!;
+  expect(head.querySelector("b")?.getAttribute("title")).toBe("docs/memory-index-not-in-prefix");
+  const count = head.querySelector("span")!;
+  expect(count.getAttribute("title")).toBe(count.textContent!.replace(/\s+/g, " ").trim());
+});

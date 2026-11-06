@@ -55,8 +55,8 @@ export function WorkbenchChangesPage({ port, changes, branch, shown, remote, onO
     <div className="wb-changes">
       <div className="wb-changes-head">
         <StudioIcon name="branch" />
-        {branch && <b>{branch}</b>}
-        <span>{t("common.n_files", { n: changes.length })}{many && ` ${t("workbench.modified_untracked", { m: changes.length - untracked, u: untracked })}`} <i data-tone="add">+{added}</i> <i data-tone="del">−{removed}</i></span>
+        {branch && <b title={branch}>{branch}</b>}
+        <span title={`${t("common.n_files", { n: changes.length })}${many ? ` ${t("workbench.modified_untracked", { m: changes.length - untracked, u: untracked })}` : ""} +${added} −${removed}`}>{t("common.n_files", { n: changes.length })}{many && ` ${t("workbench.modified_untracked", { m: changes.length - untracked, u: untracked })}`} <i data-tone="add">+{added}</i> <i data-tone="del">−{removed}</i></span>
         <span className="wb-changes-fill" />
         <button type="button" className="wb-changes-btn" data-action="workbench.stage-all" disabled={busy || changes.length === 0}
           onClick={() => void run(() => port.stageChanges({ all: true, unstage: settled }))}>
