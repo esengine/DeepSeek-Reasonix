@@ -5,6 +5,7 @@ import logoWordmark from "../assets/logo-wordmark.svg";
 import { HttpError } from "../port/port";
 import type { AgentPort, Protocol, ProviderProbe, ProviderSetup } from "../port/port";
 import { KIND_LABEL, nameFrom } from "./vendors";
+import { hasVendorMark, VendorMark } from "./vendormarks";
 import { Picker } from "./Menu";
 import { WindowControls, zoomOnTitleBar } from "./WindowControls";
 
@@ -25,9 +26,10 @@ interface Props {
 // cannot name links to its platform root instead: sending someone to a 404 is
 // worse than sending them to a front door. These are addresses on someone
 // else's site and will rot; a dead one is a bug report, not a silent failure.
-const SHORTCUTS: { label: string; hint: string; url: string; console?: string; protocolUrls?: Record<string, string> }[] = [
+const SHORTCUTS: { label: string; hint: string; url: string; mark?: string; console?: string; protocolUrls?: Record<string, string> }[] = [
   {
     label: "DeepSeek",
+    mark: "deepseek",
     hint: "onboarding.deepseek_hint",
     url: "https://api.deepseek.com",
     console: "https://platform.deepseek.com/api_keys",
@@ -38,10 +40,10 @@ const SHORTCUTS: { label: string; hint: string; url: string; console?: string; p
     },
   },
   { label: "onboarding.siliconflow", hint: "onboarding.siliconflow_hint", url: "https://api.siliconflow.cn/v1", console: "https://cloud.siliconflow.cn" },
-  { label: "onboarding.moonshot", hint: "onboarding.moonshot_hint", url: "https://api.moonshot.cn/v1", console: "https://platform.moonshot.cn" },
-  { label: "onboarding.zhipu", hint: "onboarding.zhipu_hint", url: "https://open.bigmodel.cn/api/paas/v4", console: "https://bigmodel.cn/usercenter/proj-mgmt/apikeys" },
-  { label: "MiMo", hint: "onboarding.mimo_hint", url: "https://api.xiaomimimo.com/v1", console: "https://platform.xiaomimimo.com" },
-  { label: "LongCat", hint: "onboarding.longcat_hint", url: "https://api.longcat.chat/openai", console: "https://longcat.chat/platform" },
+  { mark: "kimi", label: "onboarding.moonshot", hint: "onboarding.moonshot_hint", url: "https://api.moonshot.cn/v1", console: "https://platform.moonshot.cn" },
+  { mark: "zhipu", label: "onboarding.zhipu", hint: "onboarding.zhipu_hint", url: "https://open.bigmodel.cn/api/paas/v4", console: "https://bigmodel.cn/usercenter/proj-mgmt/apikeys" },
+  { mark: "mimo", label: "MiMo", hint: "onboarding.mimo_hint", url: "https://api.xiaomimimo.com/v1", console: "https://platform.xiaomimimo.com" },
+  { mark: "longcat", label: "LongCat", hint: "onboarding.longcat_hint", url: "https://api.longcat.chat/openai", console: "https://longcat.chat/platform" },
   { label: "onboarding.relay_self_hosted", hint: "onboarding.relay_hint", url: "" },
 ];
 
@@ -233,7 +235,7 @@ export function Onboarding({ port, setup, onDone, onSkip }: Props) {
                 {SHORTCUTS.map((s) => (
                   <button key={s.label} type="button" role="radio" className="onb-service" data-action="onboarding.service" data-value={s.label}
                     aria-checked={pick === s.label} disabled={busy} onClick={() => choose(s.label, s.url)}>
-                    <b>{t(s.label)}</b><small>{t(s.hint)}</small>
+                    <b>{hasVendorMark(s.mark) && <VendorMark slug={s.mark} size={16} />}{t(s.label)}</b><small>{t(s.hint)}</small>
                   </button>
                 ))}
               </div>

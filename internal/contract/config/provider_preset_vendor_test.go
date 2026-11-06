@@ -44,3 +44,18 @@ func TestRelaysAreDeclaredNotInferred(t *testing.T) {
 		}
 	}
 }
+
+// A hand-written entry pointing at a declared service is read through that
+// declaration; an address no preset serves stays unmarked.
+func TestAnAddressIsReadThroughThePresetServingIt(t *testing.T) {
+	preset, ok := CuratedProviderPresetForAddress(" https://api.deepseek.com/ ")
+	if !ok || preset.Vendor != "deepseek" {
+		t.Fatalf("api.deepseek.com vendor = %q (found %v), want deepseek", preset.Vendor, ok)
+	}
+	if _, ok := CuratedProviderPresetForAddress("https://yyds.yy2hd.com/v1"); ok {
+		t.Fatal("an address no preset serves must stay unmarked")
+	}
+	if _, ok := CuratedProviderPresetForAddress(""); ok {
+		t.Fatal("an empty address names nothing")
+	}
+}

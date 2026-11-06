@@ -27,7 +27,7 @@
 }
 .onb-service:hover:not(:disabled) { background: var(--overlay); }
 .onb-service[aria-checked="true"] { border-color: var(--accent); background: var(--raised); box-shadow: inset 0 0 0 .5px var(--accent); }
-.onb-service b { font: var(--w-semi) var(--fs-ui) var(--ui); }
+.onb-service b { display: flex; align-items: center; gap: 6px; font: var(--w-semi) var(--fs-ui) var(--ui); }
 .onb-service small { color: var(--faint); font: var(--w-med) var(--fs-micro) var(--ui); }
 
 .onb-models { display: flex; flex-direction: column; gap: 6px; }

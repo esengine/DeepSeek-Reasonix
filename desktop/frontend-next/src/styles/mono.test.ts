@@ -9,7 +9,7 @@ import { describe, expect, it } from "vitest";
 // The judgement is structural, never a look at the words: a class is monospaced
 // if a rule in app.css gives it var(--mono), and an element renders prose if its
 // own children call t(). Nothing here reads what a string says.
-const CSS = import.meta.glob("./app.css", { query: "?raw", import: "default", eager: true }) as Record<string, string>;
+const CSS = import.meta.glob(["./app.css", "./find.css"], { query: "?raw", import: "default", eager: true }) as Record<string, string>;
 const SOURCES = import.meta.glob(["../**/*.tsx", "!../**/*.test.*"], {
   query: "?raw",
   import: "default",
@@ -132,7 +132,7 @@ function landings(mono: Set<string>): Landing[] {
 }
 
 describe("monospace is for machine facts", () => {
-  const mono = monoClasses(Object.values(CSS)[0]);
+  const mono = monoClasses(Object.values(CSS).join("\n"));
   const all = landings(mono);
   const byClass = new Map<string, Landing[]>();
   for (const l of all) byClass.set(l.cls, [...(byClass.get(l.cls) ?? []), l]);

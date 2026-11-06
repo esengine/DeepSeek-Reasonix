@@ -407,13 +407,16 @@ func tariffBody(t pricing.Tariff) map[string]any {
 }
 
 // presetVendor is the declared vendor of the curated preset a provider came
-// from, read through the provenance the entry already records, and whether the
-// preset is a relay of other makers' models.
+// from or, for a hand-written entry, of the one serving its address, and whether
+// the preset is a relay of other makers' models.
 func presetVendor(p *config.ProviderEntry) (vendor string, relay bool) {
-	if p == nil || p.PresetID == "" {
+	if p == nil {
 		return "", false
 	}
 	if preset, ok := config.CuratedProviderPreset(p.PresetID); ok {
+		return preset.Vendor, preset.Relay
+	}
+	if preset, ok := config.CuratedProviderPresetForAddress(p.BaseURL); ok {
 		return preset.Vendor, preset.Relay
 	}
 	return "", false
