@@ -357,7 +357,7 @@
 .srow-ctl .unit-field input { width: 72px; }
 .srow-val { color: var(--muted); font: var(--w-reg) var(--fs-meta) var(--ui); max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .srow-val > * { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.prefs-card > .grp[data-inline] { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; column-gap: 16px; row-gap: 2px; }
+.prefs-card > .grp[data-inline] { display: grid; grid-template-columns: minmax(0, 1fr) fit-content(320px); align-items: center; column-gap: 16px; row-gap: 2px; }
 .prefs-card > .grp[data-inline] > :is(.grp-hd, .hint, .apply, .note) { grid-column: 1; }
 .prefs-card > .grp[data-inline] > .grp-items { grid-column: 2; grid-row: 1 / span 3; margin: 0; }
 .usage .utiles { grid-template-columns: repeat(4, minmax(0, 1fr)); }
@@ -419,3 +419,8 @@
 .mkt-bar .seg button:is([aria-pressed="true"], [aria-checked="true"]) { font-weight: var(--w-med); }
 .changed-keys { display: flex; flex-direction: column; gap: 4px; margin: 4px 0 0; padding: 8px 0 2px; border-top: 1px solid var(--hair); list-style: none; }
 .changed-keys li { color: var(--muted); font: var(--w-reg) var(--fs-meta) var(--mono); }
+.prefs-card > .grp { grid-template-columns: minmax(0, 1fr) fit-content(320px); }
+.prefs-main > .prefs-pagetitle { max-width: 760px; margin-inline: auto; }
+@container prefsmain (min-width: 860px) {
+  .prefs-main:has(.prefs-col[data-cols="2"]) > .prefs-pagetitle { max-width: 1160px; }
+}
