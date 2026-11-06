@@ -61,3 +61,54 @@
 .onb-flow :is(.onb-models, .onb-services) > :nth-child(n+8) { --i: 7; }
 .onb-flow .onb-err { animation: m-fade var(--t-card) var(--ease-out) both; }
 .onb-flow .onb-field:has(.onb-err) input[aria-invalid="true"] { animation: onb-shake var(--t-panel) var(--ease-out); }
+.onb-demo { display: none; }
+.onb-shell:has(.onb-card[data-step="welcome"]) { transition: width var(--t-panel) var(--ease-out); }
+@container onboarding (min-width: 900px) {
+  .onb-shell:has(.onb-card[data-step="welcome"]) { width: min(900px, calc(100% - 48px)); }
+  .onb-flow .onb-card[data-step="welcome"] { display: grid; grid-template-columns: minmax(0, 1fr) 320px; align-items: center; gap: 32px; }
+  .onb-demo { display: block; padding: 16px 18px; border: 1px solid var(--hair); border-radius: var(--r-md); background: var(--page); cursor: default; }
+}
+.onb-demo .demo-run { display: grid; gap: 10px; min-height: 236px; align-content: start; animation: demo-out 7s linear both; }
+.onb-demo .d { margin: 0; display: flex; align-items: center; gap: 8px; color: var(--muted); font: var(--w-med) var(--fs-meta)/1.4 var(--ui); animation: demo-in .42s var(--ease-out) both; animation-delay: calc(var(--n) * 900ms + 300ms); }
+.onb-demo .d.me { align-self: end; justify-self: end; padding: 7px 11px; border-radius: var(--r-md); background: var(--overlay); color: var(--text); }
+.onb-demo .d.think { animation: demo-in .42s var(--ease-out) both, demo-gone .3s linear both; animation-delay: 1.2s, 3.2s; }
+.onb-demo .d.tool b { color: var(--text); font-weight: var(--w-med); }
+.onb-demo .d.tool code { color: var(--faint); font: var(--w-reg) var(--fs-micro) var(--mono); }
+.onb-demo .d.tool small { margin-left: auto; color: var(--faint); font: var(--w-reg) var(--fs-micro) var(--mono); }
+.onb-demo .d.tool small.add { color: var(--add); }
+.onb-demo .d.tool small.ok { color: var(--ok-ink); }
+.onb-demo .d.done { margin-top: 4px; padding-top: 10px; border-top: 1px solid var(--hair); color: var(--ok-ink); }
+.onb-demo .demo-spin { color: var(--net); }
+.onb-demo .demo-spin path { animation: demo-draw 1.2s ease-in-out infinite; }
+.onb-demo:is(:hover, [data-held]) :is(.demo-run, .d, .demo-spin path) { animation-play-state: paused; }
+.onb-demo[data-final] .demo-run { animation: none; }
+.onb-demo[data-final] .d { animation: none; opacity: 1; }
+.onb-demo[data-final] .d.think { display: none; }
+@keyframes demo-in { from { opacity: 0; transform: translateY(6px); } }
+@keyframes demo-gone { to { opacity: 0; height: 0; margin: 0; } }
+@keyframes demo-out { 0%, 93% { opacity: 1; } 100% { opacity: 0; } }
+@keyframes demo-draw { 0% { stroke-dashoffset: 100; } 60%, 100% { stroke-dashoffset: 0; } }
+
+@keyframes onb-mark-in { from { opacity: 0; clip-path: inset(0 100% 0 0); transform: translateY(10px); } to { clip-path: inset(0 0 0 0); } }
+@keyframes onb-rise { from { opacity: 0; transform: translateY(10px); } }
+.onb-welcome-mark { animation: onb-mark-in 700ms var(--ease-out) both; }
+.onb-welcome > :not(.onb-welcome-mark) { animation: onb-rise 420ms var(--ease-out) both; animation-delay: 520ms; }
+.onb-welcome > .onb-s { animation-delay: 600ms; }
+.onb-welcome > .onb-acts { animation-delay: 680ms; }
+.onb-welcome > .onb-note { animation-delay: 760ms; }
+@keyframes onb-breathe { 0%, 100% { opacity: .75; transform: scale(1); } 50% { opacity: 1; transform: scale(1.08); } }
+@keyframes onb-grid { to { background-position: 42px 42px; } }
+.onb-stage::after { animation: onb-breathe 8s ease-in-out infinite; }
+.onb-stage::before { animation: onb-grid 36s linear infinite; }
+
+.onb-flow .onb-go[data-state] { display: inline-grid; place-items: center; min-width: 120px; transition: background-color 160ms var(--ease-out), border-color 160ms var(--ease-out); }
+.onb-flow .onb-go[data-state="ok"] { border-color: var(--ok); background: var(--ok); color: #fff; }
+.onb-flow .onb-go .onb-spin { width: 16px; height: 16px; color: currentColor; opacity: 1; }
+.onb-flow .onb-go .onb-spin path { animation: demo-draw 1.1s ease-in-out infinite; }
+.onb-flow .onb-go .onb-check { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.onb-flow .onb-go .onb-check path { stroke-dasharray: 100; stroke-dashoffset: 100; animation: demo-draw 300ms ease-out forwards; }
+.onb-flow .onb-found[data-enter] { animation: onb-banner-in 260ms var(--ease-out) both; }
+@keyframes onb-banner-in { from { opacity: 0; transform: translateY(-8px); } }
+@media (prefers-reduced-motion: reduce) {
+  .onb-stage::before, .onb-stage::after, .onb-welcome-mark, .onb-welcome > *, .onb-demo * { animation: none !important; }
+}

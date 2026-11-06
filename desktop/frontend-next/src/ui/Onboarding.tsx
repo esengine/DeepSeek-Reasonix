@@ -6,6 +6,8 @@ import { HttpError } from "../port/port";
 import type { AgentPort, Protocol, ProviderProbe, ProviderSetup } from "../port/port";
 import { KIND_LABEL, nameFrom } from "./vendors";
 import { hasVendorMark, VendorMark } from "./vendormarks";
+import { OnboardingDemo } from "./OnboardingDemo";
+import { RMark } from "./RMark";
 import { Picker } from "./Menu";
 import { WindowControls, zoomOnTitleBar } from "./WindowControls";
 
@@ -85,6 +87,7 @@ export function Onboarding({ port, setup, onDone, onSkip }: Props) {
   const [completed, setCompleted] = useState("");
   const [key, setKey] = useState("");
   const [busy, setBusy] = useState(false);
+  const [connected, setConnected] = useState(false);
   const [err, setErr] = useState<Failed | null>(setup.error ? { text: setup.error } : null);
   const [found, setFound] = useState<ProviderProbe | null>(null);
   const [catalog, setCatalog] = useState<Protocol[]>([]);
@@ -131,11 +134,15 @@ export function Onboarding({ port, setup, onDone, onSkip }: Props) {
       setCompleted(changed ? probe.baseUrl! : "");
       setKind(probe.kind);
       setModel(probe.default || probe.models[0] || "");
+      // The button says it worked, and the banner with it, before the page moves on.
+      setConnected(true);
+      await new Promise((done) => setTimeout(done, 750));
       go("model");
     } catch (e) {
       setErr(failed(e));
     } finally {
       setBusy(false);
+      setConnected(false);
     }
   };
 
@@ -215,6 +222,7 @@ export function Onboarding({ port, setup, onDone, onSkip }: Props) {
           )}
 
           {step === "welcome" && (
+            <>
             <div className="onb-welcome">
               <img className="onb-welcome-mark" src={logoWordmark} alt="" aria-hidden="true" draggable={false} />
               <h1 className="onb-t">{t("onboarding.hand_it_a_task")}</h1>
@@ -225,6 +233,8 @@ export function Onboarding({ port, setup, onDone, onSkip }: Props) {
               </div>
               <p className="onb-note">{t("onboarding.about_a_minute")}</p>
             </div>
+            <OnboardingDemo />
+            </>
           )}
 
           {step === "connect" && (
@@ -271,9 +281,18 @@ export function Onboarding({ port, setup, onDone, onSkip }: Props) {
                   </div>
                 )}
               </div>
+              {connected && found && (
+                <div className="onb-found" role="status" data-enter="">
+                  <span className="tick">✓</span>
+                  <span>{t("onboarding.connected_to_name_n_models", { name: t(pick), n: found.models.length })}</span>
+                </div>
+              )}
               <div className="onb-acts">
-                <button className="btn onb-go" data-primary disabled={busy || !url.trim() || !key.trim()} onClick={() => void connect()}>
-                  {t(busy ? "onboarding.checking_the_key" : "onboarding.connect")}
+                <button className="btn onb-go" data-primary data-state={connected ? "ok" : busy ? "busy" : undefined} disabled={busy || !url.trim() || !key.trim()}
+                  aria-label={busy ? t("onboarding.checking_the_key") : undefined} onClick={() => void connect()}>
+                  {connected
+                    ? <svg className="onb-check" viewBox="0 0 16 16" aria-hidden="true"><path pathLength={100} d="M3.5 8.5l3 3 6-7" /></svg>
+                    : busy ? <RMark className="rmark onb-spin" /> : t("onboarding.connect")}
                 </button>
                 <button type="button" className="onb-skip" data-action="onboarding.back" disabled={busy} onClick={() => go("welcome", true)}>{t("common.back")}</button>
               </div>

@@ -29,8 +29,9 @@ describe("first-run setup", () => {
     await user.type(screen.getByPlaceholderText("sk-…"), "sk-test");
     await user.click(screen.getByRole("button", { name: "连接" }));
     expect(await screen.findByText("已连上 DeepSeek · 找到 2 个模型")).toBeTruthy();
+    const pro = await screen.findByRole("radio", { name: /deepseek-v4-pro/ });
     expect(screen.queryByRole("radiogroup", { name: "协议" })).toBeNull();
-    expect(screen.getByRole("radio", { name: /deepseek-v4-pro/ }).getAttribute("aria-checked")).toBe("true");
+    expect(pro.getAttribute("aria-checked")).toBe("true");
     await user.click(screen.getByRole("radio", { name: /deepseek-flash/ }));
     await user.click(screen.getByRole("button", { name: "继续" }));
     expect(save).toHaveBeenCalledWith(expect.objectContaining({ kind: "openai", baseUrl: "https://api.deepseek.com", default: "deepseek-flash", replace: true }));
