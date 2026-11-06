@@ -60,3 +60,18 @@ it("draws the new-session button of a project row as a plus, as the Sess-Rows bo
   const icon = document.querySelector(".wsrow .wsadd svg path");
   expect(icon?.getAttribute("d")).toBe("M12 5v14M5 12h14");
 });
+
+it("draws a remote project's new-session button as a plus too", () => {
+  const noop = vi.fn();
+  render(<Sidebar hub={new MockHub()} collapsed={false} navShown treeRead tree={[]} runtimes={[]} runs={{}} active="" activeWorkspace={undefined}
+    liveIds={() => []} pinned={new Set()} onPin={noop}
+    remotes={[{ name: "server", target: "server", status: "connected", workspace: "/work/alpha" }]}
+    remoteTrees={{ server: [{ root: "/work/alpha", name: "remote-alpha", remembered: true, sessions: [{ path: "/work/alpha/r.jsonl", name: "r", title: "remote session" }] }] }}
+    reloadRemotes={async () => {}} reloadRemoteTrees={async () => {}} readRemoteTree={async () => {}} reloadTree={async () => {}} paging={NO_PAGING}
+    adder={{ busy: false, add: noop, addPath: noop } as never} onOpen={async () => {}} onOpenRemote={async () => {}} onFocusPane={noop}
+    onClosePanes={async () => {}} onPause={noop} onArchive={async () => {}} onRename={noop} onCollapse={noop} wallet="" onSettings={noop}
+    onFiles={noop} onView={noop} onFeedback={noop} feedbackUnread={0} onFind={noop} onError={noop} />);
+  const paths = [...document.querySelectorAll(".wsadd svg path")].map((p) => p.getAttribute("d"));
+  expect(paths.length).toBeGreaterThan(0);
+  expect(paths.every((d) => d === "M12 5v14M5 12h14")).toBe(true);
+});

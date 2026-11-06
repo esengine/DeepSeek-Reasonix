@@ -202,7 +202,7 @@ function RemoteHostsView({ hub, hosts, runtimes, active, onOpen, onFocus, reload
                       title={t("common.start_a_new_session_in", { name: ws.name + " · " + host.name })}
                       aria-label={t("common.start_a_new_session_in", { name: ws.name + " · " + host.name })}
                       onClick={(event) => { event.stopPropagation(); void open(host, ws.root); }}>
-                      <StudioIcon name="chat" />
+                      <StudioIcon name="plus" />
                     </button>
                     <RemoteProjectMenu name={ws.name} root={ws.root} host={host.name} defaultRoot={host.workspace} busy={!!busy}
                       onRefresh={() => void readBook(host.name)}
