@@ -417,7 +417,7 @@ export function App({ hub }: { hub: HubPort }) {
   const zoomKeys = useZoomKeys(look, onLook);
   const shortcuts: Shortcut[] = useMemo(
     () => [
-      { chord: "\\", fields: true, action: "rail.toggle", run: () => setRail((v) => !v) },
+      { chord: "b", fields: true, action: "chrome.rail", run: () => setRail((v) => !v) },
       { chord: ",", fields: true, action: "chrome.settings", run: showPrefs },
       { chord: "f", action: "transcript.find", run: find.open },
       { chord: "1", fields: true, action: "pane.view", run: () => showView("flow") },

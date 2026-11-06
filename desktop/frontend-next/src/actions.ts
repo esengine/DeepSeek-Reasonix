@@ -765,7 +765,6 @@ export const ACTIONS: UIAction[] = [
   { id: "rail.star", kind: "view", target: "none", proof: "interaction" },
   { id: "rail.pick", kind: "view", target: "none", proof: "interaction" },
   { id: "rail.jump", kind: "view", target: "none", proof: "interaction" },
-  { id: "rail.toggle", kind: "view", target: "none", proof: "interaction" },
   ...SCHEDULE_ACTIONS,
   ...DOCUMENT_ACTIONS,
 ];

@@ -57,7 +57,7 @@ async function open() {
 const nav = () => screen.queryByRole("navigation", { name: "主导航" });
 const navEl = () => document.querySelector<HTMLElement>("nav.nav");
 const app = () => document.querySelector<HTMLElement>(".app")!;
-const toggleSidebar = () => userEvent.click(document.querySelector<HTMLElement>(".gutter-l .grip")!);
+const toggleSidebar = () => userEvent.keyboard("{Control>}b{/Control}");
 
 async function openAppearance() {
   await userEvent.click(document.querySelector<HTMLElement>('[data-action="chrome.settings"]')!);
@@ -240,7 +240,7 @@ it("the conversation item opens and closes the workspace column, and from settin
 it("keeps desktop navigation usable after closing settings without a top toggle", async () => {
   await open();
   await userEvent.click(within(navEl()!).getByRole("button", { name: /^用量/ }));
-  expect(document.querySelector(".studio-menu")).toBeNull();
+  expect(document.querySelector(".studio-menu") !== null).toBe(app().dataset.rail === "off");
   expect(app().dataset.rail).toBe("on");
   await userEvent.keyboard("{Escape}");
   await toggleSidebar();
@@ -265,14 +265,14 @@ it("uses only the divider to collapse and reopen the desktop sidebar", async () 
   await open();
   const toggles = screen.queryAllByRole("button", { name: /收起工作区栏|展开工作区栏/ }).filter((b) => b.tabIndex !== -1);
   expect(toggles).toHaveLength(0);
-  expect(document.querySelector(".studio-menu")).toBeNull();
+  expect(document.querySelector(".studio-menu") !== null).toBe(app().dataset.rail === "off");
   expect(document.querySelector(".studio-quicknav")).toBeNull();
   await toggleSidebar();
   expect(app().dataset.rail).toBe("off");
   expect(screen.getByRole("separator", { name: "调整工作区栏宽度" }).getAttribute("aria-valuenow")).toBe("0");
   await toggleSidebar();
   expect(app().dataset.rail).toBe("on");
-  expect(document.querySelector(".studio-menu")).toBeNull();
+  expect(document.querySelector(".studio-menu") !== null).toBe(app().dataset.rail === "off");
 });
 
 it("remembers divider width through collapse, reopen, and reload with the icon rail off", async () => {
@@ -297,7 +297,7 @@ it.each(["on", "off"])("keeps one drawer entry at the scene boundary with the ic
   localStorage.setItem(KEY, mode);
   await open();
   act(() => room(641));
-  expect(document.querySelector(".studio-menu")).toBeNull();
+  expect(document.querySelector(".studio-menu") !== null).toBe(app().dataset.rail === "off");
   act(() => room(640));
   const toggle = await screen.findByRole("button", { name: "展开工作区栏" });
   expect(document.querySelectorAll(".studio-menu")).toHaveLength(1);
@@ -310,17 +310,34 @@ it.each(["on", "off"])("keeps one drawer entry at the scene boundary with the ic
   await userEvent.click(screen.getByRole("button", { name: "展开工作区栏" }));
   expect(app().dataset.rail).toBe("on");
   act(() => room(1440));
-  expect(document.querySelector(".studio-menu")).toBeNull();
+  expect(document.querySelector(".studio-menu") !== null).toBe(app().dataset.rail === "off");
   expect(app().dataset.rail).toBe("on");
   await toggleSidebar();
   act(() => room(390));
   act(() => room(1440));
   expect(app().dataset.rail).toBe("off");
-  expect(document.querySelector(".studio-menu")).toBeNull();
+  expect(document.querySelector(".studio-menu") !== null).toBe(app().dataset.rail === "off");
 });
 
 it("with the rail off the sidebar keeps its own quick entries", async () => {
   localStorage.setItem(KEY, "off");
   await open();
   expect(document.querySelector(".studio-quicknav")).not.toBeNull();
+});
+
+it("collapses and reopens the sidebar from Ctrl+B, and a collapsed sidebar is reopened by an icon that names the shortcut", async () => {
+  await open();
+  expect(app().dataset.rail).toBe("on");
+  await toggleSidebar();
+  expect(app().dataset.rail).toBe("off");
+  const icon = document.querySelector<HTMLElement>(".studio-menu")!;
+  expect(icon.getAttribute("title")).toMatch(/Ctrl B$/);
+  await userEvent.click(icon);
+  expect(app().dataset.rail).toBe("on");
+  expect(document.querySelector(".studio-menu")).toBeNull();
+});
+
+it("draws no handle on the dividers", async () => {
+  await open();
+  expect(document.querySelector(".gutter .grip")).toBeNull();
 });

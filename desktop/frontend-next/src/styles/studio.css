@@ -403,7 +403,7 @@ body { background: var(--page) !important; }
 .panes { background: var(--surface) !important; }
 .railhost { display: block; }
 .app { --srail-w: 36px; --rail-toggle-gap: 0px; }
-[data-fold~="scene"] .app { --rail-toggle-gap: 50px; }
+[data-fold~="scene"] .app, .app[data-rail="off"] { --rail-toggle-gap: 50px; }
 
 /* Prototype header */
 .studio-menu { position: fixed; z-index: 39; left: calc(var(--lights-w) + 10px); top: calc((var(--chrome-h) - 30px) / 2); width: 30px; height: 30px; display: grid; place-items: center; padding: 0; border: 1px solid transparent; border-radius: var(--r-sm); background: transparent; color: var(--faint); cursor: pointer; }

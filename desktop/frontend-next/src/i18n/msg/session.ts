@@ -30,6 +30,7 @@ export const SESSION: Messages = {
   "session.close_this_conversation_first_then": { zh: "先关闭这个会话，再移动它", en: "Close this conversation first, then move it" },
   "session.closes_n_panes_first_no": { zh: "将先关闭 {n} 个面板；不会删除任何文件", en: "Closes {n} panes first; no files are deleted" },
   "session.collapse_all_projects": { zh: "收起所有项目", en: "Collapse all projects" },
+  "session.expand_sidebar": { zh: "展开侧栏", en: "Expand sidebar" },
   "session.collapse_sidebar": { zh: "收起侧栏", en: "Collapse sidebar" },
   "session.compaction": { zh: "压缩", en: "Compaction" },
   "session.confirm_creation_outcome": { zh: "需要确认创建结果", en: "Confirm creation outcome" },

@@ -519,39 +519,8 @@
   @keyframes edgebump { 0%, 100% { transform: none } 40% { transform: translateX(var(--bump, 0px)) } }
   .gutter:focus-visible { outline: 2px solid var(--focus); outline-offset: -3px; border-radius: var(--r-xs) }
 
-  .gutter[data-shut] { width: 14px; top: 50%; bottom: auto; height: 46px; margin-top: -23px }
   [data-rail="off"] .gutter-l { left: 0 }
-  [data-rail="off"] .gutter-l .grip { margin-left: -6px }
-  .grip {
-    position: absolute; top: 50%; left: 50%; margin: -16px 0 0 -8px; z-index: 1;
-    width: 16px; height: 32px; padding: 0; display: grid; place-items: center;
-    border: 1px solid transparent; border-radius: var(--r-pill);
-    background: var(--surface); color: var(--muted);
-    font: var(--w-reg) var(--fs-micro)/1 var(--mono); cursor: pointer;
-    transition: color var(--m-line), background var(--m-line), border-color var(--m-line), box-shadow var(--m-card);
-  }
-  .grip > * { grid-area: 1 / 1; transition: opacity var(--m-line) }
-
-  .knurl {
-    width: 2.5px; height: 2.5px; border-radius: 50%; background: currentColor;
-    box-shadow: 0 -5.5px currentColor, 0 5.5px currentColor;
-  }
-  .dir { opacity: 0 }
-  .gutter:hover .grip, .gutter:focus-visible .grip, .gutter[data-on] .grip {
-    color: var(--text); background: var(--raised); border-color: var(--border);
-    box-shadow: 0 2px 9px -4px rgb(0 0 0 / .35);
-  }
-  .gutter:hover .knurl, .gutter:focus-visible .knurl, .gutter[data-on] .knurl { opacity: 0 }
-  .gutter:hover .dir, .gutter:focus-visible .dir, .gutter[data-on] .dir { opacity: 1 }
-
-  .gutter[data-shut] .grip {
-    height: 46px; margin-top: -23px;
-    color: var(--muted); background: var(--raised); border-color: var(--border);
-    box-shadow: 0 2px 10px -3px rgb(0 0 0 / .45);
-  }
-  .gutter[data-shut] .knurl { opacity: 0 }
-  .gutter[data-shut] .dir { opacity: 1 }
-  .gutter[data-shut] .grip:hover { color: var(--text); background: var(--overlay) }
+  .gutter-r[data-shut] { right: 0 }
 
   .scroll { flex: 1; overflow: auto; min-height: 0 }
 

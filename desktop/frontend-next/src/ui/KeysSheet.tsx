@@ -6,6 +6,7 @@ import { Group } from "./Group";
 const KEYS: Array<[string, string]> = [
   [chord("F"), "settings.find_in_the_conversation"],
   [chord("K"), "settings.search_conversations"],
+  [chord("B"), "session.collapse_sidebar"],
   [chord("1"), "session.show_conversation"],
   [chord("2"), "session.show_run_analysis"],
   [chord("3"), "session.show_workbench"],
