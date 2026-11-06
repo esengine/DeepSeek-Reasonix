@@ -193,3 +193,7 @@
 .rc[data-worked] .rc-ok { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font: var(--w-reg) var(--fs-meta)/1.4 var(--ui); }
 .rc[data-worked] .rc-tick { width: 14px; height: 14px; color: var(--ok-ink); }
 .flow .call[data-approval] .apv-ft .btn[data-deny] { order: -1; margin-right: auto; }
+.md-tw { overflow-x: visible; }
+.md table { width: 100%; table-layout: auto; }
+.md th, .md td { padding-right: 16px; vertical-align: top; white-space: normal; overflow-wrap: anywhere; }
+.md td code, .md th code { white-space: normal; overflow-wrap: anywhere; }
