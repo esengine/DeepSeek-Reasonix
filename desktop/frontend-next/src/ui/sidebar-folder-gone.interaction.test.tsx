@@ -54,3 +54,9 @@ it("keeps reporting every other failure as an error", async () => {
   await waitFor(() => expect(onError).toHaveBeenCalled());
   expect(screen.queryByText(/文件夹已经不在磁盘上/)).toBeNull();
 });
+
+it("draws the new-session button of a project row as a plus, as the Sess-Rows board does", () => {
+  draw(async () => {});
+  const icon = document.querySelector(".wsrow .wsadd svg path");
+  expect(icon?.getAttribute("d")).toBe("M12 5v14M5 12h14");
+});

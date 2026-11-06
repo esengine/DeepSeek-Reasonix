@@ -461,7 +461,7 @@ function WorkspacesView({ hub, tree, treeRead, answered = null, runtimes, active
                           void startSession(ws);
                         }}
                       >
-                        <StudioIcon name="chat" />
+                        <StudioIcon name="plus" />
                       </button>
                       <button
                         className="wsmore"
