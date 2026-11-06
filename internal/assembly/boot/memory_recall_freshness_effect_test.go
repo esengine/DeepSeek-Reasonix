@@ -120,6 +120,9 @@ default_model = "test-model"
 [agent]
 system_prompt = "BASE"
 
+[memory]
+proactive = "auto"
+
 [[providers]]
 name = "test-model"
 kind = "boot-effect-remember-freshness"

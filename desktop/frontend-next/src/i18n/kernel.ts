@@ -634,6 +634,8 @@ const SAID: Record<string, string> = {
   "hooks.rejected": "kernel.that_hook_was_not_saved",
   "hooks.dry_run_failed": "kernel.that_hook_did_not_run",
   "memory.forget_failed": "kernel.that_memory_could_not_be",
+  "memory.save_failed": "kernel.that_memory_could_not_be_saved",
+  "memory.proactive_save_failed": "kernel.the_memory_setting_could_not_be",
   "network.rejected": "kernel.the_network_settings_were_not",
   "net.proxy.off": "kernel.not_using_a_proxy_turned",
   "net.proxy.direct": "kernel.this_address_is_reached_directly",

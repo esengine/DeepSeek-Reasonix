@@ -331,6 +331,8 @@ export const KERNEL: Messages = {
   "kernel.that_key_was_refused_check": { zh: "该 key 未被接受。请检查是否复制完整，或在服务商控制台重新生成", en: "That key was refused. Check it copied in full, or generate a new one in the provider's console" },
   "kernel.that_line_already_reached_the": { zh: "该条已发送给模型，无法撤回", en: "That line already reached the model - it cannot be taken back" },
   "kernel.that_line_is_too_long": { zh: "该行过长，无法补全", en: "That line is too long to complete" },
+  "kernel.that_memory_could_not_be_saved": { zh: "未能保存该条记忆：{detail}", en: "That memory could not be saved: {detail}" },
+  "kernel.the_memory_setting_could_not_be": { zh: "未能保存记忆设置：{detail}", en: "The memory setting could not be saved: {detail}" },
   "kernel.that_memory_could_not_be": { zh: "未能删除该条记忆：{detail}", en: "That memory could not be removed: {detail}" },
   "kernel.that_message_is_too_long": { zh: "这条消息太长", en: "That message is too long" },
   "kernel.that_message_was_already_decided": { zh: "这条消息已经处理过了", en: "That message was already decided" },
