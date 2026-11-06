@@ -275,10 +275,12 @@ of button only — a small one with the pill, a medium one with `--r-md`.
 
 ## Type
 
-- Composer menus share `composer-menu.css`: 280–340px widths capped by the
-  viewport, 12px corners and 8px insets. Labels use 13px medium type,
-  descriptions 11px and headings 12px. Selection uses a neutral fill and check;
-  permission warnings retain semantic colour.
+- Picker panels follow the board "Spec-Pickers": 300px wide (340 when the
+  descriptions are long, 600 for the two-column model panel), `--r-md` corners,
+  rows inset 4px, a title row of 13px bold, rows of 13px medium with 12px
+  descriptions. Selection is a neutral fill and a `--net-ink` check; only the
+  rows scroll, with the title, filter and footer pinned. Permission warnings
+  retain semantic colour.
 - The composer scope covers work mode, workspace, permissions, model and effort.
   Search results wrap long names; large lists scroll within the viewport. Other
   pickers retain their own density.

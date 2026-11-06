@@ -1,7 +1,7 @@
 .worktree-trigger .lb { max-width: 230px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
 :root .compose .mode.worktree-trigger[data-on] { color: var(--muted); background: var(--overlay) }
 :root .compose .mode.worktree-trigger[data-on] .lb, :root .compose .mode.worktree-trigger[data-on] .studio-icon { color: var(--muted) }
-.workspace-palette { position: fixed; z-index: 1000; box-sizing: border-box; width: min(360px, calc(100vw / var(--zoom, 1) - 24px)); max-height: calc(100vh / var(--zoom, 1) - 24px); overflow: auto; border: 1px solid var(--border); border-radius: var(--r-md); background: var(--float); color: var(--text); box-shadow: var(--shadow-float); font: var(--w-reg) var(--fs-ui)/1.5 var(--ui) }
+.workspace-palette { position: fixed; z-index: 1000; box-sizing: border-box; width: min(340px, calc(100vw / var(--zoom, 1) - 24px)); max-height: calc(100vh / var(--zoom, 1) - 24px); overflow: auto; border: 1px solid var(--border); border-radius: var(--r-md); background: var(--float); color: var(--text); box-shadow: var(--shadow-float); font: var(--w-reg) var(--fs-ui)/1.5 var(--ui) }
 .workspace-palette .studio-icon { width: 14px; height: 14px; flex-shrink: 0 }
 .workspace-palette-heading { display: flex; align-items: center; gap: 8px; padding: 12px 14px 8px; font: var(--w-semi) var(--fs-ui)/1.3 var(--ui) }
 .workspace-palette-heading > span { flex: 1 }

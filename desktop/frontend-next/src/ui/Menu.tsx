@@ -26,6 +26,8 @@ export interface MenuItem {
   recommended?: boolean;
   plain?: boolean;
   divide?: boolean;
+  // Pinned under the scrolling rows instead of scrolling with them.
+  foot?: boolean;
   // A group caption. It labels the rows under it and cannot be chosen, so it
   // is not a button — a menu whose headings take focus is a menu you arrow
   // through twice.
@@ -102,6 +104,21 @@ export function Picker({
   // query narrows something, or every menu would open pre-selected.
   const lead = query ? shown.find((it) => !it.header && !it.plain)?.value : undefined;
   const none = filtering && !shown.some((it) => !it.header && !it.plain);
+  const pinned = shown.some((it) => it.foot);
+  const row = (it: MenuItem, i: number) => (
+    <Fragment key={it.value}>
+      {it.divide && i > 0 && !it.foot && <div className="div" />}
+      {it.header ? (
+        <div className="mi head">
+          <Lead it={it} />
+          <span className="lb">{it.label}</span>
+          {it.right && <span className="rt">{it.right}</span>}
+        </div>
+      ) : (
+        <MenuRow it={it} id={id} current={current} lead={lead} onTake={take} />
+      )}
+    </Fragment>
+  );
 
   useEffect(() => {
     if (!open) {
@@ -273,20 +290,8 @@ export function Picker({
           )}
           {head}
           {none && <div className="mnone">{t("app.nothing_matches_2")}</div>}
-          {shown.map((it, i) => (
-            <Fragment key={it.value}>
-              {it.divide && i > 0 && <div className="div" />}
-              {it.header ? (
-                <div className="mi head">
-                  <Lead it={it} />
-                  <span className="lb">{it.label}</span>
-                  {it.right && <span className="rt">{it.right}</span>}
-                </div>
-              ) : (
-                <MenuRow it={it} id={id} current={current} lead={lead} onTake={take} />
-              )}
-            </Fragment>
-          ))}
+          {pinned ? <div className="menu-rows">{shown.filter((it) => !it.foot).map(row)}</div> : shown.map(row)}
+          {pinned && shown.filter((it) => it.foot).map(row)}
           {aside && <div className={["menu-aside", asideClassName].filter(Boolean).join(" ")} role="group">{aside(closeMenu)}</div>}
         </div>,
         document.body,

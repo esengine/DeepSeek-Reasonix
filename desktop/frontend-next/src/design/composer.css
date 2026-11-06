@@ -112,8 +112,7 @@
 .mode-menu button.mi .lb { line-height: 1.4; }
 .mode-menu button.mi .ds { font: var(--w-reg) var(--fs-meta)/1.4 var(--ui); }
 :root .composer-menu.mode-menu .mi[data-on]::after { color: var(--net-ink); }
-:root .composer-menu.studio-model-menu { max-height: min(calc((100vh - 160px) / var(--zoom, 1)), 440px); }
-:root .composer-menu.studio-model-menu.has-aside { --choice-width: 600px; grid-template-columns: 324px minmax(0, 1fr); }
+:root .composer-menu.studio-model-menu { --picker-max: min(calc((100vh - 160px) / var(--zoom, 1)), 440px); max-height: var(--picker-max); }
 :root .composer-menu.studio-model-menu .studio-picker-title b { font: var(--w-semi) var(--fs-ui)/1.3 var(--ui); }
 :root .composer-menu.studio-model-menu .studio-picker-title small { color: var(--faint); font: var(--w-reg) var(--fs-micro)/1.3 var(--ui); }
 :root .composer-menu.studio-model-menu .mi.head .lb { color: var(--muted); font: var(--w-med) var(--fs-meta)/1.3 var(--ui); }
@@ -133,4 +132,21 @@
 :root .composer-menu.studio-effort-menu .mi[data-on]::after { margin-left: auto; color: var(--net-ink); }
 :root .composer-menu.studio-effort-menu > .mi.head:last-child { padding: 10px 14px; }
 :root .composer-menu.studio-effort-menu > .mi.head:last-child .lb { color: var(--muted); font: var(--w-reg) var(--fs-meta)/1.4 var(--ui); }
-:root .composer-menu.studio-model-menu > .studio-effort-menu { position: sticky; top: 0; align-self: start; }
+.composer-menu.studio-model-menu.has-aside { --choice-width: 600px; display: grid; grid-template-columns: 340px minmax(0, 1fr); grid-template-rows: auto auto auto minmax(0, 1fr) auto; padding: 0; overflow: hidden; }
+.composer-menu.studio-model-menu.has-aside > :not(.menu-aside) { grid-column: 1; }
+.composer-menu.studio-model-menu .studio-picker-title { min-height: 0; margin: 0; padding: 12px 14px 8px; border-bottom: 0; }
+.composer-menu.studio-model-menu .mfind { position: static; box-sizing: border-box; width: auto; height: 32px; margin: 0 8px; padding: 0 10px; border: 1px solid var(--border); border-radius: var(--r-sm); background: var(--surface); }
+.composer-menu.studio-model-menu .mchips { padding: 8px 8px 6px; }
+.composer-menu.studio-model-menu .menu-rows { min-height: 0; padding: 0 4px 6px; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; }
+.composer-menu.studio-model-menu .menu-rows .mi.head { top: 0; }
+.composer-menu.studio-model-menu .menu-rows ~ button.mi { box-sizing: border-box; width: 100%; height: 36px; min-height: 36px; margin: 0; padding: 0 14px; border-top: 1px solid var(--hair); border-radius: 0; font: var(--w-med) var(--fs-meta)/1.3 var(--ui); }
+.composer-menu.studio-model-menu .menu-rows ~ button.mi .ds { display: none; }
+.composer-menu.studio-model-menu > .menu-aside { grid-column: 2; grid-row: 1 / -1; min-height: 0; max-height: var(--picker-max); display: flex; flex-direction: column; min-width: 0; padding: 0 0 4px; overflow-y: auto; border-left: 1px solid var(--hair); }
+.composer-menu.studio-model-menu > .menu-aside > .mi.head:last-child { margin-top: auto; }
+.composer-menu.composition-menu { width: 340px; padding: 0 0 6px; border-color: var(--border); }
+.composition-menu .studio-picker-title { min-height: 0; margin: 0; padding: 12px 14px 8px; border-bottom: 0; }
+.composition-menu .studio-picker-title b { font: var(--w-semi) var(--fs-ui)/1.3 var(--ui); }
+.composition-menu .studio-picker-title small { color: var(--faint); font: var(--w-reg) var(--fs-micro)/1.3 var(--ui); }
+.composition-menu button.mi { box-sizing: border-box; width: calc(100% - 8px); margin: 0 4px 2px; padding: 7px 10px; }
+.composition-menu button.mi .lb { line-height: 1.4; }
+.composition-menu button.mi .ds { margin-top: 1px; font: var(--w-reg) var(--fs-meta)/1.45 var(--ui); }

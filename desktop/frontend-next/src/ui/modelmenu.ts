@@ -63,6 +63,7 @@ export function modelMenu(models: ModelEntry[], order: readonly string[] = [], c
     label: t("composer.manage_models_and_connections"),
     desc: t("composer.providers_api_access_and_available"),
     plain: true,
+    foot: true,
     divide: out.length > 0,
   });
   return out;
