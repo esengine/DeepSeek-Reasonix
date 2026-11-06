@@ -459,3 +459,8 @@
 .scopeaway > span { flex: 1; min-width: 0; }
 .scopeaway .act { height: 24px; padding: 0 10px; border: 1px solid var(--border); border-radius: var(--r-pill); background: transparent; color: var(--text); font: var(--w-reg) var(--fs-meta)/1 var(--ui); cursor: pointer; }
 .scopeaway .act:hover { background: var(--overlay); }
+.ext-bar .ext-scope { margin-left: auto; }
+.ext-bar .ext-scope + .ext-add { margin-inline-start: 0; }
+.scopeanchor { position: relative; display: inline-block; }
+.scopeanchor .scope-pick { top: calc(100% + 4px); right: 0; left: auto; }
+.scoperow .scopeanchor .scope-pick { top: calc(100% + 4px); right: 0; left: auto; }

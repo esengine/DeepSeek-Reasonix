@@ -14,6 +14,35 @@ export function Exception({ onClear, busy }: { onClear: () => void; busy: boolea
   );
 }
 
+// The project the extension lists answer for, as one pill that opens the list of
+// projects. It sits in settings and on the extension page, so choosing is never
+// a trip to another page.
+export function ScopePill({
+  scope, scopes, onPick,
+}: {
+  scope: CapabilityScope; scopes: CapabilityScope[]; onPick: (root: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <span className="scopeanchor">
+      <button type="button" className="spill who" data-action="ext.scope" aria-expanded={open} onClick={() => setOpen(!open)}>
+        {scope.label || scope.name}
+        <i className="cv" aria-hidden>▾</i>
+      </button>
+      {open && (
+        <ScopePicker
+          scopes={scopes}
+          at={scope.root}
+          onPick={(root) => {
+            setOpen(false);
+            onPick(root);
+          }}
+        />
+      )}
+    </span>
+  );
+}
+
 // Which folder the extension lists answer for. The shell holds several projects
 // at once and the pane follows whichever one is in front, so this is chosen on
 // purpose here rather than inferred from the tab in front. Worktrees of one
@@ -25,7 +54,6 @@ export function ScopeRow({
 }: {
   scope: CapabilityScope; scopes: CapabilityScope[]; onPick: (root: string) => void;
 }) {
-  const [open, setOpen] = useState(false);
   const shared = scope.repo && (scope.trees ?? 1) > 1;
   return (
     <div className="scoperow">
@@ -34,21 +62,8 @@ export function ScopeRow({
           <span className="srow-name">{t("ext.manage_which_project")}</span>
           <span className="srow-desc">{t("ext.scope_hint")}</span>
         </div>
-        <div className="srow-ctl scopeanchor">
-          <button type="button" className="spill who" data-action="ext.scope" aria-expanded={open} onClick={() => setOpen(!open)}>
-            {scope.label || scope.name}
-            <i className="cv" aria-hidden>▾</i>
-          </button>
-          {open && (
-            <ScopePicker
-              scopes={scopes}
-              at={scope.root}
-              onPick={(root) => {
-                setOpen(false);
-                onPick(root);
-              }}
-            />
-          )}
+        <div className="srow-ctl">
+          <ScopePill scope={scope} scopes={scopes} onPick={onPick} />
         </div>
       </div>
       <div className="scopeinfo">

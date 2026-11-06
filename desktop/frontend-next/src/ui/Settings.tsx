@@ -47,7 +47,7 @@ import { planProtocolSwitch } from "./protocolswitch";
 import { Boundary } from "./Boundary";
 import { DEFAULT_DAYS } from "./Usage";
 import { Appearance, SCHEMES } from "./Appearance";
-import { ScopeAway, ScopeRow } from "./CapabilityScope";
+import { ScopeAway, ScopePill, ScopeRow } from "./CapabilityScope";
 import { SectionCard } from "./SectionCard";
 import { savedNotApplied, reason } from "../i18n/kernel";
 import type { SettingsProps as Props } from "./SettingsProps";
@@ -476,6 +476,7 @@ export function Settings({ hub, onError, port, networkPort, localWorkspacePort, 
             <>
               <div className="ext-bar">
                 <ExtTabs at={extTab} disabled={updatingPkg.applying} onPick={(tab) => { setInstalledTarget(null); setExtTab(tab); }} />
+                {scope && <span className="ext-scope"><ScopePill scope={scope} scopes={scopes} onPick={setScopeAt} /></span>}
                 <ExtAddMenu disabled={updatingPkg.applying} offer={new Set<ExtAddWay>(["market", ...(updatingPkg.name ? [] : ["source", "folder"] as const), ...(live ? ["service"] as const : [])])}
                   onPick={(way) => { setInstalledTarget(null); setExtTab(way === "market" ? "market" : "installed"); if (way === "service") setAdding(true); else if (way !== "market") setAddingPkg(way); }} />
               </div>

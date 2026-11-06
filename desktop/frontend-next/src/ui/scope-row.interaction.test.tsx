@@ -49,3 +49,14 @@ describe("the extension page naming another project", () => {
     expect(onBack).toHaveBeenCalledOnce();
   });
 });
+
+describe("the project pill on the extension page", () => {
+  it("opens the same list in place and hands back the chosen root", async () => {
+    const { ScopePill } = await import("./CapabilityScope");
+    const onPick = vi.fn();
+    render(<ScopePill scope={scope()} scopes={scopes} onPick={onPick} />);
+    await userEvent.click(screen.getByRole("button", { name: /app/ }));
+    await userEvent.click(screen.getByRole("option", { name: /site/ }));
+    expect(onPick).toHaveBeenCalledWith("/work/site");
+  });
+});
