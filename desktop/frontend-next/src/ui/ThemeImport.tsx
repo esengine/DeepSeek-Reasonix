@@ -100,7 +100,7 @@ export function ThemeImport({ port, empty, onImported, onUse }: Props) {
         </span>
         {t(busy ? "common.importing" : "look.import_theme")}
       </button>
-      <div className="themeacts">
+      <div className="themeacts" data-landed={landed ? "" : undefined}>
         <p className="note" role="status" aria-atomic="true">
           {note || t(empty ? "look.no_themes_installed_choose_a" : "look.choose_a_zip_or_select")}
         </p>
@@ -121,7 +121,7 @@ export function ThemeImport({ port, empty, onImported, onUse }: Props) {
         </button>
       </div>
       {failed && (
-        <div className="find" data-lvl="err" role="alert">
+        <div className="find themefail" data-lvl="err" role="alert">
           <span className="t">{failed}</span>
         </div>
       )}

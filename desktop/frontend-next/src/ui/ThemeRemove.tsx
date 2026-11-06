@@ -20,6 +20,7 @@ export function ThemeRemove({ name, onRemove }: { name: string; onRemove: () => 
       type="button"
       className="btn sm pal-rm"
       data-action="theme.remove"
+      data-confirming={phase === "confirm" ? "" : undefined}
       aria-label={t("look.delete_theme_name", { name })}
       disabled={phase === "pending"}
       aria-busy={phase === "pending" || undefined}

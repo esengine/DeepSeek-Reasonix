@@ -36,3 +36,19 @@ describe("the export chips follow the board", () => {
     expect(rule(".bk-fields")).toMatch(/grid-template-columns:\s*1fr 1fr/);
   });
 });
+
+describe("the import results follow the board", () => {
+  it("draws a landed theme as a green strip and a refused one as a warning strip", () => {
+    expect(rule(".themeacts[data-landed]")).toMatch(/var\(--ok\) 10%/);
+    expect(rule(".themefail")).toMatch(/var\(--warn\) 12%/);
+  });
+
+  it("draws the armed delete in the error tone", () => {
+    expect(css).toContain('.pal-rm[data-confirming]');
+  });
+
+  it("draws the session-import placeholder as a 440px dialog with a dashed drop area", () => {
+    expect(rule(".ns-dlg")).toMatch(/width:\s*440px/);
+    expect(rule(".ns-dlg .ns-drop")).toMatch(/border:\s*1px dashed var\(--border\)/);
+  });
+});

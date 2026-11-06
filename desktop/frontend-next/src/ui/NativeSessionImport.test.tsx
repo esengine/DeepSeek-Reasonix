@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, expect, it, vi } from "vitest";
 import { MockHub } from "../port/mock_hub";
@@ -48,7 +48,37 @@ it("offers the file through the app's own button, with the native input out of s
   expect(input.hidden).toBe(true);
   const open = vi.spyOn(input, "click");
   await userEvent.click(screen.getByRole("button", { name: "选择会话文件…" }));
+  expect(open).not.toHaveBeenCalled();
+  const dialog = await screen.findByRole("dialog");
+  expect(dialog.textContent).toContain("把会话 JSON 文件拖到这里");
+  await userEvent.click(screen.getByRole("button", { name: "选择会话 JSON 文件" }));
   expect(open).toHaveBeenCalledOnce();
+});
+
+it("takes a file dropped on the dashed area and closes the dialog", async () => {
+  const hub = new MockHub();
+  const imported = vi.spyOn(hub, "importNativeSession");
+  render(<NativeSessionImport hub={hub} workspace="/workspace" onImported={vi.fn()}/>);
+  await userEvent.click(screen.getByRole("button", { name: "选择会话文件…" }));
+  const drop = document.querySelector(".ns-drop")!;
+  const file = new File(["{}"], "s.json", { type: "application/json" });
+  fireEvent.drop(drop, { dataTransfer: { files: [file] } });
+  await screen.findByRole("status");
+  expect(imported).toHaveBeenCalledWith(file, "/workspace");
+  expect(screen.queryByRole("dialog")).toBeNull();
+});
+
+it("closes the dialog with Cancel and with Escape without importing anything", async () => {
+  const hub = new MockHub();
+  const imported = vi.spyOn(hub, "importNativeSession");
+  render(<NativeSessionImport hub={hub} workspace="/workspace" onImported={vi.fn()}/>);
+  await userEvent.click(screen.getByRole("button", { name: "选择会话文件…" }));
+  await userEvent.click(screen.getByRole("button", { name: "取消" }));
+  expect(screen.queryByRole("dialog")).toBeNull();
+  await userEvent.click(screen.getByRole("button", { name: "选择会话文件…" }));
+  await userEvent.keyboard("{Escape}");
+  expect(screen.queryByRole("dialog")).toBeNull();
+  expect(imported).not.toHaveBeenCalled();
 });
 
 it("holds the button while an import is running", async () => {

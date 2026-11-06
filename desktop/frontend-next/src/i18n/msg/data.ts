@@ -33,6 +33,7 @@ export const DATA: Messages = {
   "data.decrypting": { zh: "正在解密…", en: "Decrypting…" },
   "data.differs_from_this_machine": { zh: "与本机不同", en: "Differs from this machine" },
   "data.drive_free_free_of_total": { zh: "{drive} 剩余 {free} / {total}", en: "{drive} — {free} free of {total}" },
+  "data.drop_a_session_json_file_here": { zh: "把会话 JSON 文件拖到这里", en: "Drop a session JSON file here" },
   "data.e_g_work_laptop": { zh: "例如：公司笔记本", en: "e.g. work laptop" },
   "data.encrypting": { zh: "正在加密…", en: "Encrypting…" },
   "data.encrypting_and_uploading": { zh: "正在加密上传…", en: "Encrypting and uploading…" },
