@@ -1,41 +1,6 @@
 package agent
 
-import (
-	"fmt"
-	"strings"
-
-	"reasonix/internal/contract/provider"
-	"reasonix/internal/contract/tool"
-)
-
-// Tool-result bounding, used for a call's first-visible output and for the
-// temporary transcript fed to the summarizer. The model-visible projection is
-// never rewritten by these helpers.
-const (
-	snippedMarker = "[snipped tool result — "
-	minPruneBytes = 1024
-)
-
-func snipToolResult(m provider.Message, archive string, strategy snipStrategy) string {
-	if archive == "" {
-		archive = "the canonical transcript"
-	}
-	lines := strings.Split(m.Content, "\n")
-	if len(lines) <= strategy.head+strategy.tail {
-		headChars := minInt(strategy.headChars, len(m.Content)/2)
-		tailChars := minInt(strategy.tailChars, len(m.Content)/4)
-		return fmt.Sprintf("%s%s, %d bytes; full original retained in %s; single large line truncated]\n%s\n[... %d bytes omitted ...]\n%s",
-			snippedMarker, m.Name, len(m.Content), archive,
-			firstRunes(m.Content, headChars),
-			omittedBytes(m.Content, headChars, tailChars),
-			lastRunes(m.Content, tailChars))
-	}
-	head := strings.Join(lines[:strategy.head], "\n")
-	tail := strings.Join(lines[len(lines)-strategy.tail:], "\n")
-	return fmt.Sprintf("%s%s, %d bytes; full original retained in %s; showing first %d lines and last %d lines]\n%s\n[... %d lines omitted ...]\n%s",
-		snippedMarker, m.Name, len(m.Content), archive, strategy.head, strategy.tail,
-		head, len(lines)-strategy.head-strategy.tail, tail)
-}
+import "reasonix/internal/contract/tool"
 
 type snipStrategy struct {
 	head      int
@@ -78,44 +43,4 @@ func (s snipStrategy) forFailure(cap int) snipStrategy {
 		s.headChars = cap - 512 - s.tailChars
 	}
 	return s
-}
-
-func firstRunes(s string, n int) string {
-	if len(s) <= n {
-		return s
-	}
-	for n > 0 && !isRuneBoundary(s, n) {
-		n--
-	}
-	return s[:n]
-}
-
-func lastRunes(s string, n int) string {
-	if len(s) <= n {
-		return s
-	}
-	start := len(s) - n
-	for start < len(s) && !isRuneBoundary(s, start) {
-		start++
-	}
-	return s[start:]
-}
-
-func omittedBytes(s string, head, tail int) int {
-	omitted := len(s) - head - tail
-	if omitted < 0 {
-		return 0
-	}
-	return omitted
-}
-
-func isRuneBoundary(s string, i int) bool {
-	return i == 0 || i == len(s) || (i > 0 && i < len(s) && (s[i]&0xc0) != 0x80)
-}
-
-func minInt(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
 }
