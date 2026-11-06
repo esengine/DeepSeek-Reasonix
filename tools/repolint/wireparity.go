@@ -30,6 +30,7 @@ const (
 	tsProviderFile  = "desktop/frontend-next/src/port/provider.ts"
 	tsFeedbackFile  = "desktop/frontend-next/src/port/feedback.ts"
 	tsWorkspaceFile = "desktop/frontend-next/src/port/workspace.ts"
+	tsTerminalFile  = "desktop/frontend-next/src/port/terminal.ts"
 	tsLookFile      = "desktop/frontend-next/src/port/look.ts"
 	tsHubFile       = "desktop/frontend-next/src/port/hub.ts"
 	tsMuxFile       = "desktop/frontend-next/src/port/mux.ts"
@@ -312,6 +313,9 @@ var mirroredWireTypesHead = []wireMirror{
 	{"internal/platform/gitpush/plan.go", "Plan", tsWorkspaceFile, "PushPlan"},
 	{"internal/platform/gitpush/push.go", "Result", tsWorkspaceFile, "PushResult"},
 	{"internal/frontend/serve/changes.go", "gitRepoRow", tsWorkspaceFile, "GitRepoRow"},
+	{"internal/platform/terminal/terminal.go", "Info", tsTerminalFile, "TerminalInfo"},
+	{"internal/platform/terminal/shells.go", "Shell", tsTerminalFile, "ShellChoice"},
+	{"internal/frontend/serve/terminals.go", "terminalFrame", tsTerminalFile, "TerminalFrame"},
 	{"internal/frontend/serve/changes.go", "gitReposView", tsWorkspaceFile, "GitRepos"},
 	{"internal/platform/gitstatus/commitdetail.go", "CommitFile", tsWorkspaceFile, "GitCommitFile"},
 	{"internal/frontend/serve/git_commit_detail.go", "commitFilesView", tsWorkspaceFile, "GitCommitFiles"},

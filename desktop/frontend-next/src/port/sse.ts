@@ -2,7 +2,7 @@ import type { SurfaceActionRequest, SurfaceActionRecord } from "./surface";
 import { PLAN_ACTIONS, type PlanAction } from "./session";
 import type { AccountState, AgentPort, ChipCall, CompactionSettings, Completion, DeviceGrant, UpdateProgress, StudioLogs, VersionHub, VersionNotes, ApprovalMode, ApprovalVerdict, Checkpoint, RewindPlan, RewindResult, RewindUndo, RewindScope, HistoryMessage, HostTodo, BrowserTab, ModelEntry, Preset, ProviderSetup, RoleAssignments, RoleOverride, SessionEntry, SessionStatus, WalletReading, MemoryCatalog, MemoryEdit, MemoryEntry, UsageQuery, UsageReport, UploadReport, Queue, Queued, NotifyPrefs, TrayPrefs, WorkspaceInfo } from "./port";
 import { HttpError, type CommitProposal, type CommitRequest, type CommitResult, type WorkspaceFile, type WorkspaceFiles } from "./port";
-import { SseWorkspace } from "./sse_workspace";
+import { SseTerminal } from "./sse_terminal";
 import type { StoragePlan, StorageQuery, StorageState } from "./storage";
 import type { ExecutionGraphRead, TrajectoryRead, WireEvent } from "./wire";
 import { host } from "./host";
@@ -17,7 +17,7 @@ import { subscribeStream } from "./sse_subscribe";
 // a load. The read is one small JSON body and answers from memory.
 const UPDATE_POLL_MS = 500;
 
-export class SsePort extends SseWorkspace implements AgentPort {
+export class SsePort extends SseTerminal implements AgentPort {
   status() {
     return this.get<SessionStatus>("/status");
   }

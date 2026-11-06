@@ -24,6 +24,9 @@
 .compose .changedpill i[data-io="up"] { color: var(--add); }
 .compose .changedpill i[data-io="down"] { color: var(--del); }
 
+.compose > .composeaux { overflow-y: auto; overscroll-behavior: contain; }
+.compose > .composeaux > * { flex: none; min-height: auto; }
+.compose:not(:has(.composenotes > *)) > .composeaux { max-height: var(--aux-budget); }
 .compose > .composeaux:not(:empty) { margin: 6px 10px 0; }
 .compose > .composeaux:not(:empty) ~ .changedpill-row { margin-top: 4px; }
 .compose > .composeaux:has(> .rtbar[data-kind="connect"]) { margin: 0; }

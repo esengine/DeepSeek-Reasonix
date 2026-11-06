@@ -1,0 +1,28 @@
+import type { Messages } from "./types";
+
+export const TERMINAL: Messages = {
+  "terminal.clear": { zh: "清屏", en: "Clear" },
+  "terminal.close_a_running_one": { zh: "这个终端里还有命令在运行，关闭会结束它。", en: "A command is still running in this terminal; closing it ends the command." },
+  "terminal.close_and_end": { zh: "结束并关闭", en: "End and close" },
+  "terminal.copy_all": { zh: "复制全部", en: "Copy everything" },
+  "terminal.copy_link": { zh: "复制链接", en: "Copy link" },
+  "terminal.could_not_open": { zh: "没能打开终端：{why}", en: "Could not open a terminal: {why}" },
+  "terminal.default_shell_note": { zh: "只列这台电脑上找得到的；默认用上次选的", en: "Only what this computer has is listed; the one you chose last is the default" },
+  "terminal.exited": { zh: "进程已退出（代码 {code}）", en: "The process exited (code {code})" },
+  "terminal.font_larger": { zh: "放大字号", en: "Larger text" },
+  "terminal.font_reset": { zh: "恢复字号", en: "Default text size" },
+  "terminal.font_smaller": { zh: "缩小字号", en: "Smaller text" },
+  "terminal.launch_hint": { zh: "在这个项目的目录里打开你自己的终端", en: "Open your own terminal in this project's folder" },
+  "terminal.more": { zh: "更多：复制全部、字体大小", en: "More: copy everything, text size" },
+  "terminal.n": { zh: "终端 {n}", en: "Terminal {n}" },
+  "terminal.name": { zh: "终端", en: "Terminal" },
+  "terminal.not_the_models": { zh: "这是你自己的终端：以你的身份运行，不经过模型的权限和沙盒。模型看不到这里，除非你把内容发给它。", en: "This is your own terminal: it runs as you, outside the model's permissions and sandbox. The model cannot see it unless you send it something." },
+  "terminal.open": { zh: "打开终端", en: "Open the terminal" },
+  "terminal.open_in_browser": { zh: "在内置浏览器打开", en: "Open in the built-in browser" },
+  "terminal.pick_a_shell": { zh: "选择终端程序", en: "Choose a shell" },
+  "terminal.reconnect": { zh: "重新连接", en: "Reconnect" },
+  "terminal.restart": { zh: "重新启动", en: "Restart" },
+  "terminal.send_to_chat": { zh: "发给对话", en: "Send to chat" },
+  "terminal.shell_picker": { zh: "终端程序", en: "Shell" },
+  "terminal.the_terminal": { zh: "终端输出", en: "Terminal output" },
+};

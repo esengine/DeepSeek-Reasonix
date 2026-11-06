@@ -717,3 +717,19 @@ func OpenBindRefusal(cfg config.ServeConfig, addr string, allow bool) error {
 	}
 	return fmt.Errorf("auth none on %s would let anyone on the network read sessions and history; use --auth token or password, bind to 127.0.0.1, or pass --allow-open-network", addr)
 }
+
+// AuthToken returns the pre-shared token when in token mode, or "" otherwise.
+func (s *Server) AuthToken() string {
+	if s.auth == nil {
+		return ""
+	}
+	return s.auth.Token()
+}
+
+// AuthMode returns the authentication mode: "none", "token", or "password".
+func (s *Server) AuthMode() string {
+	if s.auth == nil {
+		return "none"
+	}
+	return s.auth.Mode()
+}

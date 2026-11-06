@@ -9,6 +9,7 @@ const KEYS: Array<[string, string]> = [
   [chord("1"), "session.show_conversation"],
   [chord("2"), "session.show_run_analysis"],
   [chord("3"), "session.show_workbench"],
+  [chord("`"), "terminal.open"],
   [`${chord("↑")} / ${chord("↓")}`, "settings.move_between_your_questions"],
   [chord("Shift+E"), "composer.refine_prompt"],
   [chord("Shift+F"), "settings.workbench_full_screen"],

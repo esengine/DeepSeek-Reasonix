@@ -24,6 +24,7 @@ import (
 	"reasonix/internal/contract/event"
 	"reasonix/internal/contract/provider"
 	"reasonix/internal/contract/surface"
+	"reasonix/internal/platform/terminal"
 	"reasonix/internal/runtime/delegation"
 	"reasonix/internal/session/control"
 	"reasonix/internal/state/sessionstore"
@@ -37,7 +38,8 @@ var logoWordmarkSVG []byte
 // Server wires a controller to its HTTP surface. The controller's events must
 // reach the Broadcaster — directly, or through the host's SetPaneSink wrapper.
 type Server struct {
-	mu sync.RWMutex // guards ctrl and paneSink, which rebuild paths swap and read
+	terminals *terminal.Manager // the shells this pane opened for the person
+	mu        sync.RWMutex      // guards ctrl and paneSink, which rebuild paths swap and read
 	// bindMu serializes every entry point that changes the active session
 	// path or controller generation — /resume, /new, /fork, switchModel, and
 	// extension reload. net/http runs handlers
@@ -103,12 +105,13 @@ func New(ctrl control.SessionAPI, bc *Broadcaster, serveCfg config.ServeConfig) 
 		bc = NewBroadcaster()
 	}
 	s := &Server{
-		ctrl:   ctrl,
-		bc:     bc,
-		titles: newTitleCache(ctrl.SessionDir()),
-		wire:   &wireLog{},
-		fill:   newTitleFiller(),
-		auth:   newAuthGate(serveCfg),
+		ctrl:      ctrl,
+		bc:        bc,
+		titles:    newTitleCache(ctrl.SessionDir()),
+		wire:      &wireLog{},
+		terminals: terminal.NewManager(),
+		fill:      newTitleFiller(),
+		auth:      newAuthGate(serveCfg),
 	}
 	if cfg, err := config.Load(); err == nil {
 		bc.SetDisplayCurrency(cfg.ExplicitDisplayCurrency())
@@ -141,22 +144,6 @@ func (s *Server) ctl() control.SessionAPI {
 // between the lease rebind and the controller Resume. Tests use it to force
 // the interleaving bindMu exists to prevent; production never sets it.
 var resumeBindHookForTest func()
-
-// AuthToken returns the pre-shared token when in token mode, or "" otherwise.
-func (s *Server) AuthToken() string {
-	if s.auth == nil {
-		return ""
-	}
-	return s.auth.Token()
-}
-
-// AuthMode returns the authentication mode: "none", "token", or "password".
-func (s *Server) AuthMode() string {
-	if s.auth == nil {
-		return "none"
-	}
-	return s.auth.Mode()
-}
 
 // switchModel rebuilds the controller with a new model, carrying over the
 // conversation history. This replicates the TUI/desktop model-switch path.

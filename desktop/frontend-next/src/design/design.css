@@ -12,6 +12,7 @@
 @import "./subagent.css" layer(design);
 @import "./jobs.css" layer(design);
 @import "./workbench.css" layer(design);
+@import "./terminal.css" layer(design);
 @import "./palette.css" layer(design);
 @import "./rail.css" layer(design);
 @import "./feedback.css" layer(design);

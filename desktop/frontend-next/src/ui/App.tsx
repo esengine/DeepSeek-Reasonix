@@ -130,6 +130,7 @@ export function App({ hub }: { hub: HubPort }) {
   const [dockLimit, setDockLimit] = useState(() => dockMax(document.body.clientWidth));
   const [report, setReport] = useState<PaneReport>(NO_REPORT);
   const [filesRequests, setFilesRequests] = useState<Record<string, number>>({});
+  const [terminalRequests, setTerminalRequests] = useState<Record<string, number>>({});
   const [viewRequests, setViewRequests] = useState<Record<string, { to: PaneView; n: number }>>({});
   const [sessionRefs, referenceSession] = usePaneSessionRefs(active, (id) => panePorts.has(id));
   const [error, setError] = useState("");
@@ -359,6 +360,12 @@ export function App({ hub }: { hub: HubPort }) {
     setFilesRequests((requests) => ({ ...requests, [active]: (requests[active] ?? 0) + 1 }));
   }, [active, panePorts, hidePrefs]);
 
+  const openTerminal = useCallback(() => {
+    if (!panePorts.has(active)) return;
+    hidePrefs();
+    setTerminalRequests((requests) => ({ ...requests, [active]: (requests[active] ?? 0) + 1 }));
+  }, [active, panePorts, hidePrefs]);
+
   const showView = useCallback((to: PaneView) => {
     if (!panePorts.has(active)) return;
     hidePrefs();
@@ -416,9 +423,10 @@ export function App({ hub }: { hub: HubPort }) {
       { chord: "1", fields: true, action: "pane.view", run: () => showView("flow") },
       { chord: "2", fields: true, action: "pane.view", run: () => showView("analysis") },
       { chord: "3", fields: true, action: "pane.view", run: () => showView("browser") },
+      { chord: "`", fields: true, action: "workbench.launch-terminal", run: openTerminal },
       ...zoomKeys,
     ],
-    [showPrefs, find.open, showView, zoomKeys],
+    [showPrefs, find.open, showView, openTerminal, zoomKeys],
   );
   const closeBrowser = useCallback(() => setBrowser(false), []);
   const stopTurn = useCallback(() => activePort?.cancel(), [activePort]);
@@ -688,6 +696,7 @@ export function App({ hub }: { hub: HubPort }) {
                   findPulse={find.pulse}
                   findTogglePulse={find.togglePulse}
                   filesPulse={filesRequests[rt.id] ?? 0}
+                  terminalPulse={terminalRequests[rt.id] ?? 0}
                   viewRequest={viewRequests[rt.id]}
                   sessionRef={sessionRefs[rt.id]}
                   alert={rt.id === active ? bar : undefined}

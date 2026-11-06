@@ -29,6 +29,7 @@ export function useTabClose({ port, surfaces, selected, showFiles, setBrowsers, 
       for (const surface of targets) {
         try {
           if (surface.kind === "browser") await port.browserClose(surface.tab.id);
+          else if (surface.kind === "terminal") await port.closeTerminal(surface.id);
           closed.add(keyOf(surface));
         } catch (e) {
           failures.push(t("workbench.could_not_close_name_why", { name: labelOf(surface, {}), why: reason(e) }));

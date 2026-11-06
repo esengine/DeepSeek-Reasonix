@@ -23,7 +23,7 @@ func (s *Server) routes() http.Handler {
 	s.registerHistoryRoutes(mux)
 	mux.HandleFunc("GET /context", s.context)
 	mux.HandleFunc("GET /adjudications", s.adjudications)
-	s.registerBrowserRoutes(mux)
+	s.registerWorkbenchRoutes(mux)
 	s.registerExecutionGraphRoutes(mux)
 	mux.HandleFunc("POST /context/window", s.setContextWindow)
 	mux.HandleFunc("POST /submit", s.submit)

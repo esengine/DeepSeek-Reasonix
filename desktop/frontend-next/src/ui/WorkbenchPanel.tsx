@@ -19,7 +19,11 @@ import { leave, slideAway, useEnteringTabs, useOpenSlide, useOverflowTabs, useSw
 import { WorkbenchTabOverflow } from "./WorkbenchTabOverflow";
 import { WorkbenchCloseAsk } from "./WorkbenchCloseAsk";
 import { WorkbenchState } from "./WorkbenchState";
-import { AgentBrowserPanel, ManualBrowserPanel, UNREAD_TABS } from "./BrowserPanel";
+import { AgentBrowserPanel, UNREAD_TABS } from "./BrowserPanel";
+import { ManualBrowsers } from "./ManualBrowsers";
+import { WorkbenchTabIcon } from "./WorkbenchTabIcon";
+import { WorkbenchTerminals } from "./WorkbenchTerminals";
+import { useTerminalTabs } from "./useTerminalTabs";
 import { useOnBump } from "./useOnBump";
 import { StudioIcon } from "./StudioIcon";
 import { LazyMarkdown } from "./LazyMarkdown";
@@ -53,9 +57,7 @@ const CodeEditor = lazy(() => import("./CodeEditor"));
 import { treeRows } from "./workbench_tree";
 import { AgentRunView } from "./AgentRunView";
 import { JobRunView } from "./JobRunView";
-import { AgentAvatar } from "./cards/SubagentGroup";
 import { useAgentTabs, type AgentRequest } from "./useAgentTabs";
-import { fileKind, langOf } from "./fileKind";
 import { readRecentFiles, rememberFile } from "./recentFiles";
 
 export function WorkbenchPanel({
@@ -86,8 +88,11 @@ export function WorkbenchPanel({
   fileRequest,
   agentRequest,
   onShowCall,
+  terminalRequest = 0,
 }: {
   onShowCall?: (callId: string) => void;
+  // Counts the presses that ask for a terminal.
+  terminalRequest?: number;
   port: AgentPort;
   tabs: BrowserTab[];
   manual: boolean;
@@ -176,6 +181,7 @@ export function WorkbenchPanel({
   const [mode, setMode] = useState<FileMode>("file");
   const { renaming, setRenaming, labelFor, nameTab } = useTabNames((surface) => labelOf(surface, hosts));
   const [failed, setFailed] = useState("");
+  const terminals = useTerminalTabs({ port, shown, pick, setDismissed, onExternal, onError: setFailed, request: terminalRequest });
   // Showing a file where it lives needs a shell on the kernel's own machine.
   const revealable = !remote && port.revealsFiles();
   const [platform, setPlatform] = useState("");
@@ -312,8 +318,9 @@ export function WorkbenchPanel({
         ...tabs.map((tab) => ({ kind: "browser", tab }) as const),
         ...openFiles.map((path) => ({ kind: "file", path }) as const),
         ...agents,
+        ...terminals.tabs,
       ].filter((s) => !dismissed.has(keyOf(s))),
-    [changesOpen, browsers, tabs, openFiles, agents, dismissed],
+    [changesOpen, browsers, tabs, openFiles, agents, terminals.tabs, dismissed],
   );
   const active =
     surfaces.find((s) => keyOf(s) === selected) ??
@@ -450,7 +457,7 @@ export function WorkbenchPanel({
     }
   };
   const { close: closeTabs, closing, closeFailure } = useTabClose({ port, surfaces, selected, showFiles: showFiles || launcher, fromExplorer, setBrowsers, setOpenFiles, setAgents, setDismissed, setSelected, setShowFiles, setLauncher, onCloseManual, onCloseSelected: () => setFailed("") });
-  const close = (targets: Surface[]) => { supersede(); return closeTabs(targets); };
+  const close = (targets: Surface[]) => { supersede(); return terminals.guard(targets, closeTabs); };
   const dismissTabMenu = useCallback(() => setTabMenu(null), []);
   const [tabMenu, setTabMenu] = useState<{ surface: Surface; x: number; y: number; anchor: HTMLElement } | null>(null);
   const pages = surfaces.filter((s) => s.kind !== "file");
@@ -550,8 +557,9 @@ export function WorkbenchPanel({
                 else if (e.key === "F2" && surface.kind === "browser") { e.preventDefault(); setRenaming(keyOf(surface)); }
               }}
             >
-              {surface.kind === "agent" ? <AgentAvatar name={surface.name} /> : <StudioIcon name={surface.kind === "file" ? "file" : surface.kind === "job" ? "play" : surface.kind === "changes" ? "branch" : "globe"} data-kind={surface.kind === "file" ? fileKind(surface.path) || undefined : undefined} data-lang={surface.kind === "file" ? langOf(surface.path) : undefined} />}
+              <WorkbenchTabIcon surface={surface} />
               <span>{labelFor(surface)}</span>
+              {surface.kind === "terminal" && surface.busy && <i className="workbench-tab-busy" aria-hidden />}
               {surface.kind === "changes" && changes.length > 0 && <small className="workbench-tab-count">{changes.length}</small>}
             </button>
             )}
@@ -612,21 +620,14 @@ export function WorkbenchPanel({
               changes={changes.length}
               onFiles={chooseFiles}
               onFind={() => { chooseFiles(); requestAnimationFrame(() => document.querySelector<HTMLInputElement>(".workbench-search input")?.focus()); }}
-              onBrowser={() => void addBrowser()}
+              onBrowser={() => void addBrowser()} onTerminal={() => void terminals.open()}
               recent={recentFiles} onOpenFile={openFile}
             />
           )}
           <div className="workbench-content" ref={canvas} hidden={launcher || !active} data-action-contextmenu="workbench.quote-selection" {...textMenu.readerProps}>
-          {browsers.map((id) => (
-            <ManualBrowserPanel
-              key={id}
-              id={id}
-              hidden={!(active?.kind === "manual" && active.id === id)}
-              onAddress={noteHost}
-              onExternal={onExternal}
-              scheme={scheme}
-            />
-          ))}
+          <ManualBrowsers ids={browsers} active={active?.kind === "manual" ? active.id : ""} onAddress={noteHost} onExternal={onExternal} scheme={scheme} />
+          <WorkbenchTerminals port={port} hook={terminals} active={active?.kind === "terminal" ? active.id : ""} shown={shown && !launcher && !showFiles}
+            scheme={scheme} onQuote={onQuoteSelection} onClose={(targets) => void close(targets)} />
           {active?.kind === "browser" && (
             <AgentBrowserPanel
               tabs={[active.tab]}

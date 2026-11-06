@@ -56,6 +56,7 @@ export interface PaneProps {
   findPulse: number;
   findTogglePulse?: number;
   filesPulse?: number;
+  terminalPulse?: number;
   viewRequest?: { to: PaneView; n: number };
   sessionRef?: { n: number; id: string; title: string };
   onSettings: (section?: string) => void;

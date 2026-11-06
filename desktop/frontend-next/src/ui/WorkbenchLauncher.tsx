@@ -2,7 +2,7 @@ import { t } from "../i18n";
 import { StudioIcon } from "./StudioIcon";
 
 /** A new tab: the three things the workbench opens, then what was opened lately. */
-export function WorkbenchLauncher({ changes, focus = false, onFiles, onFind, onBrowser, recent = [], onOpenFile }: { changes: number; focus?: boolean; onFiles: () => void; onFind: () => void; onBrowser: () => void; recent?: string[]; onOpenFile?: (path: string) => void }) {
+export function WorkbenchLauncher({ changes, focus = false, onFiles, onFind, onBrowser, onTerminal, recent = [], onOpenFile }: { changes: number; focus?: boolean; onFiles: () => void; onFind: () => void; onBrowser: () => void; onTerminal?: () => void; recent?: string[]; onOpenFile?: (path: string) => void }) {
   return (
     <div className="workbench-launcher" role="group" aria-label={t("common.start")}>
       <p className="workbench-launcher-title">{t("workbench.open_in_the_workbench")}</p>
@@ -18,6 +18,12 @@ export function WorkbenchLauncher({ changes, focus = false, onFiles, onFind, onB
         <StudioIcon name="globe" />
         <span><b>{t("workbench.browser")}</b><i>{t("workbench.view_web_pages_beside_the")}</i></span>
       </button>
+      {onTerminal && (
+        <button aria-label={t("terminal.name")} data-action="workbench.launch-terminal" onClick={onTerminal}>
+          <StudioIcon name="terminal" />
+          <span><b>{t("terminal.name")}</b><i>{t("terminal.launch_hint")}</i></span>
+        </button>
+      )}
       {recent.length > 0 && onOpenFile && (
         <div className="workbench-launcher-recent" role="group" aria-label={t("workbench.recently_opened")}>
           <p>{t("workbench.recently_opened")}</p>
