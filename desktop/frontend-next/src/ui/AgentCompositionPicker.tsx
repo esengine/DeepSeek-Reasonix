@@ -43,42 +43,43 @@ export function AgentCompositionPicker({ port, binding, locked: statusLocked, ru
     return () => { active = false; };
   }, [enabled, port, running, binding?.digest, binding?.started]);
   if (!enabled) return null;
-  if (unavailable) return <button className="mode composition-trigger" onClick={onSettings}
+  if (unavailable) return <button className="mode composition-trigger unavailable" onClick={onSettings}
     data-action="agent-composition.unavailable">{t("persona.agent_presets_unavailable")}</button>;
   if (!catalog) return null;
   const selected = catalog.presets.find((v) => v.definition.id === (current?.id ?? "builtin:general"))?.definition;
   const locked = running || statusLocked || !!current?.started;
+  const currentId = current?.id ?? "builtin:general";
   const label = current ? compositionName(current.id, current.name) : t(selected?.name ?? "persona.everyday_partner");
   const items: MenuItem[] = locked && !createNew ? [] : catalog.presets.map(({ definition }) => ({
     value: definition.id,
     label: compositionName(definition.id, definition.name),
     meta: compositionSource(definition.id),
     desc: definition.id.startsWith("builtin:") ? t(definition.description) : definition.description,
-    right: locked ? t("common.start_a_new_session") : undefined,
+    right: locked ? t(definition.id === currentId ? "common.now" : "common.start_a_new_session") : undefined,
     disabled: busy,
   }));
   items.push({ value: MANAGE, label: `${t("persona.manage_agent_presets")}…`, plain: true, divide: true });
   const choose = (id: string) => {
     if (id === MANAGE) { onSettings(); return; }
     if (busy) return;
-    if (locked) { createNew?.(id); return; }
+    if (locked) { if (id !== currentId) createNew?.(id); return; }
     setBusy(true);
     port.selectAgentComposition(id).then((binding) => { setCurrent(binding); onChanged(); })
       .catch((e) => onError(reason(e))).finally(() => setBusy(false));
   };
   return <span className="composition-picker">
     <Picker
-      className="mode composition-trigger"
+      className={locked ? "mode composition-trigger locked" : "mode composition-trigger"}
       menuClassName="composer-menu composition-menu"
       ariaLabel={`${t("persona.agent_composition")}：${label}${current ? ` · ${compositionSource(current.id)}` : ""}${locked ? ` · ${t("persona.locked")}` : ""}`}
       data-action={(id) => id === MANAGE ? "agent-composition.manage" : locked ? "agent-composition.new" : "agent-composition.select"}
       title={locked ? t("persona.this_conversation_has_started_and") : selected?.description ? (selected.id.startsWith("builtin:") ? t(selected.description) : selected.description) : t("persona.choose_an_agent_composition_before")}
       pending={busy}
-      label={<><span className="nm">{label}</span><StudioIcon name="down" /></>}
+      label={<>{locked && <StudioIcon name="lock" />}<span className="nm">{label}</span>{!locked && <StudioIcon name="down" />}</>}
       menuTitle={<><b>{t("persona.agent_presets")}</b><small>{t(locked ? "persona.locked" : "persona.switch_before_the_first_message")}</small></>}
       head={<>{locked && <p className="composition-menu-note">{t("persona.this_conversation_has_started_and")}</p>}{current && current.resourceMode !== "live" && <p className="composition-menu-note">{t("persona.resources_fixed_to_a_saved")}</p>}</>}
       items={items}
-      current={locked ? undefined : current?.id ?? "builtin:general"}
+      current={currentId}
       onPick={choose}
       place="bottom"
     />

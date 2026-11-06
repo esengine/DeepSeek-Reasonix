@@ -48,7 +48,6 @@ var sessionCarryOver = map[string]bool{
 
 // windowReset and windowCarryOver are the same two lists for windowState.
 var windowReset = map[string]bool{
-	"summaryPrefix":   true,
 	"compactionMu":    true,
 	"compactionState": true,
 	"cacheState":      true,

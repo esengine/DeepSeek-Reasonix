@@ -34,30 +34,12 @@ const (
 )
 
 var (
-	errSummaryInputTooLarge   = errors.New("summary input exceeds the single-request budget")
-	errSummaryTimeout         = errors.New("summarizer stalled: no output within its idle bound")
-	errSummaryCeiling         = errors.New("summarizer exceeded its overall time ceiling")
-	errSummaryRequestFailed   = errors.New("summarizer request failed")
 	errCompactionHookRefused  = errors.New("compaction extension refused the fold")
 	errProjectionNotPersisted = errors.New("projection could not be persisted")
 )
 
 func compactionHookRefusal(err error) error {
 	return fmt.Errorf("%w: %w", errCompactionHookRefused, err)
-}
-
-// classifySummaryError names a summarizer failure where it is known: the
-// deadline is the summarizer's own only when the caller's context is still live.
-func classifySummaryError(parent context.Context, err error) error {
-	switch {
-	case err == nil, errors.Is(err, context.Canceled), parent.Err() != nil,
-		errors.Is(err, errSummaryOutputTruncated), errors.Is(err, errSummaryInputTooLarge), errors.Is(err, errSummaryNotDigest),
-		errors.Is(err, errSummaryTimeout), errors.Is(err, errSummaryCeiling):
-		return err
-	case errors.Is(err, context.DeadlineExceeded):
-		return fmt.Errorf("%w: %w", errSummaryTimeout, err)
-	}
-	return fmt.Errorf("%w: %w", errSummaryRequestFailed, err)
 }
 
 // compactionFailureCode classifies a fold error by identity. A rejection
@@ -72,20 +54,8 @@ func compactionFailureCode(err error) CompactionNoopReason {
 	switch {
 	case errors.As(err, &rejected):
 		return rejected.code
-	case errors.Is(err, errSummaryOutputTruncated):
-		return FailSummaryTruncated
-	case errors.Is(err, errSummaryNotDigest):
-		return FailSummaryNotDigest
 	case errors.Is(err, errCompressStaleContext):
 		return FailContextChanged
-	case errors.Is(err, errSummaryInputTooLarge):
-		return FailSummaryInputTooLarge
-	case errors.Is(err, errSummaryTimeout):
-		return FailSummaryTimeout
-	case errors.Is(err, errSummaryCeiling):
-		return FailSummaryCeiling
-	case errors.Is(err, errSummaryRequestFailed):
-		return FailSummaryFailed
 	case errors.Is(err, errCompactionHookRefused):
 		return FailHookRefused
 	case errors.Is(err, errProjectionNotPersisted):

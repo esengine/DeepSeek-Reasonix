@@ -2,7 +2,6 @@ package boot
 
 import (
 	"context"
-	"errors"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -12,12 +11,11 @@ import (
 	"reasonix/internal/session/control"
 )
 
-// TestEffectSkippedAskEndsTheTurnFlaggedCancelled pins the identity frontends
-// read at the sink when the user answers a question with no selection: the turn
-// ends flagged Cancelled, and its Err is the context.Canceled sentinel, not a
-// failure. A frontend that drew Err as an error card showed the user's own
-// choice as "context canceled".
-func TestEffectSkippedAskEndsTheTurnFlaggedCancelled(t *testing.T) {
+// TestEffectSkippedAskEndsTheTurnAsFinished pins the identity frontends read
+// at the sink when the user answers a question with no selection: the turn ends
+// as finished, with no error and no cancellation flag. A frontend that drew a
+// cancelled turn as interrupted showed the user's own choice as a failure.
+func TestEffectSkippedAskEndsTheTurnAsFinished(t *testing.T) {
 	root := observeProject(t)
 	prov := testutil.NewMock("m",
 		call("a1", "ask", `{"questions":[{"header":"Lib","question":"Which one?","options":[{"label":"A"},{"label":"B"}]}]}`),
@@ -52,10 +50,7 @@ func TestEffectSkippedAskEndsTheTurnFlaggedCancelled(t *testing.T) {
 	case <-time.After(30 * time.Second):
 		t.Fatal("the turn never ended after the question was skipped")
 	}
-	if !done.Cancelled {
-		t.Fatalf("TurnDone must be flagged Cancelled so frontends do not draw %v as a failure", done.Err)
-	}
-	if !errors.Is(done.Err, context.Canceled) {
-		t.Fatalf("TurnDone.Err must wrap context.Canceled, got %v", done.Err)
+	if done.Cancelled || done.Err != nil {
+		t.Fatalf("a skipped question must end the turn as finished, got cancelled=%v err=%v", done.Cancelled, done.Err)
 	}
 }

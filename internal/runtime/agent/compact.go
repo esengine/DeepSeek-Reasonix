@@ -9,10 +9,8 @@ import (
 	"reasonix/internal/state/sessionstore"
 	"slices"
 	"strings"
-	"time"
 
 	"reasonix/internal/contract/ablation"
-	"reasonix/internal/contract/event"
 	"reasonix/internal/contract/provider"
 	"reasonix/internal/contract/tool"
 )
@@ -43,7 +41,6 @@ const (
 
 var (
 	errSummaryOutputTruncated = errors.New("summarizer output truncated")
-	errNoOutputHeadroom       = errors.New("no output budget above the previous attempt")
 	errCheckpointRejected     = errors.New("checkpoint candidate rejected")
 )
 
@@ -53,35 +50,6 @@ const (
 	SummaryTagOpen  = "<compaction-summary>"
 	SummaryTagClose = "</compaction-summary>"
 )
-
-// summarySystemPrompt asks for a structured resume briefing (facts, goal,
-// decisions, files, commands, errors, next step) under fixed headings.
-const summarySystemPrompt = `You are compacting the earlier part of a coding agent's conversation to save context.
-The agent keeps your summary alongside the user's own turns (kept verbatim) and the recent tail; your job is to fold the assistant/tool work into a briefing it can resume from.
-Write under these exact headings, omitting a heading only if it has no content:
-
-## Standing facts & constraints
-Everything the user stated that still governs the work — names, paths, IDs, versions, tokens, preferences, and hard "never do X" rules — in their own words. Be exhaustive; this is the durable contract, so prefer over- to under-including.
-
-## Goal
-The user's request and intent.
-
-## Decisions & rationale
-Key choices made so far and why — so they are not re-litigated or reversed.
-
-## Files & code
-Files read or modified, with the specific facts that matter: signatures, line locations, data shapes, and exact edits applied. Be concrete; this is what lets the agent act without re-reading everything.
-
-## Commands & outcomes
-Commands run (builds, tests, git) and their relevant results — what passed, what failed, and the error text that matters.
-
-## Errors & fixes
-Problems hit and how they were resolved (or not), so the same dead ends are not repeated.
-
-## Pending & next step
-What is still in progress or unstarted, and the single most concrete next action to take.
-
-Rules: be terse — bullet points and fragments, not prose. Preserve identifiers, paths, and numbers exactly. Do NOT invent anything not present in the messages; if something is unknown, leave it out rather than guessing.`
 
 // compactTrigger is the sole automatic context-maintenance boundary. Output
 // budgets are intentionally absent: they are clipped against the final request
@@ -586,110 +554,6 @@ func msgChars(m provider.Message) int {
 	return n
 }
 
-func charsOfMessages(msgs []provider.Message) int {
-	n := 0
-	for _, m := range msgs {
-		n += msgChars(m)
-	}
-	return n
-}
-
-// summarize asks the executor's own provider (no tools) to distill the region
-// into a briefing. instructions is optional /compact focus + PreCompact text.
-func (a *contextWindow) summarize(ctx context.Context, region []provider.Message, instructions string) (string, *provider.Usage, error) {
-	return a.summarizeAt(ctx, region, instructions, summaryOutputMaxTokens, 0)
-}
-
-// summarizeAt sends one summary request whose output cap is at most limit. A
-// cap that cannot exceed above is refused with errNoOutputHeadroom before any
-// request is made. Named returns so defer can attach RequestCount.
-func (a *contextWindow) summarizeAt(ctx context.Context, region []provider.Message, instructions string, limit, above int) (summary string, usage *provider.Usage, err error) {
-	return a.summarizeAtMode(ctx, region, instructions, limit, above, true)
-}
-
-func (a *contextWindow) summarizeAtMode(ctx context.Context, region []provider.Message, instructions string, limit, above int, allowPrefix bool) (summary string, usage *provider.Usage, err error) {
-	parent := ctx
-	bounds := SummaryBounds
-	ctx, cancel := context.WithTimeoutCause(ctx, bounds.Ceiling, errSummaryCeiling)
-	defer cancel()
-	ctx = provider.WithIndependentRequestAttemptCounter(ctx)
-	defer func() {
-		if err != nil && parent.Err() == nil && errors.Is(context.Cause(ctx), errSummaryCeiling) {
-			err = summaryCeilingHit(bounds.Ceiling)
-		}
-		err = classifySummaryError(parent, err)
-	}()
-	defer func() {
-		usage = provider.UsageWithRequestAttemptCount(ctx, usage)
-		observeRootTokenUsage(ctx, usage)
-		if usage != nil && (usage.TotalTokens > 0 || usage.RequestCount > 0) {
-			// Recorded beside the emit, not at the call site that keeps the
-			// answer: a repair whose digest is discarded was still charged.
-			compactionSpendFrom(ctx).record(usage)
-			a.svc.sink.Emit(event.Event{Kind: event.Usage, ModelRef: a.modelRef, Usage: usage, Pricing: a.svc.pricing, UsageSource: event.UsageSourceCompaction})
-		}
-	}()
-	defer TrackPublishedHostStream(ctx, cancel)()
-	maxOut := limit
-	if a.maxOutputTokens > 0 && a.maxOutputTokens < maxOut {
-		maxOut = a.maxOutputTokens
-	}
-	req, reused := a.summaryRequest(region, instructions, maxOut, allowPrefix)
-	if budget, clipped, budgetErr := a.effectiveOutputBudget(req); budgetErr != nil {
-		return "", usage, budgetErr
-	} else if clipped {
-		req.MaxTokens = budget
-	}
-	if req.MaxTokens > limit {
-		req.MaxTokens = limit
-	}
-	if req.MaxTokens <= above {
-		return "", usage, errNoOutputHeadroom
-	}
-	if req.MaxTokens < 256 {
-		return "", usage, fmt.Errorf("summary output budget too small (%d tokens)", req.MaxTokens)
-	}
-	if a.svc.prov == nil {
-		return "", usage, fmt.Errorf("summary unavailable")
-	}
-	ch, err := a.svc.prov.Stream(ctx, req)
-	if err != nil {
-		return "", usage, err
-	}
-
-	var b strings.Builder
-	idle := time.NewTimer(bounds.Idle)
-	defer idle.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return "", usage, ctx.Err()
-		case <-idle.C:
-			return "", usage, summaryStalled(bounds.Idle)
-		case chunk, ok := <-ch:
-			idle.Reset(bounds.Idle)
-			if !ok {
-				s, err := summaryAtEOF(ctx, b.String(), usage, req.MaxTokens, reused)
-				return s, usage, err
-			}
-			switch chunk.Type {
-			case provider.ChunkText:
-				b.WriteString(chunk.Text)
-				// The digest is already streaming; forwarding it is what lets a
-				// frontend show a fold working rather than a spinner that cannot
-				// tell slow from stuck. Coalesced downstream like any delta.
-				if chunk.Text != "" {
-					a.svc.sink.Emit(event.Event{Kind: event.CompactionProgress, Text: chunk.Text})
-				}
-			case provider.ChunkUsage:
-				usage = chunk.Usage
-			case provider.ChunkError:
-				return "", usage, chunk.Err
-			}
-		}
-	}
-}
-
 // renderTranscript flattens messages into a readable transcript for summarization.
 // renderTranscript is summarizer input: tool-call arguments are summarized so
 // a digest cannot reproduce a long one (#4317).
@@ -764,4 +628,12 @@ func summarizeToolArgs(args string) string {
 	}
 	keys := slices.Sorted(maps.Keys(parsed))
 	return fmt.Sprintf("{%s} (%d keys)", strings.Join(keys, ", "), len(parsed))
+}
+
+func charsOfMessages(msgs []provider.Message) int {
+	n := 0
+	for _, m := range msgs {
+		n += msgChars(m)
+	}
+	return n
 }

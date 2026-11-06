@@ -1711,43 +1711,6 @@
   .reask-ft .dismiss:hover { color: var(--muted) }
   .reask-ft .hint { margin-left: auto; font: var(--w-reg) var(--fs-micro) var(--ui); color: var(--ghost) }
 
-  .findhost { position: relative; height: 0; z-index: 6 }
-  .tfind {
-    position: absolute; top: 10px; right: calc(var(--srail-w) + 12px);
-    display: flex; align-items: center; gap: 6px; padding: 6px 7px 6px 9px;
-    border: 1px solid var(--border); border-radius: var(--r-md);
-    background: var(--float); box-shadow: var(--shadow-float);
-  }
-  .tfind:focus-within { border-color: var(--focus) }
-  .tfind svg { width: 13px; height: 13px; flex: none; fill: none; stroke: var(--ghost); stroke-width: 1.5; stroke-linecap: round }
-  .tfind input::-webkit-search-cancel-button,
-  .tfind input::-webkit-search-decoration { -webkit-appearance: none; appearance: none }
-  .tfind input {
-    flex: none; width: 190px; min-width: 0; border: 0; background: none; outline: 0; color: var(--text);
-    font: var(--w-reg) var(--fs-ui) var(--ui);
-  }
-  .tfind input::placeholder { color: var(--ghost) }
-  .tfind .n {
-    flex: none; min-width: 52px; text-align: right; font: var(--w-reg) var(--fs-micro) var(--mono);
-    color: var(--faint); font-variant-numeric: tabular-nums;
-  }
-  .tfind .n[data-empty] { color: var(--muted) }
-  .tfind .st {
-    flex: none; display: grid; place-items: center; width: 22px; height: 22px; padding: 0;
-    border: 0; border-radius: var(--r-xs); background: none; cursor: pointer; color: var(--faint);
-  }
-  .tfind .st svg { stroke: currentColor }
-  .tfind .st:hover:not(:disabled) { background: var(--float-hi); color: var(--text) }
-  .tfind .st:disabled { opacity: .4; cursor: default }
-  .tfind .clr {
-    flex: none; border: 0; background: none; cursor: pointer; color: var(--ghost);
-    font-size: var(--fs-ui); line-height: 1; padding: 0 3px;
-  }
-  .tfind .clr:hover { color: var(--text) }
-  @container conversation (max-width: 460px) {
-    .tfind { right: 12px; left: 12px }
-    .tfind input { flex: 1; width: 0 }
-  }
 
   ::highlight(rx-find) { background-color: color-mix(in srgb, var(--warn) 26%, transparent); color: var(--text) }
   ::highlight(rx-find-now) { background-color: var(--accent); color: var(--accent-fg) }

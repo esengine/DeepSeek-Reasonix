@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"reasonix/internal/state/sessionstore"
 	"strings"
 	"testing"
@@ -82,77 +81,6 @@ func TestSessionSwapKeepsPromptCalibration(t *testing.T) {
 	}
 	if after > 40_000 {
 		t.Fatalf("estimate = %d, want the calibrated ~36000 rather than a cold fallback", after)
-	}
-}
-
-func TestSharedWindowFoldUsesGuardedInputBudget(t *testing.T) {
-	prov := &sharedWindowTestProvider{budget: 128 * 1024, shared: true}
-	a := &Agent{agentConfig: agentConfig{contextWindow: 100_000}, svc: agentServices{prov: prov, sink: event.Discard}, sess: sessionRuntime{output: outputBudgetState{outputBudget: prov.budget}}}
-	// Oversized tool bodies are deterministically shortened for the single
-	// summarizer request (no multi-span). The guard must still fit one call.
-	toolBody := strings.Repeat("file line content here. ", 20_000) // ~480K chars
-	fold := []provider.Message{
-		{Role: provider.RoleUser, Content: "read large files"},
-		{Role: provider.RoleAssistant, ToolCalls: []provider.ToolCall{{ID: "1", Name: "read_file", Arguments: "{}"}}},
-		{Role: provider.RoleTool, ToolCallID: "1", Name: "read_file", Content: toolBody},
-		{Role: provider.RoleAssistant, ToolCalls: []provider.ToolCall{{ID: "2", Name: "read_file", Arguments: "{}"}}},
-		{Role: provider.RoleTool, ToolCallID: "2", Name: "read_file", Content: toolBody},
-	}
-
-	if _, err := a.window().foldToSummary(context.Background(), fold, ""); err != nil {
-		t.Fatalf("foldToSummary: %v", err)
-	}
-	if prov.calls == 0 || len(prov.last.Messages) < 2 {
-		t.Fatalf("guarded fold produced no summarizer request: calls=%d request=%+v", prov.calls, prov.last)
-	}
-	got := prov.last.Messages[1].Content
-	if len(got) >= len(renderTranscript(fold)) {
-		t.Fatalf("oversized tool fold was not shortened before summarize: len=%d original=%d", len(got), len(renderTranscript(fold)))
-	}
-	// Snip / omit markers prove the temporary request was bounded for the guard.
-	if !strings.Contains(got, "omitted") && !strings.Contains(got, "retained") && !strings.Contains(got, "snip") {
-		t.Fatalf("shortened fold missing a truncation marker:\n%.200q", got)
-	}
-	if got := prov.last.MaxTokens; got < summaryOutputReserve {
-		t.Fatalf("summarizer MaxTokens = %d, below summaryOutputReserve %d", got, summaryOutputReserve)
-	}
-}
-
-// The omit stage measures the fold against a budget expressed in real tokens,
-// so what the summarizer can read is what it receives. Sizing it in characters
-// instead cut an English fold to roughly a quarter of what fit.
-func TestFoldOmitKeepsWhatTheBudgetCanHold(t *testing.T) {
-	prov := &sharedWindowTestProvider{budget: 128 * 1024, shared: true}
-	a := &Agent{agentConfig: agentConfig{contextWindow: 100_000}, svc: agentServices{prov: prov, sink: event.Discard}, sess: sessionRuntime{output: outputBudgetState{outputBudget: prov.budget}}}
-	fold := make([]provider.Message, 32)
-	for i := range fold {
-		fold[i] = provider.Message{Role: provider.RoleUser,
-			Content: fmt.Sprintf("turn %02d: ", i) + strings.Repeat("a plain english sentence about the work. ", 256)}
-	}
-	// ~320K characters is ~80K tokens: over the budget, but only just.
-	if _, err := a.window().foldToSummary(context.Background(), fold, ""); err != nil {
-		t.Fatalf("foldToSummary: %v", err)
-	}
-	if prov.calls == 0 || len(prov.last.Messages) < 2 {
-		t.Fatalf("fold produced no summarizer request: calls=%d", prov.calls)
-	}
-	if kept := strings.Count(prov.last.Messages[1].Content, "turn "); kept < 28 {
-		t.Fatalf("summarizer saw %d of %d turns; the budget could hold nearly all of them", kept, len(fold))
-	}
-}
-
-// A single unshortenable fold that still exceeds the single-request budget after
-// all deterministic shorteners must fail once (no multi-span split).
-func TestSharedWindowFoldRejectsUnshortenableOverBudgetInput(t *testing.T) {
-	prov := &sharedWindowTestProvider{budget: 128 * 1024, shared: true}
-	a := &Agent{agentConfig: agentConfig{contextWindow: 100_000}, svc: agentServices{prov: prov, sink: event.Discard}, sess: sessionRuntime{output: outputBudgetState{outputBudget: prov.budget}}}
-	fold := []provider.Message{{Role: provider.RoleUser, Content: strings.Repeat("字", 200_000)}}
-	_, err := a.window().foldToSummary(context.Background(), fold, "")
-	if !errors.Is(err, errSummaryInputTooLarge) {
-		t.Fatalf("foldToSummary err = %v, want single-request budget failure", err)
-	}
-	if prov.calls != 0 {
-		t.Fatalf("over-budget unshortenable fold still called summarizer %d times", prov.calls)
 	}
 }
 
@@ -371,36 +299,6 @@ func TestEffectiveOutputBudgetHonorsExplicitOmit(t *testing.T) {
 	})
 	if err != nil || clipped || got != 0 {
 		t.Fatalf("explicit omit changed: budget=%d clipped=%v err=%v", got, clipped, err)
-	}
-}
-
-func TestSummarizeClipsSharedWindowOutputBudget(t *testing.T) {
-	prov := &sharedWindowTestProvider{budget: 128 * 1024, shared: true}
-	a := &Agent{agentConfig: agentConfig{contextWindow: 100_000}, svc: agentServices{prov: prov, sink: event.Discard}, sess: sessionRuntime{output: outputBudgetState{outputBudget: prov.budget}}}
-	region := []provider.Message{{Role: provider.RoleUser, Content: strings.Repeat("字", 50_000)}}
-	a.sess.output.lastUsage.Store(&provider.Usage{PromptTokens: 50_000})
-	a.window().setPromptTokenCalibration(50_000, requestCalibrationShapeOf(provider.Request{Messages: region}))
-
-	if _, _, err := a.window().summarize(context.Background(), region, ""); err != nil {
-		t.Fatalf("summarize: %v", err)
-	}
-	if prov.last.MaxTokens <= 0 || prov.last.MaxTokens >= prov.budget {
-		t.Fatalf("summarizer MaxTokens = %d, want a clipped positive budget below %d", prov.last.MaxTokens, prov.budget)
-	}
-}
-
-func TestSummarizeRejectsLengthTruncation(t *testing.T) {
-	prov := &sharedWindowTestProvider{budget: 128 * 1024, shared: true, finish: "length"}
-	a := &Agent{agentConfig: agentConfig{contextWindow: 1_048_576}, svc: agentServices{prov: prov, sink: event.Discard}, sess: sessionRuntime{output: outputBudgetState{outputBudget: prov.budget}}}
-
-	_, _, err := a.window().summarizeOnce(context.Background(), []provider.Message{{
-		Role: provider.RoleUser, Content: "retain every durable fact",
-	}}, "")
-	if err == nil || !strings.Contains(err.Error(), "truncated") {
-		t.Fatalf("summarizeOnce error = %v, want truncation failure", err)
-	}
-	if prov.calls != 2 || prov.last.MaxTokens <= summaryOutputMaxTokens {
-		t.Fatalf("length-truncated summary calls = %d, last cap %d, want one retry above %d", prov.calls, prov.last.MaxTokens, summaryOutputMaxTokens)
 	}
 }
 

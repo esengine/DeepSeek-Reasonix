@@ -127,7 +127,7 @@ func TestRefusedOverWindowReadsStatusAndSizeNotWords(t *testing.T) {
 }
 
 func TestProseOnlyOverflowRefusalFoldsAndReplays(t *testing.T) {
-	prov := testutil.NewMock("mock", testutil.Turn{Text: "digest of the earlier work"})
+	prov := testutil.NewMock("mock")
 	a := New(prov, tool.NewRegistry(), foldableSessionOverForce(20), Options{
 		ContextWindow: 40_000, RecentKeep: 2, ArchiveDir: testenv.TempDir(t),
 	}, event.Discard)
@@ -137,7 +137,7 @@ func TestProseOnlyOverflowRefusalFoldsAndReplays(t *testing.T) {
 	if !w.recoverContextOverflow(context.Background(), refused, prose) {
 		t.Fatal("a 400 over the window with no overflow code was not recovered")
 	}
-	if len(prov.Requests()) != 1 {
-		t.Fatalf("recovery made %d provider requests, want the one summary", len(prov.Requests()))
+	if len(prov.Requests()) != 0 {
+		t.Fatalf("recovery made %d provider requests, want none: the fold is an archive", len(prov.Requests()))
 	}
 }

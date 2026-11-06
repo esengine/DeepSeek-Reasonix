@@ -54,6 +54,9 @@ func (c *Controller) finishGuardedTurn(err error, completion *guardedTurnComplet
 	c.memory.clearAutoRemember()
 	c.mu.Lock()
 	cancelRequested := c.gate.canceling
+	if c.gate.skippedAsk() && errors.Is(err, context.Canceled) {
+		cancelRequested, err = false, nil
+	}
 	c.gate.end()
 	// A live controller keeps admission closed until TurnDone fan-out finishes.
 	// Close has already sealed admission permanently, so a late completion must
@@ -131,6 +134,33 @@ func (c *Controller) cancelTurn(cause cancelCause) {
 	}
 	if c.goals.active() {
 		c.stopGoal(GoalStatusStopped)
+	}
+}
+
+// askSkipInFlight reports that the turn is ending because the user declined a
+// question, which is an answer and not an interruption.
+func (c *Controller) askSkipInFlight() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.gate.skippedAsk()
+}
+
+// dropInterruptedDisplayAfter removes the recovery records a cancelled run
+// leaves after idx, keeping every real message.
+func (c *Controller) dropInterruptedDisplayAfter(idx int) {
+	if c.executor == nil {
+		return
+	}
+	msgs := c.executor.Session().Snapshot()
+	idx = max(0, min(idx, len(msgs)))
+	keep := append([]provider.Message(nil), msgs[:idx]...)
+	for _, m := range msgs[idx:] {
+		if !(m.LocalOnly && m.InterruptedTurn != nil) {
+			keep = append(keep, m)
+		}
+	}
+	if len(keep) < len(msgs) {
+		c.replaceSessionAfterCancel(keep)
 	}
 }
 

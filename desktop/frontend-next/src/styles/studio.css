@@ -3384,30 +3384,6 @@ button, input, textarea { font-size: var(--fs-ui); }
 .studio-refine[aria-disabled="true"] { cursor: default; }
 .studio-refine[aria-disabled="true"] > .studio-icon { opacity: .35; }
 .studio-refine[aria-busy="true"] > .studio-icon { animation: m-pulse var(--t-live) ease-in-out infinite; }
-.refine-card {
-  display: grid;
-  gap: 8px;
-  margin: 0 0 8px;
-  padding: 10px 12px;
-  border: 1px solid var(--border);
-  border-radius: var(--r-md);
-  background: var(--hair);
-}
-.refine-card header { display: flex; align-items: center; gap: 6px; color: var(--muted); font: var(--w-med) var(--fs-micro)/1.4 var(--ui); }
-.refine-card header .studio-icon { width: 13px; height: 13px; stroke-width: 1.6; }
-.refine-card header b { color: var(--text); font-weight: var(--w-med); }
-.refine-card header small { margin-left: auto; color: var(--ghost); font: var(--w-reg) var(--fs-micro)/1.4 var(--ui); }
-.refine-text {
-  max-height: 240px;
-  overflow: auto;
-  color: var(--text);
-  font: var(--w-reg) var(--read)/1.6 var(--ui);
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
-.refine-wait { margin: 0; color: var(--faint); font: var(--w-reg) var(--fs-meta)/1.5 var(--ui); }
-.refine-error { margin: 0; color: var(--err-ink); font: var(--w-reg) var(--fs-meta)/1.5 var(--ui); }
-.refine-card footer { display: flex; justify-content: flex-end; gap: 6px; }
 .commit-card { display: grid; gap: 8px; margin: 8px 0 0; }
 .commit-open { margin-left: auto; }
 .workbench-explorer-head .commit-open { height: 24px; padding: 0 10px; font-size: var(--fs-meta); }

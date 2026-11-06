@@ -33,6 +33,9 @@ import (
 // run/serve pass true so a missing key fails fast, chat/desktop false so the UI
 // is reachable before one is set.
 type Options struct {
+	// SummarizeFolds keeps the model-written digest for a fold. Without it a
+	// fold moves the earlier conversation into a file the model reads back.
+	SummarizeFolds   bool
 	AgentComposition string
 	Composition      *agentcomposition.Binding
 	ComputerDriver   *computer.Driver

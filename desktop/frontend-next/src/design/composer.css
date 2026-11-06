@@ -41,6 +41,12 @@
 .compose :is(.mode, .studio-branch, .model-picker):hover:not(:disabled) { background: var(--overlay); color: var(--text); border-color: transparent; }
 .compose :is(.mode, .studio-branch, .model-picker)[aria-expanded="true"] { background: var(--overlay); color: var(--text); }
 .compose :is(.mode, .studio-branch, .model-picker):focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.compose .compose-context { box-sizing: border-box; min-height: 34px; margin: 0; padding: 6px 0 0 12px; }
+.compose .compose-context > .studio-runstate { min-height: 0; padding: 0 12px 0 0; }
+.compose .mode.composition-trigger { height: 24px; min-height: 24px; border-radius: var(--r-sm); color: var(--text); font-weight: var(--w-med); }
+.compose .mode.composition-trigger:is(:hover, [aria-expanded="true"]):not(:disabled) { border-color: var(--border); }
+.compose .mode.composition-trigger.locked { color: var(--muted); }
+.compose .mode.composition-trigger.unavailable { border-color: var(--border); color: var(--warn); }
 .compose :is(.studio-mode-picker, .studio-branch, .policy .mode) > :is(svg, .studio-icon, .ic):first-child { width: 14px; height: 14px; color: inherit; }
 .compose :is(.studio-mode-picker, .studio-branch, .policy .mode, .model-picker) > :is(svg, .studio-icon):last-child { width: 11px; height: 11px; color: var(--faint); }
 .compose .policy .mode .ic, .compose .policy .mode .ic svg { width: 14px; height: 14px; }
@@ -90,6 +96,6 @@
 @container conversation (max-width: 420px) {
   .compose .studio-effort-reading, .compose .studio-model-sep { display: none; }
 }
-.compose .studio-model-group { flex: none; }
+.compose .studio-model-group { flex: none; margin-left: auto; }
 .compose .model-picker .nm { flex: none; max-width: none; }
 .compose .studio-model-control { flex: none; min-width: 0; }

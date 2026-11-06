@@ -11,6 +11,7 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/contract/event"
 	"reasonix/internal/contract/provider"
 	"reasonix/internal/contract/tool"
@@ -62,7 +63,7 @@ func anchorSession(t *testing.T) *sessionstore.Session {
 func newAnchorAgent(t *testing.T) (*Agent, *summaryCounter) {
 	prov := &summaryCounter{}
 	a := New(prov, tool.NewRegistry(), anchorSession(t), Options{
-		ContextWindow: anchorWindow, CompactRatio: 0.85, RecentKeep: 2, WorkspaceID: "ws", ModelRef: "m",
+		ContextWindow: anchorWindow, CompactRatio: 0.85, RecentKeep: 2, WorkspaceID: "ws", ModelRef: "m", ArchiveDir: testenv.TempDir(t),
 	}, event.Discard)
 	return a, prov
 }
@@ -86,7 +87,7 @@ func foldPass(t *testing.T, a *Agent) {
 }
 
 func TestProviderReportedUsageTriggersFoldWhenLocalEstimateRunsLow(t *testing.T) {
-	a, prov := newAnchorAgent(t)
+	a, _ := newAnchorAgent(t)
 	if got, trigger := a.ContextUsedTokens(), a.CompactTrigger(); got >= trigger {
 		t.Fatalf("setup: local estimate %d must sit below the trigger %d", got, trigger)
 	}
@@ -101,41 +102,41 @@ func TestProviderReportedUsageTriggersFoldWhenLocalEstimateRunsLow(t *testing.T)
 		t.Fatal("setup: local estimate must still read low after the usage")
 	}
 	foldPass(t, a)
-	if prov.calls.Load() != 1 {
-		t.Fatalf("summary calls = %d; provider reported 92k against an 85k trigger and the fold did not run", prov.calls.Load())
+	if archivedFolds(a) != 1 {
+		t.Fatalf("summary calls = %d; provider reported 92k against an 85k trigger and the fold did not run", archivedFolds(a))
 	}
 }
 
 func TestLocalEstimateAloneDoesNotFoldWithoutProviderUsage(t *testing.T) {
-	a, prov := newAnchorAgent(t)
+	a, _ := newAnchorAgent(t)
 	sendWithUsage(t, a, nil)
 	foldPass(t, a)
-	if prov.calls.Load() != 0 {
-		t.Fatalf("summary calls = %d, want 0 with no reported usage", prov.calls.Load())
+	if archivedFolds(a) != 0 {
+		t.Fatalf("summary calls = %d, want 0 with no reported usage", archivedFolds(a))
 	}
 }
 
 func TestProviderUsageBelowTriggerPlusGrowthFoldsOnlyOnceGrowthCrosses(t *testing.T) {
-	a, prov := newAnchorAgent(t)
+	a, _ := newAnchorAgent(t)
 	sendWithUsage(t, a, &provider.Usage{PromptTokens: 80_000})
 	foldPass(t, a)
-	if prov.calls.Load() != 0 {
-		t.Fatalf("80k reported plus nothing new folded: calls=%d", prov.calls.Load())
+	if archivedFolds(a) != 0 {
+		t.Fatalf("80k reported plus nothing new folded: calls=%d", archivedFolds(a))
 	}
 	grown := append(a.Session().Messages, provider.Message{Role: provider.RoleAssistant, Content: strings.Repeat("g", 30_000)})
 	a.Session().Messages = grown
 	foldPass(t, a)
-	if prov.calls.Load() != 1 {
-		t.Fatalf("80k reported plus ~7k new content must cross 85k: calls=%d", prov.calls.Load())
+	if archivedFolds(a) != 1 {
+		t.Fatalf("80k reported plus ~7k new content must cross 85k: calls=%d", archivedFolds(a))
 	}
 }
 
 func TestFoldInvalidatesReportedUsageUntilNextUsageArrives(t *testing.T) {
-	a, prov := newAnchorAgent(t)
+	a, _ := newAnchorAgent(t)
 	sendWithUsage(t, a, &provider.Usage{PromptTokens: 92_000})
 	foldPass(t, a)
-	if prov.calls.Load() != 1 {
-		t.Fatalf("setup: calls=%d", prov.calls.Load())
+	if archivedFolds(a) != 1 {
+		t.Fatalf("setup: calls=%d", archivedFolds(a))
 	}
 	visible := a.window().modelVisibleMessages()
 	if _, ok := a.window().providerReportedFloor(a.window().visibleRequestShape(visible), a.window().currentProjectionVersion()); ok {
@@ -143,8 +144,8 @@ func TestFoldInvalidatesReportedUsageUntilNextUsageArrives(t *testing.T) {
 	}
 	foldPass(t, a)
 	foldPass(t, a)
-	if prov.calls.Load() != 1 {
-		t.Fatalf("stale pre-fold usage re-triggered the fold: calls=%d", prov.calls.Load())
+	if archivedFolds(a) != 1 {
+		t.Fatalf("stale pre-fold usage re-triggered the fold: calls=%d", archivedFolds(a))
 	}
 
 	sendWithUsage(t, a, &provider.Usage{PromptTokens: 30_000})
@@ -152,8 +153,8 @@ func TestFoldInvalidatesReportedUsageUntilNextUsageArrives(t *testing.T) {
 		t.Fatalf("post-fold usage did not re-anchor: floor=%d ok=%v", floor, ok)
 	}
 	foldPass(t, a)
-	if prov.calls.Load() != 1 {
-		t.Fatalf("a post-fold 30k folded again: calls=%d", prov.calls.Load())
+	if archivedFolds(a) != 1 {
+		t.Fatalf("a post-fold 30k folded again: calls=%d", archivedFolds(a))
 	}
 }
 
@@ -164,41 +165,41 @@ func TestUnreliableUsageAnchorsNothing(t *testing.T) {
 		"provider reports nothing": {},
 	} {
 		t.Run(name, func(t *testing.T) {
-			a, prov := newAnchorAgent(t)
+			a, _ := newAnchorAgent(t)
 			sendWithUsage(t, a, usage)
 			foldPass(t, a)
-			if prov.calls.Load() != 0 {
-				t.Fatalf("folded on a usage that is not the provider's own count of our request: calls=%d", prov.calls.Load())
+			if archivedFolds(a) != 0 {
+				t.Fatalf("folded on a usage that is not the provider's own count of our request: calls=%d", archivedFolds(a))
 			}
 		})
 	}
 }
 
 func TestReportedUsageCountsCachedTokens(t *testing.T) {
-	a, prov := newAnchorAgent(t)
+	a, _ := newAnchorAgent(t)
 	sendWithUsage(t, a, &provider.Usage{PromptTokens: 92_000, CacheHitTokens: 87_000, CacheMissTokens: 5_000})
 	foldPass(t, a)
-	if prov.calls.Load() != 1 {
-		t.Fatalf("cached tokens occupy the window and must count: calls=%d", prov.calls.Load())
+	if archivedFolds(a) != 1 {
+		t.Fatalf("cached tokens occupy the window and must count: calls=%d", archivedFolds(a))
 	}
 }
 
 func TestLatestAttemptUsageWinsOverBillableAggregate(t *testing.T) {
-	a, prov := newAnchorAgent(t)
+	a, _ := newAnchorAgent(t)
 	sendWithUsage(t, a, &provider.Usage{PromptTokens: 200_000, ContextPromptTokens: 50_000})
 	foldPass(t, a)
-	if prov.calls.Load() != 0 {
-		t.Fatalf("a retry aggregate stood in for the last request's size: calls=%d", prov.calls.Load())
+	if archivedFolds(a) != 0 {
+		t.Fatalf("a retry aggregate stood in for the last request's size: calls=%d", archivedFolds(a))
 	}
 }
 
 func TestSetSessionDropsReportedUsage(t *testing.T) {
-	a, prov := newAnchorAgent(t)
+	a, _ := newAnchorAgent(t)
 	sendWithUsage(t, a, &provider.Usage{PromptTokens: 92_000})
 	a.SetSession(anchorSession(t))
 	foldPass(t, a)
-	if prov.calls.Load() != 0 {
-		t.Fatalf("usage of the replaced transcript survived the swap: calls=%d", prov.calls.Load())
+	if archivedFolds(a) != 0 {
+		t.Fatalf("usage of the replaced transcript survived the swap: calls=%d", archivedFolds(a))
 	}
 }
 
@@ -230,13 +231,13 @@ func TestUnfoldableReportedUsageDoesNotRepeatTheAttempt(t *testing.T) {
 	a := New(prov, tool.NewRegistry(), &sessionstore.Session{Messages: []provider.Message{
 		{Role: provider.RoleSystem, Content: "system"},
 		{Role: provider.RoleUser, Content: "only turn"},
-	}}, Options{ContextWindow: anchorWindow, CompactRatio: 0.85, RecentKeep: 2, WorkspaceID: "ws", ModelRef: "m"}, event.Discard)
+	}}, Options{ContextWindow: anchorWindow, CompactRatio: 0.85, RecentKeep: 2, WorkspaceID: "ws", ModelRef: "m", ArchiveDir: testenv.TempDir(t)}, event.Discard)
 	for range 5 {
 		sendWithUsage(t, a, &provider.Usage{PromptTokens: 90_000})
 		foldPass(t, a)
 	}
-	if prov.calls.Load() != 0 {
-		t.Fatalf("summary calls = %d with nothing foldable", prov.calls.Load())
+	if archivedFolds(a) != 0 {
+		t.Fatalf("summary calls = %d with nothing foldable", archivedFolds(a))
 	}
 }
 
@@ -315,7 +316,7 @@ func newCalibratedAgent(t *testing.T) *Agent {
 	}
 	msgs = append(msgs, provider.Message{Role: provider.RoleUser, Content: "current"})
 	a := New(&summaryCounter{}, tool.NewRegistry(), &sessionstore.Session{Messages: msgs}, Options{
-		ContextWindow: anchorWindow, CompactRatio: 0.85, RecentKeep: 2, WorkspaceID: "ws", ModelRef: "m",
+		ContextWindow: anchorWindow, CompactRatio: 0.85, RecentKeep: 2, WorkspaceID: "ws", ModelRef: "m", ArchiveDir: testenv.TempDir(t),
 	}, event.Discard)
 	sendWithUsage(t, a, &provider.Usage{PromptTokens: 9_000})
 	return a
@@ -336,7 +337,7 @@ func TestGaugeAndFoldTriggerReadOnePressure(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			a, prov := newAnchorAgent(t)
+			a, _ := newAnchorAgent(t)
 			if tc.reported > 0 {
 				sendWithUsage(t, a, &provider.Usage{PromptTokens: tc.reported})
 			} else {
@@ -349,7 +350,7 @@ func TestGaugeAndFoldTriggerReadOnePressure(t *testing.T) {
 				t.Fatalf("gauge %d != the trigger's pressure %d", gauge, pressure)
 			}
 			foldPass(t, a)
-			if folded := prov.calls.Load() == 1; folded != tc.fold {
+			if folded := archivedFolds(a) == 1; folded != tc.fold {
 				t.Fatalf("folded=%v at pressure %d against a line of %d, want %v", folded, pressure, a.CompactTrigger(), tc.fold)
 			}
 			if tc.fold != (pressure >= a.CompactTrigger()) {

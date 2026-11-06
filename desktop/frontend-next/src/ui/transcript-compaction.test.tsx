@@ -49,7 +49,7 @@ describe("earlier compactions in a transcript", () => {
     ];
     render(view(items));
     expect(saying()).toEqual(["mid", "new"]);
-    const bar = screen.getByRole("button", { name: /较早的 2 条消息已折叠为简报/ });
+    const bar = screen.getByRole("button", { name: /较早的 2 条消息已归档/ });
     expect(bar.getAttribute("aria-expanded")).toBe("false");
     fireEvent.click(bar);
     expect(saying()).toEqual(["old", "mid", "new"]);

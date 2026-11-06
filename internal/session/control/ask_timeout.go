@@ -168,6 +168,12 @@ func (a *approvalManager) resolveAskForTimeout(id string) (pendingAsk, bool, boo
 func (c *Controller) endUnansweredAsk(waitCtx context.Context, id string, reply <-chan []event.AskAnswer) ([]event.AskAnswer, error) {
 	timedOut, skipped := errors.AsType[*agent.AskTimedOutError](context.Cause(waitCtx))
 	if !skipped {
+		select {
+		case ans := <-reply:
+			c.closeBarrier(id, barrierResolved)
+			return ans, nil
+		default:
+		}
 		c.approval.cancelAsk(id)
 		c.closeBarrier(id, barrierCancelled)
 		return nil, waitCtx.Err()

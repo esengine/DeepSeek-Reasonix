@@ -57,7 +57,7 @@ export function ContextSummaryCard({ context, mcp, percent, onManage, compact: a
           )}
         </>
       ) : <p>{t("composer.no_context_data_yet")}</p>}
-      {action && <CompactNow action={action} />}
+      {action && <CompactNow action={action} usage={context ? { used: context.used, window: context.window } : undefined} />}
       <section>
         <div><b>MCP</b><small>{ready.length} / {active.length} {t("composer.connected")} · {tools} {t("composer.tools")}</small></div>
         {active.slice(0, 4).map((server) => <div className="chrome-mcp-row" key={server.name}><i data-ready={server.state === "ready" ? "" : undefined} /><span>{server.name}</span><small>{server.state === "ready" ? `${server.tools} ${t("composer.tools")}` : t("composer.waiting_to_connect")}</small></div>)}

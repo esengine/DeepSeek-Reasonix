@@ -20,7 +20,7 @@ func projectionWithLiveTail(t *testing.T) (*Agent, *sessionstore.Session, int) {
 	sess := sessionstore.NewSession("sys")
 	for range 8 {
 		sess.Add(provider.Message{Role: provider.RoleUser, Content: strings.Repeat("u", 80)})
-		sess.Add(provider.Message{Role: provider.RoleAssistant, Content: strings.Repeat("a", 120)})
+		sess.Add(provider.Message{Role: provider.RoleAssistant, Content: strings.Repeat("a", 600)})
 	}
 	dir := testenv.TempDir(t)
 	a := New(&fakeProvider{reply: "digest"}, tool.NewRegistry(), sess, Options{

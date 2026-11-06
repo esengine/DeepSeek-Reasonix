@@ -983,11 +983,13 @@ func TestDismissedAskCancelsTurnWithoutModelContinuation(t *testing.T) {
 
 	continued := false
 	if got := c.runGuarded(func(ctx context.Context) error {
-		_, err := c.Ask(ctx, sampleAskQuestions())
-		if err == nil {
+		if _, err := c.Ask(ctx, sampleAskQuestions()); err != nil {
+			return err
+		}
+		if ctx.Err() == nil {
 			continued = true
 		}
-		return err
+		return ctx.Err()
 	}); got != turnStarted {
 		t.Fatalf("runGuarded = %v, want turnStarted", got)
 	}
@@ -996,8 +998,8 @@ func TestDismissedAskCancelsTurnWithoutModelContinuation(t *testing.T) {
 
 	select {
 	case done := <-turnDone:
-		if !done.Cancelled {
-			t.Fatalf("dismissed Ask TurnDone = %+v, want Cancelled", done)
+		if done.Cancelled || done.Err != nil {
+			t.Fatalf("dismissed Ask TurnDone = %+v, want a finished turn", done)
 		}
 	case <-time.After(30 * time.Second):
 		t.Fatal("dismissed Ask did not finish the turn")

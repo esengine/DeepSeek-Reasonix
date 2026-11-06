@@ -276,7 +276,9 @@ func (o *turnOrchestrator) runOrchestratedTurn(ctx context.Context, turn orchest
 		// but is marked local-only, and a bounded recovery summary is folded into
 		// the next real user turn (#5499, #6680).
 		if errors.Is(err, context.Canceled) && c.CancelRequested() {
-			if turn.synthetic || IsSyntheticUserMessage(turn.raw) {
+			if c.askSkipInFlight() {
+				c.dropInterruptedDisplayAfter(startMessages)
+			} else if turn.synthetic || IsSyntheticUserMessage(turn.raw) {
 				c.stripInterruptedSyntheticTurnMessagesAfter(startMessages)
 			} else {
 				c.stripCancelledVisibleTurnMessagesAfterWithFallback(startMessages, provider.Message{
@@ -424,7 +426,11 @@ func (o *turnOrchestrator) gatePlanApproval(ctx context.Context) error {
 	}()
 	if err != nil {
 		if errors.Is(err, context.Canceled) && c.CancelRequested() {
-			c.stripInterruptedSyntheticTurnMessagesAfter(execStart)
+			if c.askSkipInFlight() {
+				c.dropInterruptedDisplayAfter(execStart)
+			} else {
+				c.stripInterruptedSyntheticTurnMessagesAfter(execStart)
+			}
 		}
 		return err
 	}

@@ -1,11 +1,14 @@
-.toasts { position: fixed; right: 16px; bottom: 16px; z-index: 21; display: flex; flex-direction: column; gap: 8px; align-items: flex-end; width: min(380px, calc(100vw - 32px)); pointer-events: none; }
-.toast { pointer-events: auto; box-sizing: border-box; width: 100%; display: flex; align-items: flex-start; gap: 10px; padding: 10px 10px 10px 12px; border-radius: var(--r-md); border: 1px solid var(--border); background: var(--float); box-shadow: var(--shadow-float); font: var(--w-reg) var(--fs-ui)/1.55 var(--ui); color: var(--text); animation: m-card var(--t-card) var(--ease-out) both; }
-.toast[data-kind="error"] { border-color: color-mix(in srgb, var(--err) 40%, var(--border)); }
-.toast-icon { display: flex; flex: none; margin-top: 2px; color: var(--muted); }
-.toast-icon[data-kind="error"] { color: var(--err-ink); }
-.toast-icon .studio-icon { width: 15px; height: 15px; }
-.toast-body { flex: 1; min-width: 0; word-break: break-word; }
-.toast-actions { display: flex; flex: none; align-items: center; gap: 2px; margin: -2px 0; }
+.toasts { position: fixed; right: 16px; bottom: 16px; z-index: 21; display: flex; flex-direction: column; gap: 8px; align-items: flex-end; width: min(760px, calc(100vw - 32px)); pointer-events: none; }
+.toast { pointer-events: auto; box-sizing: border-box; width: 100%; display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: var(--r-md); border: 1px solid var(--border); background: var(--raised); font: var(--w-med) var(--fs-ui)/1.5 var(--ui); color: var(--text); animation: m-card var(--t-card) var(--ease-out) both; }
+.toast-icon { display: flex; flex: none; color: var(--muted); }
+.toast-icon[data-tone="ok"] { color: var(--ok-ink); }
+.toast-icon[data-tone="warn"] { color: var(--warn-ink); }
+.toast-icon[data-tone="net"] { color: var(--net-ink); }
+.toast-icon .studio-icon { width: 16px; height: 16px; }
+.toast-body { flex: 1; min-width: 0; word-break: break-word; font-weight: var(--w-med); }
+.toast-actions { display: flex; flex: none; align-items: center; gap: 6px; }
+.toast-actions .act { height: 24px; padding: 0 10px; border: 1px solid transparent; border-radius: var(--r-pill); background: transparent; color: var(--muted); font: var(--w-med) var(--fs-meta) var(--ui); white-space: nowrap; cursor: pointer; }
+.toast-actions .act:hover { background: var(--overlay); color: var(--text); }
 .toast[data-stacked] { flex-wrap: wrap; }
 .toast[data-stacked] .toast-body { flex-basis: calc(100% - 40px); }
 .toast[data-stacked] .toast-actions { flex-basis: 100%; margin: 0 0 0 25px; gap: 6px; }

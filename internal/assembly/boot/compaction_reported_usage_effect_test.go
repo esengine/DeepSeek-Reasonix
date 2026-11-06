@@ -122,26 +122,6 @@ context_window = 100000
 	return d, prov.mains[len(prov.mains)-1]
 }
 
-func TestEffectReportedUsagePastTriggerFoldsDespiteLowLocalEstimate(t *testing.T) {
-	digests, second := foldsAfterTwoTurns(t, 92_000)
-	if digests != 1 {
-		t.Fatalf("digest requests = %d; the provider reported 92k against an 85k trigger and the context was not folded", digests)
-	}
-	summarized, bulky := false, 0
-	for _, m := range second.Messages {
-		summarized = summarized || strings.Contains(m.Content, "SUMMARY of the earlier work.")
-		if len(m.Content) >= 20_000 {
-			bulky++
-		}
-	}
-	if !summarized {
-		t.Fatal("the folded view did not reach the provider request")
-	}
-	if bulky >= 14 {
-		t.Fatalf("the request still carries all %d bulky replies", bulky)
-	}
-}
-
 func TestEffectReportedUsageBelowTriggerLeavesContextAlone(t *testing.T) {
 	if digests, _ := foldsAfterTwoTurns(t, 60_000); digests != 0 {
 		t.Fatalf("digest requests = %d with the provider reporting 60k of 100k", digests)

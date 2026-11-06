@@ -195,7 +195,7 @@ func (a *contextWindow) compressVisibleRange(
 		return result, nil
 	}
 
-	res, err := a.foldToSummary(ctx, prepared.fold, prepared.instructions)
+	res, err := a.foldToArchive(prepared.fold, prepared.instructions)
 	summary := res.Text
 	tele := compactionTelemetryFromSummary(trigger, a.cacheState(), result.SourceTokens, res, spend.read())
 	if err != nil {
@@ -389,11 +389,6 @@ func compactionTelemetryFromSummary(trigger, cacheState string, sourceTokens int
 type compactionScope struct {
 	ignoreThreshold bool
 	ignoreEconomics bool
-}
-
-func (a *contextWindow) compact(ctx context.Context, trigger, instructions string, scope compactionScope) error {
-	_, _, err := a.compactToProjection(ctx, trigger, instructions, scope, false)
-	return err
 }
 
 // compactToProjection installs one content-driven summary checkpoint:
@@ -655,10 +650,6 @@ func (a *contextWindow) planFoldRegion(msgs []provider.Message, force bool) (hea
 	return head, start, true, ""
 }
 
-func (a *contextWindow) partitionFoldForProjection(region []provider.Message) (kept, fold []provider.Message, retention userTurnRetention, policyKeep []bool) {
-	return a.partitionFoldWith(region, nil, a.keepPolicy)
-}
-
 // partitionFoldWith partitions under policy rather than the configured one, so
 // a fold can retain less than the session asks for when retaining it would
 // leave nothing for the digest to fit in.
@@ -685,18 +676,6 @@ func (a *contextWindow) partitionFoldWith(region, tail []provider.Message, polic
 	return supersedeStandingState(kept, tail), fold, retention, policyKeep
 }
 
-// runCompactionSummary uses the single local summarizer path for every provider.
-func (a *contextWindow) runCompactionSummary(ctx context.Context, fold []provider.Message, instructions string) (summary, mode string, usage *provider.Usage, providerReqID string, err error) {
-	summary, usage, err = a.summarizeOnce(ctx, fold, instructions)
-	if err == nil && !hasDigestHeading(summary) {
-		err = errSummaryNotDigest
-	}
-	if err != nil {
-		return "", CompactionModeSummarized, usage, "", err
-	}
-	return summary, CompactionModeSummarized, usage, "", nil
-}
-
 // announceCompaction puts the card up for a fold of n messages out of msgs and
 // returns the size it announced, which the done frame reports against.
 func (a *contextWindow) announceCompaction(trigger string, n int, msgs []provider.Message) int {
@@ -705,4 +684,13 @@ func (a *contextWindow) announceCompaction(trigger string, n int, msgs []provide
 		Trigger: trigger, Messages: n, SourceTokens: sourceTokens,
 	})})
 	return sourceTokens
+}
+
+func (a *contextWindow) compact(ctx context.Context, trigger, instructions string, scope compactionScope) error {
+	_, _, err := a.compactToProjection(ctx, trigger, instructions, scope, false)
+	return err
+}
+
+func (a *contextWindow) partitionFoldForProjection(region []provider.Message) (kept, fold []provider.Message, retention userTurnRetention, policyKeep []bool) {
+	return a.partitionFoldWith(region, nil, a.keepPolicy)
 }

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { MAX, search, stepped, type FindMode, type Hit } from "../state/find";
+import { MAX, search, stepped, type FindMode, type FindScope, type Hit } from "../state/find";
 import type { Item } from "../state/session";
 
 const NO_HITS: Hit[] = [];
@@ -19,15 +19,16 @@ export interface Finding {
   /** How the query is read. Off is the plain substring search. */
   regex: boolean;
   caseSensitive: boolean;
+  scope: FindScope;
   setMode: (mode: Partial<FindMode>) => void;
 }
 
 /** The find bar's whole state. pulse is the window asking; only the pane that
  *  has focus answers it, so one chord does not open a bar in every session. */
 export function useFind(items: Item[], pulse: number, active: boolean, onOpen: () => void, togglePulse = 0): Finding {
-  const [held, setHeld] = useState<{ q: string; i: number; focus: number; re?: boolean; cs?: boolean } | null>(null);
+  const [held, setHeld] = useState<{ q: string; i: number; focus: number; re?: boolean; cs?: boolean; sc?: FindScope } | null>(null);
   const hits = useMemo(
-    () => (held ? search(items, held.q, { regex: held.re, caseSensitive: held.cs }) : NO_HITS),
+    () => (held ? search(items, held.q, { regex: held.re, caseSensitive: held.cs, scope: held.sc }) : NO_HITS),
     [items, held],
   );
   const i = held ? Math.min(held.i, hits.length - 1) : -1;
@@ -71,7 +72,7 @@ export function useFind(items: Item[], pulse: number, active: boolean, onOpen: (
   // Changing how the query is read restarts from the first hit: the old index
   // counted hits the new reading may no longer have.
   const setMode = useCallback(
-    (mode: Partial<FindMode>) => setHeld((was) => (was ? { ...was, ...(mode.regex !== undefined ? { re: mode.regex } : {}), ...(mode.caseSensitive !== undefined ? { cs: mode.caseSensitive } : {}), i: 0 } : was)),
+    (mode: Partial<FindMode>) => setHeld((was) => (was ? { ...was, ...(mode.regex !== undefined ? { re: mode.regex } : {}), ...(mode.caseSensitive !== undefined ? { cs: mode.caseSensitive } : {}), ...(mode.scope !== undefined ? { sc: mode.scope } : {}), i: 0 } : was)),
     [],
   );
 
@@ -82,12 +83,13 @@ export function useFind(items: Item[], pulse: number, active: boolean, onOpen: (
     focus: held?.focus ?? 0,
     total,
     capped: total >= MAX,
-    at: at ? { id: at.id, nth, n: nonce, mode: { regex: held?.re ?? false, caseSensitive: held?.cs ?? false } } : null,
+    at: at ? { id: at.id, nth, n: nonce, mode: { regex: held?.re ?? false, caseSensitive: held?.cs ?? false, scope: held?.sc ?? "all" } } : null,
     ask,
     step,
     close,
     regex: held?.re ?? false,
     caseSensitive: held?.cs ?? false,
+    scope: held?.sc ?? "all",
     setMode,
   };
 }

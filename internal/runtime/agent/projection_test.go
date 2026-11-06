@@ -3,7 +3,6 @@ package agent
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"os"
 	"path/filepath"
 	"reasonix/internal/state/sessionstore"
@@ -191,36 +190,8 @@ func TestCompactToProjectionLeavesCanonicalIntact(t *testing.T) {
 	if len(visible) == len(before) {
 		t.Fatal("model-visible still full canonical")
 	}
-	// Summarizer must have been invoked with fold region (no tools schema).
-	if len(fp.got) == 0 {
-		t.Fatal("summarizer was not called")
-	}
-}
-
-func TestCompactFailureDoesNotWriteMechanicalMarker(t *testing.T) {
-	fp := &fakeProvider{streamErr: errors.New("boom")}
-	sess := sessionstore.NewSession("sys")
-	for range 10 {
-		sess.Add(provider.Message{Role: provider.RoleUser, Content: strings.Repeat("u", 100)})
-		sess.Add(provider.Message{Role: provider.RoleAssistant, Content: strings.Repeat("a", 200)})
-	}
-	before := append([]provider.Message(nil), sess.Messages...)
-	a := New(fp, nil, sess, Options{ContextWindow: 2000, RecentKeep: 2, ArchiveDir: testenv.TempDir(t)}, event.Discard)
-	_, err := a.CompactNow(context.Background(), CompactRequest{})
-	if err == nil {
-		t.Fatal("expected compaction error")
-	}
-	after := sess.Snapshot()
-	if len(after) != len(before) {
-		t.Fatalf("canonical changed on failure: %d → %d", len(before), len(after))
-	}
-	for _, m := range after {
-		if strings.Contains(m.Content, "summary was unavailable") || strings.Contains(m.Content, "folded here to free context") {
-			t.Fatalf("mechanical marker written into history: %q", m.Content)
-		}
-	}
-	if len(a.sess.win.compactionState.Projection.Messages) != 0 {
-		t.Fatal("failed compaction installed a projection")
+	if len(fp.got) != 0 {
+		t.Fatalf("the fold made %d provider request(s); it archives instead", len(fp.got))
 	}
 }
 
@@ -292,33 +263,6 @@ func earlyUserPrefix(msgs []provider.Message) string {
 		}
 	}
 	return b.String()
-}
-
-func TestLocalOnlyExcludedFromCompactionRequest(t *testing.T) {
-	fp := &fakeProvider{reply: "ok"}
-	sess := sessionstore.NewSession("sys")
-	for range 8 {
-		sess.Add(provider.Message{Role: provider.RoleUser, Content: strings.Repeat("u", 80)})
-		sess.Add(provider.Message{Role: provider.RoleAssistant, Content: strings.Repeat("a", 120)})
-	}
-	sess.Add(provider.Message{
-		Role: provider.RoleTool, ToolCallID: provider.LocalOnlyToolID, Name: provider.LocalOnlyToolName,
-		Content: "secret local only", LocalOnly: true,
-	})
-	a := New(fp, nil, sess, Options{ContextWindow: 2000, RecentKeep: 2, ArchiveDir: testenv.TempDir(t)}, event.Discard)
-	if _, err := a.CompactNow(context.Background(), CompactRequest{}); err != nil {
-		t.Fatalf("compact: %v", err)
-	}
-	for _, m := range fp.got {
-		if strings.Contains(m.Content, "secret local only") {
-			t.Fatal("LocalOnly content reached summarizer")
-		}
-	}
-	for _, m := range a.sess.win.compactionState.Projection.Messages {
-		if m.LocalOnly || strings.Contains(m.Content, "secret local only") {
-			t.Fatal("LocalOnly content entered projection")
-		}
-	}
 }
 
 // Checkpoint installation no longer writes archive copies — the canonical
@@ -419,66 +363,12 @@ func TestCompactReplacesHistory(t *testing.T) {
 	}
 	var foundSummary bool
 	for _, m := range proj {
-		if strings.Contains(m.Content, "do X") {
+		if strings.Contains(m.Content, "archived, not summarized") {
 			foundSummary = true
 		}
 	}
 	if !foundSummary {
-		t.Errorf("summary missing do X: %+v", proj)
-	}
-
-	// No new archive files: canonical is the lossless store.
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		t.Fatalf("archive dir: %v", err)
-	}
-	if len(entries) != 0 {
-		t.Fatalf("archive dir entries = %d, want 0 (no new archives)", len(entries))
-	}
-}
-
-func TestManualCompactReportsSummarizerFailure(t *testing.T) {
-	// Manual compaction must not rewrite history or degrade to a mechanical
-	// fold when the summarizer fails. The error is returned so the caller,
-	// who is present, can retry or report it.
-	prov := &fakeProvider{streamErr: errors.New("provider down")}
-	sess := &sessionstore.Session{Messages: []provider.Message{
-		{Role: provider.RoleSystem, Content: "sys"},
-		{Role: provider.RoleUser, Content: "task"},
-		{Role: provider.RoleAssistant, Content: "step one"},
-		{Role: provider.RoleUser, Content: "more"},
-		{Role: provider.RoleAssistant, Content: "step two"},
-		{Role: provider.RoleUser, Content: "next"},
-		{Role: provider.RoleAssistant, Content: "ok"},
-	}}
-	var got []event.Event
-	sink := event.FuncSink(func(e event.Event) { got = append(got, e) })
-	a := New(prov, tool.NewRegistry(), sess, Options{RecentKeep: 2, ArchiveDir: testenv.TempDir(t)}, sink)
-
-	before := append([]provider.Message(nil), sess.Messages...)
-	if err := a.window().compact(context.Background(), "manual", "", compactionScope{ignoreThreshold: true, ignoreEconomics: true}); err == nil {
-		t.Fatal("compact should error when summarizer fails")
-	}
-	if len(sess.Messages) != len(before) {
-		t.Fatalf("canonical changed on summarizer failure: %d -> %d", len(before), len(sess.Messages))
-	}
-	for _, m := range sess.Messages {
-		if strings.Contains(m.Content, "summary was unavailable") {
-			t.Fatalf("mechanical marker written: %q", m.Content)
-		}
-	}
-	if len(a.sess.win.compactionState.Projection.Messages) != 0 {
-		t.Fatal("failed compact installed a projection")
-	}
-	// CompactionDone with empty summary resolves the UI placeholder.
-	var done *event.Compaction
-	for i := range got {
-		if got[i].Kind == event.CompactionDone {
-			done = &got[i].Compaction
-		}
-	}
-	if done == nil {
-		t.Fatal("expected CompactionDone on abort")
+		t.Errorf("archive pointer missing: %+v", proj)
 	}
 }
 
@@ -586,101 +476,6 @@ func TestCompactKeepsMidSessionUserTurns(t *testing.T) {
 	}
 }
 
-func TestCompactKeepsPriorDigests(t *testing.T) {
-	// A1 rolling merge: prior digests enter the fold and the summarizer must
-	// carry durable facts forward into a single latest summary. The fake
-	// provider echoes the prior fact so we can assert the fold input included it.
-	priorDigest := SummaryTagOpen + "\n## Standing facts\n- db is orion_prod_42\n" + SummaryTagClose
-	big := strings.Repeat("work output ", 200)
-	sess := &sessionstore.Session{Messages: []provider.Message{
-		{Role: provider.RoleSystem, Content: "sys"},
-		{Role: provider.RoleUser, Content: "task"},
-		{Role: provider.RoleAssistant, Content: big}, // breaks leading-summary contiguity
-		{Role: provider.RoleUser, Content: priorDigest},
-		{Role: provider.RoleAssistant, Content: big},
-		{Role: provider.RoleUser, Content: "next"},
-		{Role: provider.RoleAssistant, Content: "ok"},
-	}}
-	prov := &fakeProvider{reply: "Standing facts: db is orion_prod_42"}
-	a := New(prov, tool.NewRegistry(), sess,
-		Options{RecentKeep: 2, ArchiveDir: testenv.TempDir(t)}, event.Discard)
-
-	if err := a.window().compact(context.Background(), "manual", "", compactionScope{ignoreThreshold: true, ignoreEconomics: true}); err != nil {
-		t.Fatalf("compact: %v", err)
-	}
-
-	// Canonical retains the prior digest; projection has exactly one summary.
-	var priorInCanonical bool
-	for _, m := range sess.Snapshot() {
-		if strings.Contains(m.Content, "orion_prod_42") {
-			priorInCanonical = true
-		}
-	}
-	if !priorInCanonical {
-		t.Fatal("canonical lost prior digest")
-	}
-	proj := visibleContext(a)
-	summaries := 0
-	for _, m := range proj {
-		if isCompactionSummary(m) {
-			summaries++
-		}
-	}
-	if summaries != 1 {
-		t.Fatalf("projection summaries = %d, want 1 (rolling merge)", summaries)
-	}
-	if !strings.Contains(joinContents(proj), "orion_prod_42") {
-		t.Fatalf("rolling summary lost prior fact: %+v", proj)
-	}
-	// Prior digest body was part of the fold sent to the summarizer.
-	if len(prov.got) < 2 || !strings.Contains(prov.got[1].Content, "orion_prod_42") {
-		t.Fatalf("prior digest not folded into summarizer input: %+v", prov.got)
-	}
-}
-
-func TestCompactKeepsErrorMessages(t *testing.T) {
-	prov := &fakeProvider{reply: "- normal work summarized"}
-	big := strings.Repeat("normal work output ", 200)
-	sess := &sessionstore.Session{Messages: []provider.Message{
-		{Role: provider.RoleSystem, Content: "sys"},
-		{Role: provider.RoleUser, Content: "task"},
-		{Role: provider.RoleAssistant, ToolCalls: []provider.ToolCall{{ID: "1", Name: "bash", Arguments: `{"cmd":"bad"}`}}},
-		{Role: provider.RoleTool, ToolCallID: "1", Name: "bash", Content: "error: command failed"},
-		{Role: provider.RoleAssistant, Content: big},
-		{Role: provider.RoleUser, Content: "continue"},
-		{Role: provider.RoleAssistant, Content: big},
-		{Role: provider.RoleUser, Content: "next"},
-		{Role: provider.RoleAssistant, Content: "ok"},
-	}}
-	a := New(prov, tool.NewRegistry(), sess, Options{
-		ContextWindow: 50_000, CompactRatio: 0.85, RecentKeep: 2, KeepPolicy: KeepErrors,
-	}, event.Discard)
-
-	if err := a.window().compact(context.Background(), "manual", "", compactionScope{ignoreThreshold: true, ignoreEconomics: true}); err != nil {
-		t.Fatalf("compact: %v", err)
-	}
-	// Canonical unchanged.
-	if sess.Messages[3].Content != "error: command failed" {
-		t.Fatalf("canonical error tool result changed: %+v", sess.Messages[3])
-	}
-	proj := visibleContext(a)
-	var keptErr bool
-	for i, m := range proj {
-		if m.Role == provider.RoleTool && m.Content == "error: command failed" {
-			keptErr = true
-			if i == 0 || proj[i-1].Role != provider.RoleAssistant || len(proj[i-1].ToolCalls) == 0 {
-				t.Fatalf("kept error lost its assistant tool call: %+v", proj)
-			}
-		}
-	}
-	if !keptErr {
-		t.Fatalf("error tool result not kept in projection: %+v", proj)
-	}
-	if strings.Contains(prov.got[1].Content, "error: command failed") {
-		t.Fatalf("kept error was still folded into summary input:\n%s", prov.got[1].Content)
-	}
-}
-
 func TestCompactKeepsUserMarkedMessages(t *testing.T) {
 	prov := &fakeProvider{reply: "- unmarked work summarized"}
 	// Keep-marked text stays in the projection as protected content; surrounding
@@ -723,8 +518,11 @@ func TestCompactKeepsUserMarkedMessages(t *testing.T) {
 	if !keptProj {
 		t.Fatalf("marked message not kept in projection: %+v", visibleContext(a))
 	}
-	if strings.Contains(prov.got[1].Content, "exact requirement") {
-		t.Fatalf("marked message was still folded into summary input:\n%s", prov.got[1].Content)
+	files, _ := filepath.Glob(filepath.Join(a.window().outputsDir(), "fold-*.md"))
+	for _, f := range files {
+		if body, err := os.ReadFile(f); err == nil && strings.Contains(string(body), "exact requirement") {
+			t.Fatalf("marked message was still folded into the archive %s", f)
+		}
 	}
 }
 
@@ -759,31 +557,5 @@ func TestRunCompactsAfterFinalAnswer(t *testing.T) {
 	// Canonical rewrite version stays 0; projection carries the fold.
 	if got := sess.RewriteVersion(); got != 0 {
 		t.Fatalf("canonical rewrite version = %d, want 0", got)
-	}
-}
-
-func TestCompactFoldsSingleLargeMessage(t *testing.T) {
-	prov := &fakeProvider{reply: "- captured the large file contents"}
-	sess := &sessionstore.Session{Messages: []provider.Message{
-		{Role: provider.RoleSystem, Content: "sys"},
-		{Role: provider.RoleTool, ToolCallID: "1", Name: "read_file", Content: strings.Repeat("large output line\n", 500)},
-		{Role: provider.RoleUser, Content: "next"},
-		{Role: provider.RoleAssistant, Content: "ok"},
-	}}
-	a := New(prov, tool.NewRegistry(), sess, Options{RecentKeep: 2, ArchiveDir: testenv.TempDir(t)}, event.Discard)
-	before := len(sess.Messages)
-
-	if err := a.window().compact(context.Background(), "auto", "", compactionScope{}); err != nil {
-		t.Fatalf("compact: %v", err)
-	}
-	if len(sess.Messages) != before {
-		t.Fatalf("canonical changed: %d -> %d", before, len(sess.Messages))
-	}
-	proj := visibleContext(a)
-	if !hasCompactionSummary(proj) || !strings.Contains(joinContents(proj), "large file contents") {
-		t.Fatalf("single large message was not summarized into projection: %+v", proj)
-	}
-	if len(prov.got) == 0 || !strings.Contains(prov.got[1].Content, "large output line") {
-		t.Fatalf("summarizer did not receive the large message: %+v", prov.got)
 	}
 }

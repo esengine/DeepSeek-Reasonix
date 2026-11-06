@@ -2,7 +2,6 @@ package agent
 
 import (
 	"encoding/json"
-	"fmt"
 	"path"
 	"path/filepath"
 	"slices"
@@ -124,20 +123,6 @@ func measureFoldCoverage(region []provider.Message, facts func(string) evidence.
 	return cov
 }
 
-// measureShownCoverage is measureFoldCoverage for a digest written from input
-// shorter than the fold: a change absent from the input is unseen, not
-// forgotten, and the backstop restores it.
-func measureShownCoverage(region, shown []provider.Message, facts func(string) evidence.ToolFacts, digest string) foldCoverage {
-	cov := measureFoldCoverage(region, facts, digest)
-	seen := foldFacts(shown, facts).Mutations
-	for _, p := range cov.Mutations {
-		if !slices.Contains(seen, p) {
-			cov.Unseen = append(cov.Unseen, p)
-		}
-	}
-	return cov
-}
-
 // mentionsPath accepts the full path or the bare file name: insisting on the
 // full path would fail a digest that did its job.
 func mentionsPath(haystack, p string) bool {
@@ -163,44 +148,6 @@ func commandSignature(command string) string {
 		fields = fields[:2]
 	}
 	return strings.Join(fields, " ")
-}
-
-// foldBackstopHeading opens the host's own record of what a digest dropped.
-const foldBackstopHeading = "## Host-retained fold facts"
-
-// maxBackstopFacts bounds the block. A fold with more changes than this has a
-// digest problem the backstop cannot fix; the count says so rather than the
-// list silently ending.
-const maxBackstopFacts = 20
-
-// foldCoverageBackstop states the facts the digest did not carry. The index
-// skips them on the digest's promise (coverageDemands), so a broken promise
-// takes them out of the model's world while the transcript still holds them.
-// This is the host's line, not a second summary: no tool output, no inference,
-// only the paths and command signatures the receipts already proved.
-func foldCoverageBackstop(cov foldCoverage) string {
-	if cov.Missing() == 0 {
-		return ""
-	}
-	var b strings.Builder
-	b.WriteString(foldBackstopHeading + "\n")
-	b.WriteString("The summary above does not cover these, and the fold index omits them. The full transcript still holds them.\n")
-	writeBackstopList(&b, "changed", cov.MissingMut)
-	writeBackstopList(&b, "failed", cov.MissingFai)
-	return strings.TrimRight(b.String(), "\n")
-}
-
-func writeBackstopList(b *strings.Builder, label string, facts []string) {
-	shown := facts
-	if len(shown) > maxBackstopFacts {
-		shown = shown[:maxBackstopFacts]
-	}
-	for _, f := range shown {
-		b.WriteString("- " + label + ": " + f + "\n")
-	}
-	if dropped := len(facts) - len(shown); dropped > 0 {
-		fmt.Fprintf(b, "- (%d more %s, not listed)\n", dropped, label)
-	}
 }
 
 // coverageDemands reports whether a call is one the digest must carry, so the

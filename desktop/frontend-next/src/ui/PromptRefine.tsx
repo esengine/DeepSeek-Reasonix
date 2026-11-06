@@ -84,26 +84,39 @@ export function usePromptRefine(port: Pick<AgentPort, "refinePrompt">, text: str
         <header>
           <StudioIcon name="spark" />
           <b>{t("composer.refined_prompt")}</b>
-          {state.phase !== "working" && state.draft !== text && <small>{t("composer.the_box_has_changed_adopting")}</small>}
+          <small>
+            {state.phase !== "working" && state.draft !== text
+              ? t("composer.the_box_has_changed_adopting")
+              : t("composer.refine_note")}
+          </small>
         </header>
-        {state.phase === "working" && <p className="refine-wait" role="status">{t("composer.refining")}</p>}
+        {state.phase === "working" && (
+          <p className="refine-wait" role="status">
+            <StudioIcon name="spark" />
+            {t("composer.refining")}
+            <button type="button" className="btn sm" data-weak="" data-action="prompt.discard" onClick={dismiss}>
+              {t("common.cancel")}
+            </button>
+          </p>
+        )}
         {state.phase === "failed" && <p className="refine-error" role="alert">{state.error}</p>}
         {state.phase === "ready" && <div className="refine-text">{state.text}</div>}
-        <footer>
-          {state.phase === "ready" && (
-            <button type="button" className="btn sm" data-primary data-action="prompt.adopt" onClick={take}>
-              {t("composer.adopt")}
+        {state.phase !== "working" && (
+          <footer>
+            <s className="refine-original">{t("composer.refine_original", { text: state.draft })}</s>
+            <button type="button" className="btn sm" data-weak="" data-action="prompt.discard" onClick={dismiss}>
+              {t("composer.discard")}
             </button>
-          )}
-          {state.phase !== "working" && (
-            <button type="button" className="btn sm" data-action="prompt.refine" onClick={() => run(state.draft)}>
+            <button type="button" className="btn" data-action="prompt.refine" onClick={() => run(state.draft)}>
               {state.phase === "failed" ? t("common.retry") : t("composer.try_again")}
             </button>
-          )}
-          <button type="button" className="btn sm" data-weak="" data-action="prompt.discard" onClick={dismiss}>
-            {state.phase === "working" ? t("common.cancel") : t("composer.discard")}
-          </button>
-        </footer>
+            {state.phase === "ready" && (
+              <button type="button" className="btn" data-primary data-action="prompt.adopt" onClick={take}>
+                {t("composer.adopt")}
+              </button>
+            )}
+          </footer>
+        )}
       </section>
     );
 

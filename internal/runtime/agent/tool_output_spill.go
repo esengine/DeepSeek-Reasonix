@@ -5,14 +5,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"reasonix/internal/state/sessionstore"
 	"runtime"
 	"strings"
 
 	"reasonix/internal/base/textutil"
 	"reasonix/internal/contract/event"
 	"reasonix/internal/contract/tool"
-	"reasonix/internal/state/store"
 )
 
 // Oversize tool output goes to a file; the context keeps a pointer. A head+tail
@@ -65,13 +63,7 @@ func spillPays(body, pointer int) bool {
 // nowhere to write, the only remaining bound is truncation, which discards
 // almost all of a large result rather than parking it.
 func (a *Agent) spillDir() string {
-	if dir := store.SessionOutputsDir(a.SessionPath()); dir != "" {
-		return dir
-	}
-	if dir := a.archiveOutputsDir(); dir != "" {
-		return dir
-	}
-	return sessionstore.ScratchOutputsDir()
+	return a.window().outputsDir()
 }
 
 // toolIsPaged reports whether this tool addresses its own continuation, read off

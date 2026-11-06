@@ -4,8 +4,6 @@ import (
 	"context"
 	"reasonix/internal/state/sessionstore"
 	"sync"
-
-	"reasonix/internal/contract/provider"
 )
 
 type compactionSpendKey struct{}
@@ -38,25 +36,6 @@ func compactionSpendFrom(ctx context.Context) *compactionSpend {
 	}
 	spend, _ := ctx.Value(compactionSpendKey{}).(*compactionSpend)
 	return spend
-}
-
-// record adds one billed summarizer call. Called where the usage event is
-// emitted, so what a transaction reports and what the usage ledger receives
-// cannot come apart.
-func (s *compactionSpend) record(u *provider.Usage) {
-	if s == nil || u == nil {
-		return
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.total.Calls++
-	s.total.RequestAttempts += max(1, u.RequestCount)
-	s.total.InputTokens += u.PromptTokens
-	s.total.OutputTokens += u.CompletionTokens
-	s.total.ReasoningTokens += u.ReasoningTokens
-	s.total.CacheHitTokens += u.CacheHitTokens
-	s.total.CacheMissTokens += u.CacheMissTokens
-	s.total.CacheWriteTokens += u.CacheWriteTokens
 }
 
 func (s *compactionSpend) read() sessionstore.CompactionUsage {

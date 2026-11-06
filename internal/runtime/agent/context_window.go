@@ -4,7 +4,6 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"reasonix/internal/contract/provider"
 	"reasonix/internal/state/sessionstore"
 )
 
@@ -12,7 +11,6 @@ import (
 // installed projection, the compaction in flight, and the latches the
 // pressure notices keep. It restarts with the conversation.
 type windowState struct {
-	summaryPrefix atomic.Pointer[provider.Request]
 	// coveredHash remembers the folded prefix's fingerprint under the rewrite
 	// counter that makes it valid; gauges read it off the run loop.
 	coveredHash atomic.Pointer[coveredHashMemo]
@@ -33,7 +31,6 @@ type windowState struct {
 // reset rebinds the window to a new conversation. checkpointState is left to
 // preflight, which rebinds it with the transcript path.
 func (w *windowState) reset() {
-	w.summaryPrefix.Store(nil)
 	// Keyed on a rewrite counter that restarts with the new transcript, so a
 	// carried-over entry could answer for history this session never had.
 	w.coveredHash.Store(nil)

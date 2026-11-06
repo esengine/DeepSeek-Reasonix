@@ -3,13 +3,18 @@
 .image-trigger:disabled { cursor: default }
 .image-preview {
   position: fixed; inset: var(--chrome-h, 39px) 0 0; z-index: 60;
-  display: grid; grid-template-rows: 36px minmax(0, 1fr) auto; gap: 12px; padding: 16px;
-  background: color-mix(in srgb, var(--page) 92%, transparent);
+  display: grid; grid-template-rows: 36px minmax(0, 1fr) auto; gap: 12px; padding: 10px 12px;
+  background: rgb(20 22 20 / .82); color: #f4f2ea;
   -webkit-backdrop-filter: blur(14px) saturate(.92); backdrop-filter: blur(14px) saturate(.92);
 }
-.image-preview-close { justify-self: end; width: 36px; height: 36px; display: grid; place-items: center; border: 1px solid var(--border); border-radius: var(--r-sm); background: var(--raised); color: var(--text); cursor: pointer }
-.image-preview-close:hover { background: var(--overlay) }
-.image-preview-close:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px }
+.image-preview-bar { display: flex; align-items: center; gap: 8px; min-width: 0; font: var(--w-med) var(--fs-meta) var(--ui); }
+.image-preview-bar > button { width: 28px; height: 28px; display: grid; place-items: center; flex: none; border: 0; border-radius: var(--r-sm); background: transparent; color: inherit; cursor: pointer; }
+.image-preview-bar > button:hover { background: rgb(255 255 255 / .14); }
+.image-preview-bar > button:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.image-preview-bar .studio-icon { width: 16px; height: 16px; }
+.image-preview-gap { flex: 1; }
+.image-preview-size { opacity: .6; white-space: nowrap; }
+.image-preview-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .image-preview-view { display: grid; place-items: center; min-width: 0; min-height: 0; overflow: hidden }
-.image-preview-view img { max-width: 100%; max-height: 100%; min-width: 0; min-height: 0; object-fit: contain; border-radius: var(--r-md); box-shadow: var(--shadow-float) }
-.image-preview-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: center; color: var(--muted); font: var(--w-reg) var(--fs-ui) var(--mono) }
+.image-preview-view img { max-width: 100%; max-height: 100%; min-width: 0; min-height: 0; object-fit: contain; border-radius: var(--r-sm); cursor: grab; touch-action: none; }
+.image-preview-hint { text-align: center; color: rgb(244 242 234 / .7); font: var(--w-med) var(--fs-meta) var(--ui); }

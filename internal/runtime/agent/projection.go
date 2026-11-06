@@ -32,6 +32,7 @@ const (
 	CompactionModeNative     = "native"
 	CompactionModeSummarized = "summarized"
 	CompactionModeDegraded   = "degraded"
+	CompactionModeArchived   = "archived"
 	CompactionModeSnip       = "snip"
 )
 

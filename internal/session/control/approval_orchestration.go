@@ -341,20 +341,19 @@ func (c *Controller) AnswerQuestionFrom(id string, answers []event.AskAnswer, vi
 	if err != nil {
 		return err
 	}
-	// No selections is the explicit "skip" path: it ends the turn rather than
-	// feeding a prose dismissal back to the model (#6869). An external
-	// party's form is refused to that party instead, and the turn goes on.
+	c.recordAskDecisionReceipt(id, pending, answers, "answered", via)
+	pending.reply <- answers // buffered, never blocks
+	// No selections is the explicit "skip" path: the turn ends as finished
+	// instead of feeding a dismissal back to the model (#6869). An external
+	// party's form is refused to that party, and the turn goes on.
 	if !askAnswersHaveSelection(answers) && pending.origin == nil {
 		c.mu.Lock()
 		activeTurn := c.gate.cancel != nil
 		c.mu.Unlock()
 		if activeTurn {
 			c.cancelTurn(causeAskSkipped)
-			return nil
 		}
 	}
-	c.recordAskDecisionReceipt(id, pending, answers, "answered", via)
-	pending.reply <- answers // buffered, never blocks
 	return nil
 }
 

@@ -5,6 +5,8 @@
 @import "./composition-picker.css" layer(legacy);
 @import "./dock.css" layer(legacy);
 @import "./studio.css" layer(legacy);
+@import "./find.css" layer(legacy);
+@import "./refine.css" layer(legacy);
 @import "./dialogcenter.css" layer(legacy);
 @import "./settings-type.css" layer(legacy);
 @import "./stophint.css" layer(legacy);

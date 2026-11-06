@@ -31,30 +31,6 @@ func (r *noticeRecorder) held() []event.Event {
 	return append([]event.Event(nil), r.got...)
 }
 
-func TestHeldRetryAfterFailedSummaryIsAnnouncedOncePerTurn(t *testing.T) {
-	a := newPressureAgent(t, &failingSummaryProvider{})
-	rec := &noticeRecorder{}
-	a.svc.sink = rec
-	_ = prepare(t, a, CompactionTriggerPressure)
-	if got := rec.held(); len(got) != 0 {
-		t.Fatalf("the attempt itself announced a hold: %+v", got)
-	}
-	_ = prepare(t, a, CompactionTriggerPressure)
-	_ = prepare(t, a, CompactionTriggerPressure)
-	got := rec.held()
-	if len(got) != 1 {
-		t.Fatalf("held notices = %d, want 1 for the turn", len(got))
-	}
-	a.activeTurnCreatedAt.Store(a.activeTurnCreatedAt.Load() + 1)
-	_ = prepare(t, a, CompactionTriggerPressure)
-	if n := len(rec.held()); n != 2 {
-		t.Fatalf("held notices after a new turn = %d, want the cause announced again (2)", n)
-	}
-	if got[0].Detail != string(FailSummaryFailed) || got[0].Level != event.LevelWarn || got[0].Text == "" {
-		t.Fatalf("held notice = %+v, want warn level, English fallback and the failure code as detail", got[0])
-	}
-}
-
 func TestHoldBelowTheTriggerIsNotAnnounced(t *testing.T) {
 	rec := &noticeRecorder{}
 	a := New(&failingSummaryProvider{}, tool.NewRegistry(), &sessionstore.Session{Messages: []provider.Message{

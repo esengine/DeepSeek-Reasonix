@@ -81,6 +81,7 @@ export const APP: Messages = {
   "app.pick_one_on_the_left": { zh: "从左栏选择，或在当前文件夹新建", en: "Pick one on the left, or start a new one in this folder" },
   "app.point_at_an_executable": { zh: "指定一个可执行文件", en: "Point at an executable" },
   "app.preparing_workspace": { zh: "准备工作目录", en: "Preparing workspace" },
+  "app.project_folder_not_found": { zh: "找不到项目文件夹", en: "Project folder not found" },
   "app.queued": { zh: "插话待送达", en: "Queued" },
   "app.quick_actions": { zh: "快捷操作", en: "Quick actions" },
   "app.recently_used": { zh: "最近用过", en: "Recently used" },

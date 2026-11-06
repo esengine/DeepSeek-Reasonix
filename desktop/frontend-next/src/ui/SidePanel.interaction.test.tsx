@@ -54,6 +54,17 @@ describe("the side conversation panel", () => {
     expect(screen.getByText("这个函数做什么？")).toBeTruthy();
   });
 
+  it("carries an answer back to the main input as a quotation", async () => {
+    const onQuote = vi.fn();
+    const port = new MockPort() as unknown as AgentPort;
+    render(<SidePanel port={port} onClose={vi.fn()} onQuote={onQuote} />);
+    await userEvent.type(await screen.findByRole("textbox", { name: "向辅助会话提问" }), "这个函数做什么？");
+    await userEvent.click(screen.getByRole("button", { name: "发送" }));
+    await userEvent.click(await screen.findByRole("button", { name: "把这段回答引用到主输入框" }));
+    expect(onQuote).toHaveBeenCalledOnce();
+    expect(onQuote.mock.calls[0]![0]).toMatch(/^> .*只读回答/);
+  });
+
   it("draws the answer as markdown but leaves the question as typed", async () => {
     const { port } = draw();
     vi.spyOn(port, "askSide").mockResolvedValue("先看 **入口函数** 再看 `main`");

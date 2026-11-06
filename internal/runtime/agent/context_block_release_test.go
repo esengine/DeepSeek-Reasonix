@@ -2,7 +2,6 @@ package agent
 
 import (
 	"context"
-	"errors"
 	"strings"
 	"testing"
 
@@ -46,42 +45,6 @@ func prepare(t *testing.T, a *Agent, trigger string) error {
 	return err
 }
 
-func TestTransientSummaryFailureRetriesOnceAfterGrowth(t *testing.T) {
-	p := &failingSummaryProvider{}
-	a := newPressureAgent(t, p)
-	_ = prepare(t, a, CompactionTriggerPressure)
-	_ = prepare(t, a, CompactionTriggerPressure)
-	if p.calls != 1 {
-		t.Fatalf("unchanged input retried: calls=%d", p.calls)
-	}
-	growBy(a, 400)
-	_ = prepare(t, a, CompactionTriggerPressure)
-	if p.calls != 1 {
-		t.Fatalf("growth below one step retried: calls=%d", p.calls)
-	}
-	growBy(a, 2000)
-	_ = prepare(t, a, CompactionTriggerPressure)
-	_ = prepare(t, a, CompactionTriggerPressure)
-	if p.calls != 2 {
-		t.Fatalf("growth past one step made %d requests, want 2", p.calls)
-	}
-}
-
-func TestRepeatedTransientFailureIsBoundedByGrowth(t *testing.T) {
-	p := &failingSummaryProvider{}
-	a := newPressureAgent(t, p)
-	const turns, perTurn = 40, 100
-	for range turns {
-		growBy(a, perTurn)
-		_ = prepare(t, a, CompactionTriggerPressure)
-	}
-	w := a.window()
-	step := w.retryGrowthStep(w.estimatedVisibleRequestTokens(w.modelVisibleMessages()))
-	if limit := 1 + turns*perTurn/step + 1; p.calls < 2 || p.calls > limit {
-		t.Fatalf("summary requests over %d turns = %d, want within [2,%d]", turns, p.calls, limit)
-	}
-}
-
 func TestDeterministicFailureStaysBlockedDespiteGrowth(t *testing.T) {
 	p := &failingSummaryProvider{}
 	a := newPressureAgent(t, p)
@@ -90,68 +53,6 @@ func TestDeterministicFailureStaysBlockedDespiteGrowth(t *testing.T) {
 	_ = prepare(t, a, CompactionTriggerPressure)
 	if p.calls != 0 {
 		t.Fatalf("deterministic block retried after growth: calls=%d", p.calls)
-	}
-}
-
-func TestTransientFailureDoesNotBlockOverflowRecovery(t *testing.T) {
-	p := &failingSummaryProvider{}
-	a := newPressureAgent(t, p)
-	_ = prepare(t, a, CompactionTriggerPressure)
-	err := prepare(t, a, CompactionTriggerOverflow)
-	if errors.Is(err, ErrCompactionRequired) && p.calls == 1 {
-		t.Fatalf("overflow was refused without trying: %v", err)
-	}
-	if p.calls != 2 {
-		t.Fatalf("overflow made %d total requests, want 2", p.calls)
-	}
-}
-
-func TestLegacyReceiptWithoutSizeReleasesOnce(t *testing.T) {
-	p := &failingSummaryProvider{}
-	a := newPressureAgent(t, p)
-	a.sess.win.compactionState.LastReceipt = &sessionstore.ContextMaintenanceReceipt{
-		Status: "failed", Action: "summary", Code: string(FailSummaryTruncated),
-	}
-	_ = prepare(t, a, CompactionTriggerPressure)
-	_ = prepare(t, a, CompactionTriggerPressure)
-	if p.calls != 1 {
-		t.Fatalf("legacy transient receipt made %d requests, want exactly 1", p.calls)
-	}
-}
-
-func TestLegacyBlockedHashOnlyFollowsInput(t *testing.T) {
-	p := &failingSummaryProvider{}
-	a := newPressureAgent(t, p)
-	w := a.window()
-	w.sess.win.compactionState.BlockedInputHash = w.contextMaintenanceInputHash(w.modelVisibleMessages())
-	_ = prepare(t, a, CompactionTriggerPressure)
-	if p.calls != 0 {
-		t.Fatalf("matching legacy hash did not block: calls=%d", p.calls)
-	}
-	growBy(a, 500)
-	_ = prepare(t, a, CompactionTriggerPressure)
-	if p.calls != 1 {
-		t.Fatalf("changed input under a legacy hash made %d requests, want 1", p.calls)
-	}
-}
-
-func TestLegacyHashDoesNotOverrideReleasedTransientReceipt(t *testing.T) {
-	p := &failingSummaryProvider{}
-	a := newPressureAgent(t, p)
-	w := a.window()
-	w.sess.win.compactionState.BlockedInputHash = w.contextMaintenanceInputHash(w.modelVisibleMessages())
-	w.sess.win.compactionState.LastReceipt = &sessionstore.ContextMaintenanceReceipt{
-		Status: "failed", Action: "summary", Code: string(FailSummaryTruncated),
-	}
-	if a.ContextMaintenanceSnapshot().Blocked {
-		t.Fatal("status reports blocked for a released transient receipt")
-	}
-	if blocked, _ := w.contextMaintenanceBlocked(w.contextMaintenanceInputHash(w.modelVisibleMessages()), w.estimatedVisibleRequestTokens(w.modelVisibleMessages()), false); blocked {
-		t.Fatal("manager reports blocked for a released transient receipt")
-	}
-	_ = prepare(t, a, CompactionTriggerPressure)
-	if p.calls != 1 {
-		t.Fatalf("calls=%d, want 1", p.calls)
 	}
 }
 

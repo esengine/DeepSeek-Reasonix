@@ -14,6 +14,9 @@ import (
 // about it: the smallest request it refused as too long, and the largest it
 // accepted. Both are sizes of requests we actually sent, so together they bound
 // the real window instead of guessing at one.
+// minFoldSpanTokens is the smallest window a fold can work inside.
+const minFoldSpanTokens = 4000
+
 type contextWindowProbe struct {
 	rejected atomic.Int64
 	accepted atomic.Int64
@@ -64,7 +67,7 @@ func (p *contextWindowProbe) window() int {
 	// A refusal too small for one fold to be worth summarizing is not a window
 	// this agent can work inside: adopting it would put every later turn under a
 	// ceiling no projection can meet.
-	if rejected < minSummarySpanTokens {
+	if rejected < minFoldSpanTokens {
 		return 0
 	}
 	if accepted := p.accepted.Load(); accepted > 0 && accepted < rejected {

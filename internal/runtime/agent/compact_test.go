@@ -229,20 +229,6 @@ func TestKeepUserMarkedRequiresUserPrefixMarker(t *testing.T) {
 	}
 }
 
-// TestCompactFallsBackToMechanicalFoldWhenSummaryFails: when the summarizer is
-// unreachable, /compact must still free context (fold mechanically) and surface a
-// card, not hang or abort leaving a full window.
-// TestSummarizeRespectsContextCancel: a stalled stream (open but never closing)
-// must unblock on context cancellation instead of pinning compaction forever.
-func TestSummarizeRespectsContextCancel(t *testing.T) {
-	a := New(&fakeProvider{hang: true}, tool.NewRegistry(), &sessionstore.Session{}, Options{}, event.Discard)
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	if _, _, err := a.window().summarize(ctx, []provider.Message{{Role: provider.RoleUser, Content: "x"}}, ""); err == nil {
-		t.Fatal("summarize must return when ctx is cancelled, not hang")
-	}
-}
-
 // TestCompactEmitsEvents covers the card-driving signals: a CompactionStarted
 // (before the summarizer runs) then a CompactionDone carrying the trigger,
 // message count, and summary — in that order.
@@ -276,7 +262,7 @@ func TestCompactEmitsEvents(t *testing.T) {
 		case event.CompactionDone:
 			doneAt = i
 			c := e.Compaction
-			if c.Trigger != "auto" || c.Messages == 0 || !strings.Contains(c.Summary, "do X") {
+			if c.Trigger != "auto" || c.Messages == 0 || !strings.Contains(c.Summary, "archived, not summarized") {
 				t.Errorf("done event = %+v", c)
 			}
 		}
@@ -289,40 +275,6 @@ func TestCompactEmitsEvents(t *testing.T) {
 	}
 	if startedAt > doneAt {
 		t.Errorf("CompactionStarted (%d) must precede CompactionDone (%d)", startedAt, doneAt)
-	}
-}
-
-// TestCompactInjectsFocusAndPreCompactHook checks that /compact <focus> text and
-// a PreCompact hook's output both reach the summarizer's system prompt.
-func TestCompactInjectsFocusAndPreCompactHook(t *testing.T) {
-	prov := &fakeProvider{reply: "- ok"}
-	big := strings.Repeat("step work detail ", 200)
-	sess := &sessionstore.Session{Messages: []provider.Message{
-		{Role: provider.RoleSystem, Content: "sys"},
-		{Role: provider.RoleUser, Content: "task"},
-		{Role: provider.RoleAssistant, Content: big},
-		{Role: provider.RoleUser, Content: "more"},
-		{Role: provider.RoleAssistant, Content: big},
-		{Role: provider.RoleUser, Content: "next"},
-		{Role: provider.RoleAssistant, Content: "ok"},
-	}}
-	a := New(prov, tool.NewRegistry(), sess, Options{
-		ContextWindow: 50_000, RecentKeep: 2,
-		Hooks: &stubHooks{preCompactOut: "KEEP-THE-MIGRATION-PLAN"},
-	}, event.Discard)
-
-	if err := a.window().compact(context.Background(), "manual", "focus on the auth refactor", compactionScope{ignoreThreshold: true, ignoreEconomics: true}); err != nil {
-		t.Fatalf("compact: %v", err)
-	}
-	if len(prov.got) == 0 || prov.got[0].Role != provider.RoleSystem {
-		t.Fatalf("summarizer wasn't asked with a system prompt: %+v", prov.got)
-	}
-	sys := prov.got[0].Content
-	if !strings.Contains(sys, "focus on the auth refactor") {
-		t.Errorf("summary system prompt missing the /compact focus text: %q", sys)
-	}
-	if !strings.Contains(sys, "KEEP-THE-MIGRATION-PLAN") {
-		t.Errorf("summary system prompt missing the PreCompact hook output: %q", sys)
 	}
 }
 
@@ -420,7 +372,7 @@ func TestMaybeCompactForceCeilingBypassesEconomics(t *testing.T) {
 		{Role: provider.RoleUser, Content: "next"},
 		{Role: provider.RoleAssistant, Content: "ok"},
 	}}
-	prov := &fakeProvider{reply: "forced summary"}
+	prov := &fakeProvider{reply: "archived, not summarized"}
 	a := New(prov, tool.NewRegistry(), sess, Options{ContextWindow: window, CompactRatio: 0.85, RecentKeep: 2}, event.Discard)
 
 	// hard = 10000-256 = 9744; observe just above it.
@@ -432,11 +384,8 @@ func TestMaybeCompactForceCeilingBypassesEconomics(t *testing.T) {
 		t.Fatalf("first user turn not pinned verbatim in canonical: %+v", sess.Messages[1])
 	}
 	proj := visibleContext(a)
-	if !hasCompactionSummary(proj) || !strings.Contains(joinContents(proj), "forced summary") {
+	if !hasCompactionSummary(proj) || !strings.Contains(joinContents(proj), "archived, not summarized") {
 		t.Fatalf("forced compact did not install summary projection: %+v", proj)
-	}
-	if len(prov.got) == 0 {
-		t.Fatalf("summarizer was not called at force ceiling")
 	}
 }
 
@@ -477,7 +426,7 @@ func TestMaybeCompactFoldsSingleLargeMessageAtThreshold(t *testing.T) {
 		{Role: provider.RoleUser, Content: "next"},
 		{Role: provider.RoleAssistant, Content: "ok"},
 	}}
-	a := New(&fakeProvider{reply: "single large summary"}, tool.NewRegistry(), sess, Options{
+	a := New(&fakeProvider{reply: "archived, not summarized"}, tool.NewRegistry(), sess, Options{
 		ContextWindow: window, CompactRatio: 0.8, RecentKeep: 2,
 	}, event.Discard)
 
@@ -486,7 +435,7 @@ func TestMaybeCompactFoldsSingleLargeMessageAtThreshold(t *testing.T) {
 		t.Fatalf("canonical len = %d, want 5: %+v", got, sess.Messages)
 	}
 	proj := visibleContext(a)
-	if !hasCompactionSummary(proj) || !strings.Contains(joinContents(proj), "single large summary") {
+	if !hasCompactionSummary(proj) || !strings.Contains(joinContents(proj), "archived, not summarized") {
 		t.Fatalf("single large message was not compacted into projection: %+v", proj)
 	}
 }
@@ -673,59 +622,5 @@ func TestCompactTriggerIgnoresConfiguredOutputBudget(t *testing.T) {
 	}
 	if got := a.window().checkpointCeiling(); got != 50_000 {
 		t.Fatalf("checkpoint ceiling = %d, want 50000", got)
-	}
-}
-
-func TestCompactRollsOldDigestsIntoNew(t *testing.T) {
-	// A1 rolling merge: prior digests enter the fold region and are merged into
-	// one new provider-visible summary. The canonical transcript stays intact.
-	oldDigest := SummaryTagOpen + "\n" + strings.Repeat("old standing fact ", 60) + "\n" + SummaryTagClose // >1500 chars → not pinnable
-	newestDigest := SummaryTagOpen + "\nnewest digest\n" + SummaryTagClose
-	big := strings.Repeat("work output ", 200)
-	sess := &sessionstore.Session{Messages: []provider.Message{
-		{Role: provider.RoleSystem, Content: "sys"},
-		{Role: provider.RoleUser, Content: "task"},
-		{Role: provider.RoleUser, Content: oldDigest}, // old digest, large → folds
-		{Role: provider.RoleUser, Content: newestDigest},
-		{Role: provider.RoleAssistant, Content: big},
-		{Role: provider.RoleUser, Content: "next"},
-		{Role: provider.RoleAssistant, Content: "ok"},
-	}}
-	a := New(&fakeProvider{reply: "merged digest"}, tool.NewRegistry(), sess,
-		Options{RecentKeep: 2, ArchiveDir: testenv.TempDir(t)}, event.Discard)
-
-	if err := a.window().compact(context.Background(), "manual", "", compactionScope{ignoreThreshold: true, ignoreEconomics: true}); err != nil {
-		t.Fatalf("compact: %v", err)
-	}
-	canonical := sess.Snapshot()
-	var oldDigestRetained bool
-	for _, m := range canonical {
-		if m.Content == oldDigest {
-			oldDigestRetained = true
-		}
-	}
-	if !oldDigestRetained {
-		t.Fatalf("canonical transcript lost old digest: %+v", canonical)
-	}
-
-	projection := visibleContext(a)
-	var summaryCount int
-	var generatedSummaryPresent bool
-	for _, m := range projection {
-		if isCompactionSummary(m) {
-			summaryCount++
-			if strings.Contains(m.Content, "merged digest") {
-				generatedSummaryPresent = true
-			}
-		}
-		if m.Content == oldDigest {
-			t.Fatalf("old digest survived verbatim in projection: %+v", projection)
-		}
-	}
-	if summaryCount != 1 {
-		t.Fatalf("projection summaries = %d, want exactly 1: %+v", summaryCount, projection)
-	}
-	if !generatedSummaryPresent {
-		t.Fatalf("generated rolling summary missing from projection: %+v", projection)
 	}
 }

@@ -30,15 +30,42 @@ describe("a corner notice carries one shape", () => {
 
   it("tells a failure from a note by its icon, not only its colour", () => {
     render(<ToastStack onFeedback={vi.fn()} />);
-    act(() => { pushToast("失败了"); pushNote("只是说明"); });
-    const [failure, note] = [...document.querySelectorAll(".toast .toast-icon")];
+    act(() => {
+      pushToast("失败了");
+      pushNote("只是说明");
+    });
+    const [failure, note] = [
+      ...document.querySelectorAll(".toast .toast-icon"),
+    ];
     expect(failure.getAttribute("data-kind")).toBe("error");
     expect(note.getAttribute("data-kind")).toBe("note");
   });
 
   it("keeps the dismiss button on every notice", () => {
     render(<ToastStack onFeedback={vi.fn()} />);
-    act(() => { pushToast("一"); pushNote("二"); });
+    act(() => {
+      pushToast("一");
+      pushNote("二");
+    });
     expect(screen.getAllByRole("button", { name: "知道了" })).toHaveLength(2);
+  });
+
+  it("shows at most the three newest, oldest first", () => {
+    render(<ToastStack onFeedback={vi.fn()} />);
+    act(() => {
+      for (const n of ["一", "二", "三", "四", "五"]) pushNote(n);
+    });
+    const shown = [...document.querySelectorAll(".toast .toast-body")].map(
+      (el) => el.textContent,
+    );
+    expect(shown).toEqual(["三", "四", "五"]);
+    act(() => {
+      screen.getAllByRole("button", { name: "知道了" })[2].click();
+    });
+    expect(
+      [...document.querySelectorAll(".toast .toast-body")].map(
+        (el) => el.textContent,
+      ),
+    ).toEqual(["三", "四"]);
   });
 });

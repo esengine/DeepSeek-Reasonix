@@ -731,7 +731,7 @@ export const EN_SETTINGS: Record<string, string> = {
   "拒绝提供": "Decline",
   "（补写过一次）": " (repaired once)",
   "（缺失部分由主机补全）": " (gaps kept by the host)",
-  "正在折叠为简报": "Folding into a digest",
+  "正在归档较早的内容": "Archiving earlier content",
   "本次未折叠任何内容": "This pass folded nothing",
   "扩展拒绝了这次折叠": "An extension refused this fold",
   "折叠结果没能保存": "The folded result could not be saved",
@@ -788,7 +788,7 @@ export const EN_SETTINGS: Record<string, string> = {
   "本段的 {n} 处改动均已写入简报": "All {n} changes made here are in the digest",
   "{kept}/{required} 处改动写进了简报": "{kept}/{required} changes are in the digest",
   "另有 {n} 处仅保留索引地址，需通过 recall 取回原文": "{n} more are index entries only; recall fetches the original",
-  "正在将 {n} 条消息折叠为简报": "Folding {n} messages into a digest",
+  "正在将 {n} 条消息归档": "Archiving {n} messages",
   "折叠了 {n} 条消息": "Folded {n} messages",
 
   // ── 首次连接 ─────────────────────────────────────────────────────
@@ -1155,8 +1155,8 @@ export const EN_SETTINGS: Record<string, string> = {
   "每一步的参数、输出与文件差异": "Each step's arguments, output and file diff",
   "长输出": "Long output",
   "超出一屏的命令输出与文件内容": "Command output and file contents longer than a screen",
-  "压缩简报": "Compaction brief",
-  "上下文压缩后，模型接下来依据的那份简报": "The brief the model works from after context is compacted",
+  "压缩归档": "Compaction archive",
+  "上下文压缩后，模型读回较早内容的位置和说明": "Where the model reads earlier content back from after compaction",
   "收起时预览思考开头": "Preview the beginning when collapsed",
   "在思考标题下方显示一行开头文字；思考进行中也显示，展开后隐藏。": "Show one line of opening text below the thinking header, including while thinking is in progress. Hidden when expanded.",
   "先检查配置，再决定改哪里。": "Check the configuration first, then decide what to change.",

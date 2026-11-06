@@ -10,6 +10,11 @@
 .composition-picker { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 4px; min-width: 0; max-width: 100%; }
 .composition-picker > .picker { min-width: 0; max-width: 100%; }
 .composition-trigger { max-width: 100%; }
+:root .composition-menu .mi[data-on] { background: var(--overlay); }
+:root .composer-menu.composition-menu .mi[data-on]::after { color: var(--net-ink); }
+:root .composition-menu .mi[data-on]:has(.rt)::after { display: none; }
+:root .composition-menu .studio-item-meta { padding: 0 5px; border: 1px solid var(--border); border-radius: var(--r-sm); color: var(--muted); font: var(--w-med) var(--fs-micro)/1.5 var(--ui); }
+.composition-menu .mi:not([data-on]) .rt { color: var(--net-ink); font-family: var(--ui); font-weight: var(--w-med); }
 .composition-trigger .nm { max-width: 180px; }
 .composition-trigger > .studio-icon { width: 12px; height: 12px; flex: none; }
 .composition-picker [role="alert"] { overflow-wrap: anywhere; }

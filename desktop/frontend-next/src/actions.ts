@@ -190,6 +190,9 @@ export const ACTIONS: UIAction[] = [
 
   { id: "image.open", kind: "view", target: "none", proof: "interaction" },
   { id: "image.close", kind: "view", target: "none", proof: "interaction" },
+  { id: "image.zoom", kind: "view", target: "none", proof: "interaction" },
+  { id: "image.pan", kind: "view", target: "none", proof: "interaction" },
+  { id: "image.download", kind: "view", target: "none", proof: "interaction" },
   { id: "image.focus-trap", kind: "navigation", target: "none", proof: "interaction" },
   { id: "tool.show-all", kind: "view", target: "none", proof: "interaction" },
   { id: "tool.show-full", kind: "view", target: "none", proof: "interaction" },
@@ -307,6 +310,7 @@ export const ACTIONS: UIAction[] = [
   { id: "side.collapse", kind: "view", target: "none", proof: "interaction" },
   { id: "side.toggle", kind: "view", target: "none", proof: "interaction" },
   { id: "side.quote", kind: "view", target: "none", proof: "interaction" },
+  { id: "side.quote-answer", kind: "view", target: "none", proof: "interaction" },
   { id: "side.unquote", kind: "view", target: "none", proof: "interaction" },
   { id: "side.draft", kind: "view", target: "none", proof: "interaction" },
   { id: "side.send", kind: "kernel-mutation", target: "none", proof: "interaction" },

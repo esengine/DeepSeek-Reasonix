@@ -113,59 +113,6 @@ func TestCommitSurvivesPostPublishDirSyncFailure(t *testing.T) {
 	}
 }
 
-// TestBlockedReceiptSurvivesPostPublishDirSyncFailure ensures a failed summary
-// still installs the generation-scoped receipt in memory when only parent-dir
-// fsync fails after rename — otherwise the next Prepare pays for another summary.
-func TestBlockedReceiptSurvivesPostPublishDirSyncFailure(t *testing.T) {
-	restore := fileutil.SetSyncParentDirForTest(func(string) error {
-		return errors.New("injected parent dir fsync failure")
-	})
-	t.Cleanup(restore)
-
-	const window = 10_000
-	messages := []provider.Message{
-		{Role: provider.RoleSystem, Content: "system"},
-		{Role: provider.RoleUser, Content: "task"},
-		{Role: provider.RoleAssistant, Content: strings.Repeat("old work ", 500)},
-		{Role: provider.RoleUser, Content: "current"},
-		{Role: provider.RoleAssistant, Content: "tail"},
-	}
-	path := filepath.Join(testenv.TempDir(t), "session.jsonl")
-	prov := &failingSummaryProvider{}
-	a := New(prov, tool.NewRegistry(), &sessionstore.Session{Messages: append([]provider.Message(nil), messages...)}, Options{
-		ContextWindow: window, CompactRatio: 0.85, RecentKeep: 2,
-		WorkspaceID: "workspace", ModelRef: "model",
-	}, event.Discard)
-	a.BindSessionPath(path, true)
-
-	policy := ContextPreparePolicy{Trigger: CompactionTriggerPressure, ObservedInputTokens: 8600}
-	if _, err := a.window().contextManager().Prepare(context.Background(), policy); err != nil {
-		t.Fatalf("above-ratio failure should not reject: %v", err)
-	}
-	if prov.calls != 1 {
-		t.Fatalf("summary calls = %d, want 1", prov.calls)
-	}
-	if a.sess.win.compactionState.LastReceipt == nil {
-		t.Fatal("memory lost blocked/failed receipt after post-publish dir-sync fault")
-	}
-	if status := a.sess.win.compactionState.LastReceipt.Status; status != "blocked" && status != "failed" {
-		t.Fatalf("receipt status = %q", status)
-	}
-	disk, ok, err := sessionstore.LoadCompactionState(path)
-	if err != nil || !ok || disk.LastReceipt == nil {
-		t.Fatalf("disk receipt missing: ok=%v err=%v", ok, err)
-	}
-	if disk.Generation != a.sess.win.compactionState.Generation {
-		t.Fatalf("blocked generation fork: disk=%d mem=%d", disk.Generation, a.sess.win.compactionState.Generation)
-	}
-	if _, err := a.window().contextManager().Prepare(context.Background(), policy); err != nil {
-		t.Fatal(err)
-	}
-	if prov.calls != 1 {
-		t.Fatalf("same generation re-summarized after dir-sync fault: calls=%d", prov.calls)
-	}
-}
-
 func TestLoadProjectionSidecarDoesNotRewriteExactKey(t *testing.T) {
 	path := filepath.Join(testenv.TempDir(t), "session.jsonl")
 	msgs := []provider.Message{

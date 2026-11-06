@@ -55,7 +55,7 @@ func TestContextWindowProbeBoundsWhatWasRejectedAndAccepted(t *testing.T) {
 
 func TestContextWindowProbeIgnoresARefusalTooSmallToFold(t *testing.T) {
 	var probe contextWindowProbe
-	probe.noteRejected(minSummarySpanTokens - 1)
+	probe.noteRejected(minFoldSpanTokens - 1)
 	if got := probe.window(); got != 0 {
 		t.Fatalf("window = %d, want 0 for a refusal no fold could answer", got)
 	}
@@ -71,7 +71,6 @@ func TestContextWindowProbeIgnoresARefusalTooSmallToFold(t *testing.T) {
 func TestContextOverflowRejectionFoldsAndReplays(t *testing.T) {
 	prov := testutil.NewMock("mock",
 		testutil.Turn{StreamError: contextOverflowRejection()},
-		testutil.Turn{Text: "digest of the earlier work"},
 		testutil.Turn{Text: "recovered"},
 	)
 	session := foldableSessionOverForce(20)
@@ -85,10 +84,10 @@ func TestContextOverflowRejectionFoldsAndReplays(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 	requests := prov.Requests()
-	if len(requests) != 3 {
-		t.Fatalf("provider saw %d requests, want refused + summary + replay", len(requests))
+	if len(requests) != 2 {
+		t.Fatalf("provider saw %d requests, want refused + replay", len(requests))
 	}
-	if refused, replayed := requestChars(requests[0]), requestChars(requests[2]); replayed >= refused {
+	if refused, replayed := requestChars(requests[0]), requestChars(requests[1]); replayed >= refused {
 		t.Fatalf("replay carried %d chars against the refused %d; the fold freed nothing", replayed, refused)
 	}
 	messages := session.Snapshot()
@@ -103,7 +102,6 @@ func TestContextOverflowRejectionFoldsAndReplays(t *testing.T) {
 func TestContextOverflowProbesAnUndeclaredWindow(t *testing.T) {
 	prov := testutil.NewMock("mock",
 		testutil.Turn{StreamError: contextOverflowRejection()},
-		testutil.Turn{Text: "digest of the earlier work"},
 		testutil.Turn{Text: "recovered"},
 	)
 	session := foldableSessionOverForce(60)
@@ -122,10 +120,10 @@ func TestContextOverflowProbesAnUndeclaredWindow(t *testing.T) {
 		t.Fatal("the refusal taught the agent nothing about the window")
 	}
 	requests := prov.Requests()
-	if len(requests) != 3 {
-		t.Fatalf("provider saw %d requests, want refused + summary + replay", len(requests))
+	if len(requests) != 2 {
+		t.Fatalf("provider saw %d requests, want refused + replay", len(requests))
 	}
-	if refused, replayed := requestChars(requests[0]), requestChars(requests[2]); replayed >= refused {
+	if refused, replayed := requestChars(requests[0]), requestChars(requests[1]); replayed >= refused {
 		t.Fatalf("replay carried %d chars against the refused %d; the fold freed nothing", replayed, refused)
 	}
 }
@@ -154,7 +152,6 @@ func TestContextOverflowWithNothingToFoldFailsTheTurn(t *testing.T) {
 func TestContextOverflowRecoveryIsOneShotPerRound(t *testing.T) {
 	prov := testutil.NewMock("mock",
 		testutil.Turn{StreamError: contextOverflowRejection()},
-		testutil.Turn{Text: "digest of the earlier work"},
 		testutil.Turn{StreamError: contextOverflowRejection()},
 	)
 	session := foldableSessionOverForce(20)
@@ -168,8 +165,8 @@ func TestContextOverflowRecoveryIsOneShotPerRound(t *testing.T) {
 	if !provider.IsContextOverflow(err) {
 		t.Fatalf("Run error = %v, want the second rejection to end the turn", err)
 	}
-	if got := len(prov.Requests()); got != 3 {
-		t.Fatalf("provider saw %d requests, want refused + summary + one replay", got)
+	if got := len(prov.Requests()); got != 2 {
+		t.Fatalf("provider saw %d requests, want refused + one replay", got)
 	}
 	if text := strings.TrimSpace(latestDigest(a.sess.win.compactionState.Projection.Messages)); text == "" {
 		t.Fatal("the recovery fold left no projection behind")
@@ -189,7 +186,6 @@ func codelessOverflowRejection() error {
 func TestCodelessRejectionPastTheWindowWithItsCompletionFoldsAndReplays(t *testing.T) {
 	prov := testutil.NewMock("mock",
 		testutil.Turn{StreamError: codelessOverflowRejection()},
-		testutil.Turn{Text: "digest of the earlier work"},
 		testutil.Turn{Text: "recovered"},
 	)
 	session := foldableSessionOverForce(20)
@@ -206,8 +202,8 @@ func TestCodelessRejectionPastTheWindowWithItsCompletionFoldsAndReplays(t *testi
 	if err := a.Run(context.Background(), "continue"); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	if got := len(prov.Requests()); got != 3 {
-		t.Fatalf("provider saw %d requests, want refused + summary + replay", got)
+	if got := len(prov.Requests()); got != 2 {
+		t.Fatalf("provider saw %d requests, want refused + replay", got)
 	}
 }
 
@@ -224,7 +220,6 @@ func (sharedWindowMock) OutputBudget() int         { return 4_000 }
 func TestCodelessRejectionOnASharedWindowFoldsAndReplays(t *testing.T) {
 	inner := testutil.NewMock("mock",
 		testutil.Turn{StreamError: codelessOverflowRejection()},
-		testutil.Turn{Text: "digest of the earlier work"},
 		testutil.Turn{Text: "recovered"},
 	)
 	session := foldableSessionOverForce(20)
@@ -241,7 +236,7 @@ func TestCodelessRejectionOnASharedWindowFoldsAndReplays(t *testing.T) {
 	if err := a.Run(context.Background(), "continue"); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	if got := len(inner.Requests()); got != 3 {
-		t.Fatalf("provider saw %d requests, want refused + summary + replay", got)
+	if got := len(inner.Requests()); got != 2 {
+		t.Fatalf("provider saw %d requests, want refused + replay", got)
 	}
 }

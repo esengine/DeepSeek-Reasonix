@@ -23,6 +23,7 @@ const MARKS: Record<string, string> = {
   x: "× — the close mark, sized to hold its cell beside ✓",
   "ptab-x": "× — same mark on a pane tab",
   ah: "› — the affordance arrow",
+  "mode-toggle": "Aa and .* — the glyphs of the search flags they switch, which are the flags' own notation",
   prompt: "› — the composer's own prompt character",
   esc: "Esc — a keycap, which is lettering on a key rather than prose",
   "oobe-brand": "the lockup's STUDIO line, deliberately set in the terminal's face",

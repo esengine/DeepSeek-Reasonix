@@ -1,16 +1,11 @@
 package agent
 
 import (
-	"context"
-	"slices"
 	"strings"
 	"sync"
 	"testing"
 
-	"reasonix/internal/base/testenv"
-	"reasonix/internal/contract/event"
 	"reasonix/internal/contract/provider"
-	"reasonix/internal/contract/tool"
 	"reasonix/internal/safety/evidence"
 )
 
@@ -103,68 +98,5 @@ func TestCoverageIsSatisfiedByAnEmptyFold(t *testing.T) {
 	}, coverageTools, "the user asked what the project does")
 	if cov.Required() != 0 || cov.LostAChange() || cov.LostEveryChange() {
 		t.Fatalf("a fold that changed nothing owes nothing: %+v", cov)
-	}
-}
-
-// The card that shows a fold's quality can only be as honest as the event
-// behind it. Coverage is measured during the fold and would read as a clean
-// zero at every frontend if it were not carried out with the result.
-func TestCompactionDoneCarriesWhatTheDigestKept(t *testing.T) {
-	sess := foldableSessionOverForce(40)
-	// Early enough to land in the fold rather than the verbatim tail.
-	sess.Messages = slices.Insert(sess.Messages, 2,
-		provider.Message{Role: provider.RoleAssistant, ToolCalls: []provider.ToolCall{
-			{ID: "w1", Name: "write_file", Arguments: `{"path":"internal/parser/lexer.go"}`},
-		}},
-		provider.Message{Role: provider.RoleTool, ToolCallID: "w1", Name: "write_file", Content: "wrote"})
-
-	var done []event.Compaction
-	sink := event.FuncSink(func(e event.Event) {
-		if e.Kind == event.CompactionDone {
-			done = append(done, e.Compaction)
-		}
-	})
-	reg := tool.NewRegistry()
-	reg.Add(fakeTool{name: "write_file", writesPaths: true})
-	a := New(&fakeProvider{reply: "## Files & code\n- internal/parser/lexer.go rewritten"}, reg, sess,
-		Options{ContextWindow: 60_000, CompactRatio: 0.5, RecentKeep: 2, ArchiveDir: testenv.TempDir(t)}, sink)
-
-	if _, _, err := a.window().compactToProjection(context.Background(), CompactionTriggerManual, "", compactionScope{ignoreThreshold: true, ignoreEconomics: true}, false); err != nil {
-		t.Fatalf("compactToProjection: %v", err)
-	}
-	if len(done) != 1 {
-		t.Fatalf("CompactionDone events = %d, want 1", len(done))
-	}
-	got := done[0]
-	if got.CoverageRequired == 0 {
-		t.Fatalf("the fold rewrote a file but the event reports no coverage: %+v", got)
-	}
-	if got.CoverageMissing != 0 {
-		t.Fatalf("the digest named the file it rewrote; missing = %d", got.CoverageMissing)
-	}
-	if got.SourceTokens <= got.ProjectionTokens || got.ProjectionTokens == 0 {
-		t.Fatalf("sizes = %d → %d, want a real shrink", got.SourceTokens, got.ProjectionTokens)
-	}
-}
-
-// A digest written from input the window forced shortened cannot name changes
-// it was never shown; those are restored by the backstop, not a reason to drop
-// the whole fold.
-func TestCoverageDoesNotBlameDigestForUnseenChanges(t *testing.T) {
-	region := coverageRegion()
-	shown := region[:0:0]
-	cov := measureShownCoverage(region, shown, coverageTools, "The user asked for a refactor.")
-	if cov.LostEveryChange() {
-		t.Fatalf("changes the summarizer never saw were read as forgotten: %+v", cov)
-	}
-	if len(cov.Unseen) != 2 || cov.Missing() == 0 {
-		t.Fatalf("unseen changes must still be missing so the backstop writes them: %+v", cov)
-	}
-	if got := foldCoverageBackstop(cov); !strings.Contains(got, "lexer.go") {
-		t.Errorf("backstop did not restore the unseen change: %q", got)
-	}
-	seen := measureShownCoverage(region, region, coverageTools, "The user asked for a refactor.")
-	if !seen.LostEveryChange() {
-		t.Errorf("a digest that saw every change and named none must still read as broken: %+v", seen)
 	}
 }

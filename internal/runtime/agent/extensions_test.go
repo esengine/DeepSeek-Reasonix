@@ -1128,56 +1128,6 @@ func newCompactionAgent(t *testing.T, d *dispatch.Dispatcher) (*mockProvider, *A
 	}, event.Discard)
 }
 
-func TestCompactionPrepareReplaceGuidance(t *testing.T) {
-	client := &fakeDispatchClient{interceptFn: func(ev protocol.InterceptEvent, payload json.RawMessage) (protocol.InterceptResult, error) {
-		if ev == protocol.EventCompactionPrepare {
-			var in dispatch.CompactionPreparePayload
-			if err := json.Unmarshal(payload, &in); err != nil {
-				return protocol.InterceptResult{}, err
-			}
-			in.Guidance = "EXTENSION GUIDANCE"
-			return replaceWith(t, in), nil
-		}
-		return protocol.InterceptResult{Decision: protocol.DecisionContinue}, nil
-	}}
-	d := newExtDispatcher(client, true, nil, extension.PointCompactionPrepare)
-	mp, a := newCompactionAgent(t, d)
-	if _, err := a.CompactNow(context.Background(), CompactRequest{}); err != nil {
-		t.Fatalf("CompactNow: %v", err)
-	}
-	for i, req := range mp.requests { // a fold too large for one call is summarized in parts
-		if sys := req.Messages[0].Content; !strings.Contains(sys, "EXTENSION GUIDANCE") {
-			t.Fatalf("summarizer call %d of %d missing the replaced guidance:\n%.200q", i+1, len(mp.requests), sys)
-		}
-	}
-	if sc := joinContents(visibleContext(a)); !strings.Contains(sc, "SUMMARY TEXT") {
-		t.Fatalf("projection missing the summary:\n%.200q", sc)
-	}
-	if n := client.notifyCountFor(protocol.EventCompactionPrepare); n != 1 {
-		t.Fatalf("compaction.prepare events = %d, want 1", n)
-	}
-}
-
-func TestCompactionPrepareReplaceMessages(t *testing.T) {
-	client := &fakeDispatchClient{interceptFn: func(ev protocol.InterceptEvent, _ json.RawMessage) (protocol.InterceptResult, error) {
-		if ev == protocol.EventCompactionPrepare {
-			return replaceWith(t, dispatch.CompactionPreparePayload{
-				Messages: []protocol.ProviderMessage{{Role: protocol.ProviderRoleUser, Content: "EXTENSION FOLD"}},
-			}), nil
-		}
-		return protocol.InterceptResult{Decision: protocol.DecisionContinue}, nil
-	}}
-	d := newExtDispatcher(client, true, nil, extension.PointCompactionPrepare)
-	mp, a := newCompactionAgent(t, d)
-	if _, err := a.CompactNow(context.Background(), CompactRequest{}); err != nil {
-		t.Fatalf("CompactNow: %v", err)
-	}
-	transcript := mp.requests[0].Messages[1].Content
-	if !strings.Contains(transcript, "EXTENSION FOLD") {
-		t.Fatalf("summarizer transcript = %.200q, want the replaced fold", transcript)
-	}
-}
-
 func TestCompactionPrepareBlock(t *testing.T) {
 	client := &fakeDispatchClient{interceptFn: func(ev protocol.InterceptEvent, _ json.RawMessage) (protocol.InterceptResult, error) {
 		if ev == protocol.EventCompactionPrepare {
@@ -1227,7 +1177,7 @@ func TestCompactionPrepareFailurePolicy(t *testing.T) {
 		if _, err := a.CompactNow(context.Background(), CompactRequest{}); err != nil {
 			t.Fatalf("CompactNow: %v", err)
 		}
-		if sc := joinContents(visibleContext(a)); !strings.Contains(sc, "SUMMARY TEXT") {
+		if sc := joinContents(visibleContext(a)); !strings.Contains(sc, "archived, not summarized") {
 			t.Fatalf("projection missing the summary:\n%.200q", sc)
 		}
 		if !warns.contains("skipping this optional extension") {
@@ -1243,7 +1193,7 @@ func TestCompactionCompleteReplace(t *testing.T) {
 			if err := json.Unmarshal(payload, &in); err != nil {
 				return protocol.InterceptResult{}, err
 			}
-			if in.Summary != "## Summary\nSUMMARY TEXT" {
+			if !strings.Contains(in.Summary, "archived, not summarized") {
 				t.Errorf("complete payload summary = %q, want the produced summary", in.Summary)
 			}
 			return replaceWith(t, dispatch.CompactionCompletePayload{Summary: "EXTENSION SUMMARY"}), nil
@@ -1657,12 +1607,12 @@ func TestCompactionPrepareSlotOwnerConsulted(t *testing.T) {
 	}}
 	d := newExtSlotDispatcher(client, false, nil, nil,
 		map[extension.Slot]string{extension.SlotCompaction: extTestPlugin})
-	mp, a := newCompactionAgent(t, d)
+	_, a := newCompactionAgent(t, d)
 	if _, err := a.CompactNow(context.Background(), CompactRequest{}); err != nil {
 		t.Fatalf("CompactNow: %v", err)
 	}
-	if sys := mp.requests[0].Messages[0].Content; !strings.Contains(sys, "OWNER GUIDANCE") {
-		t.Fatalf("summarizer system prompt missing the owner's guidance:\n%.200q", sys)
+	if sc := joinContents(visibleContext(a)); !strings.Contains(sc, "OWNER GUIDANCE") {
+		t.Fatalf("the pointer is missing the owner's guidance:\n%.200q", sc)
 	}
 }
 
@@ -1690,16 +1640,16 @@ func TestCompactionPrepareSlotOwnerFinalSayAfterChain(t *testing.T) {
 	d := newExtSlotDispatcher(client, false, nil,
 		[]extension.InterceptorPoint{extension.PointCompactionPrepare},
 		map[extension.Slot]string{extension.SlotCompaction: extTestPlugin})
-	mp, a := newCompactionAgent(t, d)
+	_, a := newCompactionAgent(t, d)
 	if _, err := a.CompactNow(context.Background(), CompactRequest{}); err != nil {
 		t.Fatalf("CompactNow: %v", err)
 	}
 	if calls != 2 {
 		t.Fatalf("owner consulted %d times, want 2 (chain, then strategy)", calls)
 	}
-	sys := mp.requests[0].Messages[0].Content
-	if !strings.Contains(sys, "OWNER GUIDANCE") || strings.Contains(sys, "CHAIN GUIDANCE") {
-		t.Fatalf("summarizer system prompt = %.200q, want the strategy ruling to win", sys)
+	sc := joinContents(visibleContext(a))
+	if !strings.Contains(sc, "OWNER GUIDANCE") || strings.Contains(sc, "CHAIN GUIDANCE") {
+		t.Fatalf("pointer = %.200q, want the strategy ruling to win", sc)
 	}
 }
 

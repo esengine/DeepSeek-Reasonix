@@ -79,6 +79,18 @@ function haystack(it: Item): string {
 export interface FindMode {
   regex?: boolean;
   caseSensitive?: boolean;
+  scope?: FindScope;
+}
+
+export type FindScope = "all" | "user" | "reply" | "tool";
+
+export function inScope(it: Item, scope: FindScope = "all"): boolean {
+  switch (scope) {
+    case "user": return it.t === "user";
+    case "reply": return it.t === "say";
+    case "tool": return it.t === "tool" || it.t === "reads";
+    default: return true;
+  }
 }
 
 /** One match: where it starts and how much it covers. */
@@ -161,6 +173,7 @@ export function search(items: Item[], query: string, mode: FindMode = {}): Hit[]
   const deadline = Date.now() + BUDGET_MS;
   for (let row = 0; row < items.length; row++) {
     if (Date.now() > deadline) break;
+    if (!inScope(items[row], mode.scope)) continue;
     const hay = finder.verbatim ? exactHaystack(items[row]) : haystack(items[row]);
     for (let m = finder.match(hay, 0); m; m = afterMatch(finder, hay, m)) {
       // An empty match (`^`, `a*`) covers nothing to paint; the painter skips

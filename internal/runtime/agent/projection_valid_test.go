@@ -240,61 +240,12 @@ func TestForceThresholdNoopReturnsCompactionRequired(t *testing.T) {
 	}
 }
 
-func TestSummarizeOnceDoesNotRetry(t *testing.T) {
-	fp := &retryUsageProvider{
-		failOnce: errors.New("transient"),
-		reply:    "digest body",
-		usage1:   &provider.Usage{PromptTokens: 10, CompletionTokens: 2, TotalTokens: 12, RequestCount: 1},
-		usage2:   &provider.Usage{PromptTokens: 11, CompletionTokens: 3, TotalTokens: 14, RequestCount: 1},
-	}
-	a := New(fp, tool.NewRegistry(), sessionstore.NewSession("sys"), Options{}, event.Discard)
-	_, _, err := a.window().summarizeOnce(context.Background(), []provider.Message{
-		{Role: provider.RoleUser, Content: "fold me"},
-	}, "")
-	if err == nil {
-		t.Fatal("expected first-attempt failure to surface without retry")
-	}
-	if fp.calls != 1 {
-		t.Fatalf("provider calls = %d, want exactly 1", fp.calls)
-	}
-}
-
-// retryUsageProvider fails the first Stream, then returns reply + usage2.
-type retryUsageProvider struct {
-	calls    int
-	failOnce error
-	reply    string
-	usage1   *provider.Usage
-	usage2   *provider.Usage
-}
-
-func (p *retryUsageProvider) Name() string { return "retry-usage" }
-func (p *retryUsageProvider) Stream(_ context.Context, _ provider.Request) (<-chan provider.Chunk, error) {
-	p.calls++
-	ch := make(chan provider.Chunk, 4)
-	if p.calls == 1 && p.failOnce != nil {
-		if p.usage1 != nil {
-			ch <- provider.Chunk{Type: provider.ChunkUsage, Usage: p.usage1}
-		}
-		ch <- provider.Chunk{Type: provider.ChunkError, Err: p.failOnce}
-		close(ch)
-		return ch, nil
-	}
-	ch <- provider.Chunk{Type: provider.ChunkText, Text: p.reply}
-	if p.usage2 != nil {
-		ch <- provider.Chunk{Type: provider.ChunkUsage, Usage: p.usage2}
-	}
-	ch <- provider.Chunk{Type: provider.ChunkDone}
-	close(ch)
-	return ch, nil
-}
-
 func TestCompactInstallsCoveredPrefixHash(t *testing.T) {
 	fp := &fakeProvider{reply: "digest"}
 	sess := sessionstore.NewSession("sys")
 	for range 8 {
 		sess.Add(provider.Message{Role: provider.RoleUser, Content: strings.Repeat("u", 80)})
-		sess.Add(provider.Message{Role: provider.RoleAssistant, Content: strings.Repeat("a", 120)})
+		sess.Add(provider.Message{Role: provider.RoleAssistant, Content: strings.Repeat("a", 600)})
 	}
 	dir := testenv.TempDir(t)
 	path := filepath.Join(dir, "s.jsonl")
