@@ -69,6 +69,7 @@ interface Props {
   side?: boolean;
   onSide?: () => void;
   sidePanel?: ReactNode;
+  queueStrip?: ReactNode;
   changeCount?: number;
   countElsewhere?: boolean;
   // Git state follows changeCount's refresh path (turn boundaries and writes).
@@ -82,7 +83,7 @@ interface Props {
   draftKey?: string;
 }
 
-export function Composer({ port, status, running, queued = false, quote, restore, inject, focus, onSubmit, onChanged, onError, onSettings = () => {}, side = false, onSide, sidePanel, changeCount = 0, countElsewhere = false, git = null, workspace = null, onTreeChanged, pulse = 0, draftKey = "", fresh = false, worktreeTarget, onWorktreePhase }: Props) {
+export function Composer({ port, status, running, queued = false, quote, restore, inject, focus, onSubmit, onChanged, onError, onSettings = () => {}, side = false, onSide, sidePanel, queueStrip, changeCount = 0, countElsewhere = false, git = null, workspace = null, onTreeChanged, pulse = 0, draftKey = "", fresh = false, worktreeTarget, onWorktreePhase }: Props) {
   const touch = touchKeyboard();
   const providerOrder = useProviderOrder();
   const modelGroups = useModelFilter();
@@ -532,6 +533,7 @@ export function Composer({ port, status, running, queued = false, quote, restore
       )}
       {/* The prompt glyph sits beside the box rather than in it, so it cannot be
           dragged into a selection of what was typed. */}
+      {queueStrip}
       <div className="fmain">
         <span className="prompt" aria-hidden="true">
           ›

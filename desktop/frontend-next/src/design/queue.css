@@ -1,4 +1,4 @@
-.queue { display: flex; flex-direction: column; gap: 6px; margin: 0 0 8px; padding: 0; border: 0; }
+.queue { display: flex; flex-direction: column; gap: 6px; margin: 8px 12px 0; padding: 0; border: 0; animation: none; }
 .queue .qi { display: flex; align-items: center; gap: 8px; min-width: 0; min-height: 0; padding: 6px 8px 6px 10px; border: 1px solid var(--hair); border-radius: var(--r-md); background: var(--page); font: var(--w-reg) var(--fs-meta)/1.35 var(--ui); color: var(--text); }
 .queue .qi:hover, .queue .qi:focus-within { background: var(--page); }
 .queue .ql { flex: none; font-weight: var(--w-med); color: var(--muted); white-space: nowrap; }
