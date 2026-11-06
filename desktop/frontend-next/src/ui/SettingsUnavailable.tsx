@@ -1,6 +1,7 @@
 import { useRef } from "react";
 import { useModalFocus } from "./useModalFocus";
 import { t } from "../i18n";
+import { StudioIcon } from "./StudioIcon";
 
 // What is shown when the settings chunk does not arrive. An update replaces the
 // assets under a window still holding the old document, so the name it asks for
@@ -11,21 +12,14 @@ export function SettingsUnavailable({ onClose }: { onClose: () => void }) {
   useModalFocus(sheet);
   return (
     <div className="prefs">
-      <div ref={sheet} className="prefs-sheet" role="alertdialog" aria-modal="true" aria-labelledby="prefs-gone">
-        <div className="prefs-hd">
-          <h1 id="prefs-gone">{t("settings.settings_did_not_open")}</h1>
-          <button className="btn sm" data-action="chrome.reload" onClick={() => location.reload()}>
-            {t("settings.reload")}
-          </button>
-          <button className="btn sm" data-action="settings.close" onClick={onClose}>
-            {t("common.close")}
-          </button>
-        </div>
-        <div className="find" data-lvl="err" role="alert">
-          <span className="t">{t("settings.this_screen_is_fetched_on")}</span>
-          <span className="why">
-            {t("settings.an_update_most_likely_replaced")}
-          </span>
+      <div ref={sheet} className="prefs-sheet gone" role="alertdialog" aria-modal="true" aria-labelledby="prefs-gone">
+        <span className="gone-icon" aria-hidden="true"><StudioIcon name="warning" /></span>
+        <h1 id="prefs-gone">{t("settings.settings_did_not_open")}</h1>
+        <p className="gone-t" role="alert">{t("settings.this_screen_is_fetched_on")}</p>
+        <p className="gone-why">{t("settings.an_update_most_likely_replaced")}</p>
+        <div className="gone-acts">
+          <button className="btn ghost" data-action="settings.close" onClick={onClose}>{t("common.close")}</button>
+          <button className="btn" data-primary="" data-action="chrome.reload" onClick={() => location.reload()}><StudioIcon name="refresh" />{t("settings.reload")}</button>
         </div>
       </div>
     </div>

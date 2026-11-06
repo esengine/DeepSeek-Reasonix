@@ -26,6 +26,22 @@ describe("the notice strip follows the board", () => {
     const stack = rule(".compose > .composenotes");
     expect(stack).toMatch(/bottom:\s*calc\(100% \+ 8px\)/);
     expect(stack).toMatch(/align-items:\s*flex-end/);
-    expect(css).toContain(".compose > .composenotes > :nth-last-child(n+4) { display: none; }");
+    expect(rule(".compose > .composenotes > :nth-last-child(n+4)")).toMatch(/opacity:\s*0/);
+    expect(rule(".compose > .composenotes > :nth-last-child(n+4)")).toMatch(/max-height:\s*0/);
+    expect(rule(".compose > .composenotes > *")).toMatch(/transition:/);
+  });
+
+  it("gives the toast row the board's card, its three action levels and the update's primary button", () => {
+    expect(rule(".toast")).toMatch(/width:\s*380px/);
+    expect(rule(".toast")).toMatch(/background:\s*var\(--float\)/);
+    expect(rule(".toast-actions .act")).toMatch(/height:\s*32px/);
+    expect(rule(".toast-actions .act.ghost")).toMatch(/height:\s*24px/);
+    expect(rule(".toast-actions .act[data-primary]")).toMatch(/background:\s*var\(--accent\)/);
+  });
+
+  it("draws the leave dialog at 380 with its footer rule, and the settings placeholder at 440", () => {
+    expect(rule(".preset-confirm")).toMatch(/width:\s*380px/);
+    expect(rule(".preset-confirm .preset-confirm-actions")).toMatch(/border-top:\s*1px solid var\(--hair\)/);
+    expect(rule(".prefs-sheet.gone")).toMatch(/width:\s*440px/);
   });
 });

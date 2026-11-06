@@ -3,9 +3,10 @@ import { createPortal } from "react-dom";
 import { t } from "../i18n";
 import { listenAction } from "./listen";
 import { useModalFocus } from "./useModalFocus";
+import { StudioIcon } from "./StudioIcon";
 import { useSettingsLeaveGuard } from "./SettingsLeave";
 
-export function usePresetLeave(dirty: boolean, busy: boolean) {
+export function usePresetLeave(dirty: boolean, busy: boolean, changes: string[] = []) {
   const [asked, setAsked] = useState<{ leave: () => void; from: HTMLElement | null } | null>(null);
   const request = useCallback((leave: () => void) => {
     if (busy) return;
@@ -28,7 +29,7 @@ export function usePresetLeave(dirty: boolean, busy: boolean) {
     setAsked(null);
     if (from?.isConnected) from.focus();
   };
-  const confirmation = asked && <PresetLeaveDialog onKeep={keep} onDiscard={() => {
+  const confirmation = asked && <PresetLeaveDialog changes={changes} onKeep={keep} onDiscard={() => {
     const leave = asked.leave;
     setAsked(null);
     leave();
@@ -36,12 +37,12 @@ export function usePresetLeave(dirty: boolean, busy: boolean) {
   return { request, confirmation };
 }
 
-function PresetLeaveDialog({ onKeep, onDiscard }: { onKeep: () => void; onDiscard: () => void }) {
+function PresetLeaveDialog({ changes, onKeep, onDiscard }: { changes: string[]; onKeep: () => void; onDiscard: () => void }) {
   const root = useRef<HTMLDivElement>(null);
   const title = useId();
   useModalFocus(root);
   useEffect(() => {
-    root.current?.querySelector<HTMLButtonElement>("button")?.focus();
+    root.current?.querySelector<HTMLButtonElement>("[data-primary]")?.focus();
     return listenAction(window, "keydown", { action: "agent-preset.leave-cancel", listener: (event) => {
       if ((event as KeyboardEvent).key !== "Escape") return;
       event.preventDefault();
@@ -51,11 +52,17 @@ function PresetLeaveDialog({ onKeep, onDiscard }: { onKeep: () => void; onDiscar
   }, [onKeep]);
   return createPortal(<div className="preset-confirm-veil">
     <div className="preset-confirm" ref={root} role="alertdialog" aria-modal="true" aria-labelledby={title}>
-      <h3 id={title}>{t("persona.discard_unsaved_changes")}</h3>
-      <p>{t("common.they_will_be_lost_if")}</p>
+      <header>
+        <h3 id={title}>{t("persona.discard_unsaved_changes")}</h3>
+        <button type="button" className="pc-x" data-action="agent-preset.leave-cancel" aria-label={t("common.close")} title={t("common.close")} onClick={onKeep}><StudioIcon name="close" /></button>
+      </header>
+      <div className="pc-body">
+        <p>{t("common.they_will_be_lost_if")}</p>
+        {changes.length > 0 && <div className="pc-chips">{changes.map((c) => <span key={c}>{c}</span>)}</div>}
+      </div>
       <div className="preset-confirm-actions">
-        <button className="btn" data-action="agent-preset.leave-cancel" onClick={onKeep}>{t("persona.keep_editing")}</button>
         <button className="btn" data-danger="" data-action="agent-preset.leave-discard" onClick={onDiscard}>{t("persona.discard_changes")}</button>
+        <button className="btn" data-primary="" data-action="agent-preset.leave-cancel" onClick={onKeep}>{t("persona.keep_editing")}</button>
       </div>
     </div>
   </div>, document.body);

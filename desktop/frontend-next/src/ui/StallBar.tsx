@@ -1,4 +1,5 @@
 import { t } from "../i18n";
+import { StudioIcon } from "./StudioIcon";
 import type { Stall } from "../state/session_types";
 
 export type StallAction = "stop" | "mute" | "continue" | "dismiss";
@@ -21,6 +22,7 @@ export function StallBar({ stall, onAct }: { stall: Stall; onAct: (a: StallActio
       : t("composer.no_file_changed_no_check");
   return (
     <div className="rtbar stallbar" data-lvl="warn" role="status" data-paused={stall.paused ? "" : undefined}>
+      <StudioIcon name="warning" />
       <span className="t">{stall.paused ? t("composer.task_paused_s", { s: said }) : said}</span>
       <span className="why" title={why}>{why}</span>
       {stall.paused ? (

@@ -73,6 +73,7 @@ export const PERSONA: Messages = {
   "persona.no_matching_service": { zh: "没有匹配的服务", en: "No matching service" },
   "persona.no_modules_available": { zh: "暂无可选模块", en: "No modules available" },
   "persona.no_preset_applied_fill_in": { zh: "未应用预设；直接填写下面的两段即可。", en: "No preset applied; fill in the two boxes below." },
+  "persona.n_kind_items": { zh: "{kind} · {n} 项", en: "{kind} · {n}" },
   "persona.off_by_default_enable_to": { zh: "默认关闭。开启后在聊天输入框顶部显示模式选择器；关闭只隐藏入口，不改变会话模式。", en: "Off by default. Enable to show the mode picker above the chat input. Turning it off hides the picker without changing the conversation's mode." },
   "persona.page_the_agent_is_viewing": { zh: "智能体正在查看的页面", en: "Page the agent is viewing" },
   "persona.parameters": { zh: "独立参数", en: "Parameters" },

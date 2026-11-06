@@ -29,6 +29,8 @@ export function UpdateReady({ port, idle }: { port: Pick<AgentPort, "restartToVe
     <ToastRow kind="update" role="status" className="update-ready" actions={<>
       <button className="act ghost" data-action="update.later" onClick={() => setPutOff(version)}>{t("about.later")}</button>
       <button className="act" data-primary data-action="update.restart" onClick={() => void restart()}>{t("about.restart_and_update")}</button>
-    </>}>{says || t("about.version_v_is_downloaded_restart", { v: version })}</ToastRow>
+    </>}><b>{t("about.version_v_is_downloaded", { v: version })}</b>
+      <div className="sub">{says || t("about.restart_to_use_it_never_automatic")}</div>
+    </ToastRow>
   );
 }

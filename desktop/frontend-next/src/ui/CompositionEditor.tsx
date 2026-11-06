@@ -12,15 +12,9 @@ import { COMPOSITION_KINDS } from "../port/composition";
 import { Switch } from "./Switch";
 import { StudioIcon } from "./StudioIcon";
 import { CompositionModulePicker } from "./CompositionModulePicker";
+import { KIND_LABELS } from "./presetDraft";
 
-const labels: Record<CompositionKind, string> = {
-  tools: "common.tool",
-  skills: "settings.skills",
-  mcp: "persona.mcp_servers",
-  extensions: "ext.extension",
-  hooks: "persona.automation_hooks",
-  commands: "persona.slash_commands",
-};
+const labels = KIND_LABELS;
 
 export function CompositionEditor({
   draft,
