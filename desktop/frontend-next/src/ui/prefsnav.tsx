@@ -238,8 +238,8 @@ export const SETTINGS: SettingEntry[] = [
   // takes that choice as a parameter — hook.Scope, McpInstallScope, the skill
   // activation scope, a memory's project/global flag. Naming one authority here
   // would be wrong whenever the reader picks the other.
-  { section: "hooks", anchor: "scheduled-runs", page: true, title: "panels.scheduled_runs", scope: "machine", apply: "immediate", keywords: ["定时", "计划", "任务", "每天", "schedule", "cron", "unattended", "无人值守"] },
-  { section: "hooks", anchor: "hooks", page: true, title: "settings.automation", scope: "chosen", apply: "immediate", keywords: ["钩子", "hook", "触发"] },
+  { section: "session", anchor: "scheduled-runs", page: true, title: "panels.scheduled_runs", scope: "machine", apply: "immediate", keywords: ["定时", "计划", "任务", "每天", "schedule", "cron", "unattended", "无人值守"] },
+  { section: "session", anchor: "hooks", page: true, title: "settings.hooks", scope: "chosen", apply: "immediate", keywords: ["钩子", "hook", "触发"] },
 
   { section: "ext", anchor: "market", title: "ext.community_market", scope: "machine", apply: "immediate", keywords: ["市场", "market", "社区", "发现", "下载", "发布", "publish", "主题"] },
   { section: "ext", anchor: "plugins", title: "settings.plugin_packages", scope: "machine", apply: "immediate", keywords: ["安装"] },

@@ -1,8 +1,11 @@
-import { useContext } from "react";
+import { useContext, useEffect, useState } from "react";
 import { t } from "../i18n";
 import type { HubPort } from "../port/hub";
 import type { AgentPort } from "../port/port";
 import { AgentPresets } from "./AgentPresets";
+import { Hooks } from "./Hooks";
+import { Group } from "./Group";
+import { ScheduledRuns } from "./ScheduledRuns";
 import { ApplyNote } from "./Group";
 import { AskTimeout } from "./AskTimeout";
 import { PeersSection } from "./PeersSection";
@@ -21,8 +24,26 @@ interface Props {
   onChanged: () => void;
 }
 
+// How many of each there are, for the card's rows. A count that cannot be read
+// is left out rather than guessed.
+function useAutomationCounts(port: AgentPort) {
+  const [counts, setCounts] = useState<{ hooks?: number; schedules?: number; paused?: number }>({});
+  useEffect(() => {
+    let live = true;
+    void port.hooks().then((c) => live && setCounts((was) => ({ ...was, hooks: c.hooks.length }))).catch(() => {});
+    void port.schedules().then((b) => live && setCounts((was) => ({ ...was, schedules: b.schedules.length, paused: b.schedules.filter((s) => s.status === "paused").length }))).catch(() => {});
+    return () => { live = false; };
+  }, [port]);
+  return counts;
+}
+
 export function AgentSettings({ port, hub, persona, onChanged }: Props) {
   const deep = useContext(SettingDeepContext);
+  const counts = useAutomationCounts(port);
+  const hooksHint = t("settings.hooks_hint") + (counts.hooks ? ` · ${t("settings.n_hooks", { n: counts.hooks })}` : "");
+  const runsHint = t("settings.scheduled_runs_hint") + (counts.schedules
+    ? ` · ${t("settings.n_scheduled", { n: counts.schedules })}${counts.paused ? t("settings.n_paused", { n: counts.paused }) : ""}`
+    : "");
   return (
     <>
       <SectionCard title={t("settings.persona_and_presets")}>
@@ -50,6 +71,12 @@ export function AgentSettings({ port, hub, persona, onChanged }: Props) {
         <SessionRef port={port} />
         <SubagentClaims port={port} onChanged={onChanged} />
         <PeersSection port={port} hub={hub} />
+      </SectionCard>
+      <SectionCard title={t("settings.automation")}>
+        <Group id="hooks" title={t("settings.hooks")} hint={hooksHint} pill={t("settings.manage_storage")}>
+          <Hooks port={port} onChanged={onChanged} />
+        </Group>
+        <ScheduledRuns port={port} hint={runsHint} pill={t("settings.manage_storage")} />
       </SectionCard>
     </>
   );

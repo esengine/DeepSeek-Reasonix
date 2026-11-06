@@ -35,8 +35,6 @@ import { InstalledLocation } from "./InstalledLocation";
 import { ModelSettings } from "./ModelSettings";
 import { ServerRow } from "./ServerRow";
 import { SkillGroups } from "./SkillRow";
-import { Hooks } from "./Hooks";
-import { ScheduledRuns } from "./ScheduledRuns";
 import { ConfigTrouble } from "./ConfigTrouble";
 import { ModHost } from "./ModHost";
 import { DataSettings } from "./DataSettings";
@@ -554,17 +552,6 @@ export function Settings({ hub, onError, port, networkPort, localWorkspacePort, 
               </ExtSplit>
               </>
               )}
-            </>
-          )}
-          {at === "ext" && extTab === "installed" && (
-            <>
-              <Group id="hooks"
-                title={t("settings.automation")}
-                hint={t("settings.run_your_own_commands_before")}
-              >
-                <Hooks port={port} onChanged={afterExtChange} />
-              </Group>
-              <ScheduledRuns port={port} />
             </>
           )}
           {at === "network" && (
