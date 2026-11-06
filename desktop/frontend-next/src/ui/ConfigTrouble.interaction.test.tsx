@@ -30,7 +30,7 @@ describe("the config banner at the top of settings", () => {
     draw(problem());
     const bar = await waitFor(() => { const e = document.querySelector(".cfgbad"); expect(e).toBeTruthy(); return e!; });
     expect(bar.querySelector(".cfg-hd b")?.textContent).toBe("配置文件第 12 行无法解析");
-    expect(bar.querySelector(".cfg-hd .sub")?.textContent).toContain("上一次成功解析的配置");
+    expect(bar.querySelector(".cfg-hd .cfg-sub")?.textContent).toContain("上一次成功解析的配置");
     expect(bar.querySelector(".cfg-path span")?.textContent).toBe("~/.reasonix/config.toml");
     expect(bar.querySelector(".cfg-diff .er")?.textContent).toBe("12model = deepseek-v4-pro");
     expect(bar.querySelector(".cfg-card")?.getAttribute("data-lvl")).toBe("warn");

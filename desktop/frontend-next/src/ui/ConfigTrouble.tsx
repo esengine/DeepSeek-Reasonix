@@ -53,7 +53,7 @@ export function ConfigTrouble({ port, onRepaired }: { port: AgentPort; onRepaire
           <StudioIcon name={repairable ? "fail" : "warning"} />
           <div>
             <b>{problem.line ? t("app.line_line_of_the_config", { line: problem.line }) : t("app.the_config_file_does_not")}</b>
-            <div className="sub">
+            <div className="cfg-sub">
               {problem.recovered === "last-known-good"
                 ? t("app.what_is_shown_below_is")
                 : t("app.what_is_shown_below_is_2")}

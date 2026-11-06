@@ -22,7 +22,7 @@
 .toast { align-items: flex-start; width: 380px; max-width: 100%; padding: 10px 10px 10px 12px; background: var(--float); box-shadow: var(--shadow-float); font: var(--w-reg) var(--fs-ui)/1.55 var(--ui); }
 .toast-icon { margin-top: 1px; }
 .toast-body > b { font-weight: var(--w-semi); }
-.toast-body > .sub { color: var(--muted); font-size: var(--fs-meta); }
+.toast-body > .toast-sub { color: var(--muted); font-size: var(--fs-meta); }
 .toast-actions { gap: 2px; margin: -4px 0; }
 .toast-actions .act { height: 32px; padding: 0 14px; border: 1px solid var(--border); border-radius: var(--r-sm); background: var(--raised); color: var(--text); font: var(--w-reg) var(--fs-ui)/1 var(--ui); }
 .toast-actions .act:hover:not(:disabled) { background: var(--overlay); }

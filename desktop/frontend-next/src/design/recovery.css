@@ -10,7 +10,7 @@
 .cfgbad .cfg-card[data-lvl="warn"] .cfg-hd > .studio-icon { color: var(--warn-ink); }
 .cfgbad .cfg-hd > div { flex: 1; min-width: 0; }
 .cfgbad .cfg-hd b { font: var(--w-semi) var(--fs-lead)/1.4 var(--ui); }
-.cfgbad .cfg-hd .sub { margin-top: 2px; color: var(--muted); font-size: var(--fs-meta); }
+.cfgbad .cfg-hd .cfg-sub { margin-top: 2px; color: var(--muted); font-size: var(--fs-meta); }
 .cfgbad .cfg-bd { padding: 10px 14px; }
 .cfgbad .cfg-path { display: flex; align-items: center; gap: 8px; color: var(--muted); font: var(--w-reg) var(--fs-meta) var(--mono); }
 .cfgbad .cfg-path > span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
