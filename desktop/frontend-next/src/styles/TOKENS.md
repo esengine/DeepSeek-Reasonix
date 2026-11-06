@@ -275,12 +275,10 @@ of button only — a small one with the pill, a medium one with `--r-md`.
 
 ## Type
 
-- Picker panels follow the board "Spec-Pickers": 300px wide (340 when the
-  descriptions are long, 600 for the two-column model panel), `--r-md` corners,
-  rows inset 4px, a title row of 13px bold, rows of 13px medium with 12px
-  descriptions. Selection is a neutral fill and a `--net-ink` check; only the
-  rows scroll, with the title, filter and footer pinned. Permission warnings
-  retain semantic colour.
+- Picker panels follow the board "Spec-Pickers": 300px (340 with long
+  descriptions, 600 for the two-column model panel), `--r-md` corners, a 13px
+  bold title, 13px medium rows with 12px descriptions, selection as a neutral
+  fill and a `--net-ink` check, and only the rows scroll.
 - The composer scope covers work mode, workspace, permissions, model and effort.
   Search results wrap long names; large lists scroll within the viewport. Other
   pickers retain their own density.
