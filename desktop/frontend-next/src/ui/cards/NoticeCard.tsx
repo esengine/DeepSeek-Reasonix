@@ -27,7 +27,7 @@ export function NoticeCard({ item, onSettings }: { item: Extract<Item, { t: "not
   return (
     <div className="notice-bar" data-lvl={lvl ?? "info"} role={lvl === "err" ? "alert" : "status"}>
       <span className="sr-only">{t(lvl === "err" ? "chat.error" : lvl === "warn" ? "chat.warning" : "chat.notice")}：</span>
-      {lvl ? <StudioIcon name="warning" className="nb-ic" aria-hidden="true" /> : <i className="nb-dot" aria-hidden="true" />}
+      <StudioIcon name={lvl === "err" ? "fail" : lvl === "warn" ? "warning" : "info"} className="nb-ic" aria-hidden="true" />
       <div className="nb-body">
         <span className="t">
           {wording ? t(wording.text, vars) : item.text}

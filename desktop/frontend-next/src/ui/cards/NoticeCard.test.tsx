@@ -46,7 +46,8 @@ describe("a notice card", () => {
     expect(box.querySelector(".sr-only")?.textContent).toBe(`${t("chat.warning")}：`);
     expect(box.querySelector(".nb-ic")).not.toBeNull();
     expect(box.querySelector(".hl, .tag, .find")).toBeNull();
-    expect(draw({ level: "info" }).querySelector(".nb-dot")).not.toBeNull();
+    expect(draw({ level: "info" }).querySelector(".nb-ic")).not.toBeNull();
+    expect(draw({ level: "info" }).querySelector(".nb-dot")).toBeNull();
   });
 
   it("wears its severity on the bar so the glyph ink can follow it", () => {
