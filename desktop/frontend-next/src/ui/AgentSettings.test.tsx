@@ -39,8 +39,8 @@ it("opens the presets page from both the persona row and the presets row", () =>
 it("opens the hooks and the scheduled-runs pages from the automation card", async () => {
   const go = draw();
   const card = [...document.querySelectorAll<HTMLElement>(".prefs-card")].find((c) => c.querySelector("header h3")?.textContent === "自动化")!;
+  await waitFor(() => expect([...card.querySelectorAll("button")].filter((b) => b.textContent === "管理")).toHaveLength(2));
   const buttons = [...card.querySelectorAll("button")].filter((b) => b.textContent === "管理");
-  expect(buttons).toHaveLength(2);
   fireEvent.click(buttons[0]);
   expect(go).toHaveBeenLastCalledWith("hooks");
   fireEvent.click(buttons[1]);
