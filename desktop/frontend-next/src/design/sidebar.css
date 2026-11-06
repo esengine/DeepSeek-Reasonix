@@ -35,4 +35,6 @@
 .rail .studio-brand { height: 32px; }
 [data-titlebar="app"][data-platform="darwin"] .rail .studio-rail-head { padding-top: 0; }
 [data-titlebar="app"][data-platform="darwin"] .rail .studio-brand { height: var(--chrome-h); }
+[data-titlebar="app"][data-platform="darwin"] .rail .studio-brand-lockup { margin-left: calc(var(--lights-w) - 10px); }
+@container (max-width: 300px) { [data-titlebar="app"][data-platform="darwin"] .rail .studio-brand-sub { display: none; } }
 .rail .wsnode { padding: 0; }
