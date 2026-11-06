@@ -306,3 +306,9 @@ svg.studio-icon[data-lang="sheet"] { color: var(--ok); }
 .blogin-go { height: 32px; padding: 0 14px; border: 1px solid var(--accent); border-radius: var(--r-sm); background: var(--accent); color: var(--accent-fg); font: var(--w-med) var(--fs-ui) var(--ui); cursor: pointer; }
 .blogin-go:disabled { opacity: .5; cursor: default; }
 .sidecontent > footer .sidequote { font-weight: var(--w-reg); }
+.workbench-explorer .workbench-history > summary { height: 32px; margin-top: 4px; padding: 0 10px 0 12px; font: var(--w-bold, 700) var(--fs-meta)/1 var(--ui); }
+.workbench-history > summary small { font: var(--w-med) var(--fs-meta)/1 var(--ui); }
+.workbench-history .gh-row { gap: 8px; height: 26px; padding: 0 12px 0 30px; font: var(--w-med) var(--fs-meta)/1 var(--ui); }
+.workbench-history .gh-row:has(.gh-lanes) { padding-left: 12px; }
+.workbench-history .gh-hash { width: auto; font: var(--w-med) var(--fs-micro)/1 var(--mono); }
+.workbench-history .gh-meta { font: var(--w-med) var(--fs-micro)/1 var(--ui); }

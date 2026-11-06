@@ -4,10 +4,18 @@ import { reason } from "../i18n/kernel";
 import type { AgentPort } from "../port/port";
 import type { GitHistory } from "../port/workspace";
 import { layoutGraph, type GraphRow } from "../state/gitgraph";
-import { since } from "./wallet";
 import { GitCommitDetail } from "./GitCommitDetail";
 import { StudioIcon } from "./StudioIcon";
 import { WorkbenchState } from "./WorkbenchState";
+
+// The board writes a commit's age as a bare count and unit, no "ago".
+function age(at: number, now: number): string {
+  const minutes = Math.floor(Math.max(0, now - at * 1000) / 60000);
+  if (minutes < 1) return t("workbench.history_now");
+  if (minutes < 60) return t("workbench.history_min", { n: minutes });
+  const hours = Math.floor(minutes / 60);
+  return hours < 24 ? t("workbench.history_hour", { n: hours }) : t("workbench.history_day", { n: Math.floor(hours / 24) });
+}
 
 const ROW = 28;
 const COL = 12;
@@ -70,7 +78,7 @@ export function WorkbenchHistory({ port, repo, branch }: { port: AgentPort; repo
                 {row.commit.refs.map((ref) => (
                   <em className="gh-ref" key={ref} data-kind={ref.startsWith("tag: ") ? "tag" : "branch"}>{ref}</em>
                 ))}
-                <small className="gh-meta" title={row.commit.author}>{since(new Date(row.commit.at * 1000).toISOString(), now)}</small>
+                <small className="gh-meta" title={row.commit.author}>{age(row.commit.at, now)}</small>
               </button>
               {openId === row.commit.id && <GitCommitDetail port={port} id={row.commit.id} repo={repo} />}
             </li>
