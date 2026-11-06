@@ -25,6 +25,11 @@
 .compose .changedpill i[data-io="down"] { color: var(--del); }
 
 .compose > .composeaux:not(:empty) { margin: 6px 10px 0; }
+.compose > .composeaux:not(:empty) ~ .changedpill-row { margin-top: 4px; }
+.compose > .composeaux:has(> .rtbar[data-kind="connect"]) { margin: 0; }
+.compose .rtbar[data-kind="connect"] { flex-wrap: nowrap; align-items: center; gap: 8px; margin: 8px 12px 0; padding: 7px 10px; border: 0; border-radius: var(--r-md); background: color-mix(in srgb, var(--warn) 12%, transparent); color: var(--warn-ink); font: var(--w-reg) var(--fs-meta)/1.2 var(--ui); }
+.compose .rtbar[data-kind="connect"] .t { min-width: 0; font-weight: var(--w-reg); }
+.compose .rtbar[data-kind="connect"] button { padding: 0; font: var(--w-med) var(--fs-meta) var(--ui); }
 .compose .fmain { padding: 10px 16px 0; }
 .compose .fmain > textarea { min-height: 42px; padding: 0; font: var(--w-reg) var(--fs-lead)/1.6 var(--ui); }
 .compose .fmain > textarea::placeholder { color: var(--faint); }
