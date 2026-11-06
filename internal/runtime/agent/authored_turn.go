@@ -31,6 +31,8 @@ type HostTurnBoundary struct {
 	HostAuthored bool
 	// Via is the paired device the message was sent from, nil for the window.
 	Via *provider.Via
+	// Origin is who a host-run turn was for, nil for the user.
+	Origin *provider.Origin
 }
 
 type hostTurnBoundaryKey struct{}
@@ -73,6 +75,7 @@ func (a *Agent) LandAuthoredUserMessage(ctx context.Context, msg provider.Messag
 	}
 	msg.HostAuthored = boundary.HostAuthored
 	msg.Via = boundary.Via
+	msg.Origin = boundary.Origin
 	index := a.sess.conversation.AddIndexed(msg)
 	if boundary.Authored != nil {
 		a.verifyAuthoredLanding(*boundary.Authored, msg, index)
