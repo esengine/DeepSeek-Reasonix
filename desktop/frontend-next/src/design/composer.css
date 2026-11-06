@@ -149,7 +149,7 @@
 .composer-menu.studio-model-menu .menu-rows .mi.head { top: 0; }
 .composer-menu.studio-model-menu .menu-rows ~ button.mi { box-sizing: border-box; width: 100%; height: 36px; min-height: 36px; margin: 0; padding: 0 14px; border-top: 1px solid var(--hair); border-radius: 0; font: var(--w-med) var(--fs-meta)/1.3 var(--ui); }
 .composer-menu.studio-model-menu .menu-rows ~ button.mi .ds { display: none; }
-.composer-menu.studio-model-menu > .menu-aside { grid-column: 2; grid-row: 1 / -1; min-height: 0; max-height: var(--picker-max); display: flex; flex-direction: column; min-width: 0; padding: 0 0 4px; overflow-y: auto; border-left: 1px solid var(--hair); }
+.composer-menu.studio-model-menu > .menu-aside { grid-column: 2; grid-row: 1 / -1; margin: 0; min-height: 0; max-height: var(--picker-max); display: flex; flex-direction: column; min-width: 0; padding: 0 0 4px; overflow-y: auto; border-left: 1px solid var(--hair); }
 .composer-menu.studio-model-menu > .menu-aside > .mi.head:last-child { margin-top: auto; }
 .composer-menu.composition-menu { width: 340px; padding: 0 0 6px; border-color: var(--border); }
 .composition-menu .studio-picker-title { min-height: 0; margin: 0; padding: 12px 14px 8px; border-bottom: 0; }
