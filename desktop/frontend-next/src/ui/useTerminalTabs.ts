@@ -31,13 +31,21 @@ export function useTerminalTabs({ port, shown, pick, setDismissed, onExternal, o
   const [shells, setShells] = useState<ShellChoice[]>([]);
   const [commands, setCommands] = useState<Record<string, string>>({});
   const changed = useRef(0);
+  const held = useRef(list);
+  held.current = list;
 
   useEffect(() => {
     if (!shown) return;
     let live = true;
     const read = () => {
       const since = changed.current;
-      port.terminals().then((next) => { if (live && since === changed.current) setList((now) => (JSON.stringify(now) === JSON.stringify(next) ? now : next)); }, () => {});
+      port.terminals().then((next) => {
+        if (!live || since !== changed.current) return;
+        // Not even an update that hands back the same value: it costs the
+        // component another render, and the poll runs for as long as the panel.
+        if (JSON.stringify(held.current) === JSON.stringify(next)) return;
+        setList(next);
+      }, () => {});
     };
     read();
     const timer = window.setInterval(read, POLL_MS);

@@ -116,12 +116,10 @@ it("leaves the rendered Workbench untouched when Markdown polls are unchanged", 
   commits.mockClear();
   const base = performance.now();
   const seen: string[] = [];
-  const notes: string[] = [];
-  (globalThis as { __diag?: (note: string) => void }).__diag = (note) => notes.push(note);
   for (const n of [1, 2]) {
     await tick();
     seen.push(`after poll ${n} (${(performance.now() - base).toFixed(0)}ms): ${commits.mock.calls.length} commits [${commits.mock.calls.map((c) => `${c[1]}@${(c[5] - base).toFixed(0)}ms`).join(",")}], file reads ${read.mock.calls.length}, listings ${listed.mock.calls.length}`);
   }
   expect(read).toHaveBeenCalledTimes(3);
-  expect(commits.mock.calls.length, `${seen.join("; ")} | ${notes.join(" / ")}`).toBe(0);
+  expect(commits.mock.calls.length, seen.join("; ")).toBe(0);
 });

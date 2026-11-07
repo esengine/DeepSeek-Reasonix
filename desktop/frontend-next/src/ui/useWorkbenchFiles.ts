@@ -15,8 +15,6 @@ type Entry = {
 const blank = (): Entry => ({ file: null, draft: "", diff: "", error: "", errorCode: "", missing: false, pending: "", issued: 0 });
 const dirty = (entry: Entry) => !!entry.file && entry.draft !== entry.file.content;
 
-const diag = (note: string) => (globalThis as { __diag?: (note: string) => void }).__diag?.(note);
-
 export function useWorkbenchFiles({ port, workspaceRoot, repos = [], path, openPaths, shown, refresh, poll }: {
   port: AgentPort; workspaceRoot: string; repos?: GitRepoRow[]; path: string; openPaths: string[]; shown: boolean; refresh: string; poll: boolean;
 }) {
@@ -36,7 +34,7 @@ export function useWorkbenchFiles({ port, workspaceRoot, repos = [], path, openP
   }, [entries]);
   useEffect(() => {
     for (const [path, entry] of entries) {
-      if (!openPaths.includes(path) && !dirty(entry) && entry.pending !== "save") { diag(`evict ${path} among ${JSON.stringify(openPaths)}`); entries.delete(path); }
+      if (!openPaths.includes(path) && !dirty(entry) && entry.pending !== "save") entries.delete(path);
     }
   }, [entries, openPaths, version]);
 
@@ -47,7 +45,6 @@ export function useWorkbenchFiles({ port, workspaceRoot, repos = [], path, openP
     if (entry.pending === "save" || dirty(entry) || (entry.file && !shown) || (quiet && entry.pending === "read")) return;
     const ticket = ++entry.issued;
     let changed = !quiet || !entry.file;
-    if (quiet) diag(`quiet read, file ${entry.file ? "held" : "empty"}, pending ${entry.pending || "none"}`);
     void (async () => {
       const valid = () => live && current.current === entries && ticket === entry.issued;
       entry.pending = "read";
