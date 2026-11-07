@@ -1,2 +1,0 @@
-- 修复：历史搜索在索引读不到来源时不再表现为"没有结果"，而是说明结果可能不完整（索引失败或仍在建立）。关联 #14947。
-- Fixed: history search no longer presents an unreadable source as "no matches"; it says results may be incomplete because the index failed or is still building. Refs #14947.
