@@ -50,7 +50,12 @@ func TestEndedForSessionKeepsHowEachJobEnded(t *testing.T) {
 	if v := by[bad.ID]; v.Status != string(Failed) || v.ExitCode == nil || *v.ExitCode != 1 || v.Tail != "FAIL TestCompactKeepsPins (0.31s)" {
 		t.Fatalf("failed job view = %+v", v)
 	}
-	running := m.RunningForSession("s")
+	var running []View
+	for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); time.Sleep(time.Millisecond) {
+		if running = m.RunningForSession("s"); len(running) == 1 && running[0].Tail != "" {
+			break
+		}
+	}
 	if len(running) != 1 || running[0].ID != live.ID || running[0].Tail != "watching for changes" || running[0].EndedAt != 0 || running[0].ExitCode != nil {
 		t.Fatalf("running view = %+v, want the live job with its last line and no end", running)
 	}
