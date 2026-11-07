@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useId, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
+import { useFolded } from "./usefold";
+import { StopButton } from "./StopButton";
 import { createPortal } from "react-dom";
 import { t } from "../i18n";
 import { reason } from "../i18n/kernel";
@@ -104,6 +106,8 @@ export function Composer({ port, status, running, queued = false, quote, restore
     uploads.current.clear();
   }, []);
   const [stopping, setStopping] = useState(false);
+  const phone = useFolded("phone");
+  const [toolsOpen, setToolsOpen] = useState(false);
   const submittingRef = useRef(false);
   const stoppingRef = useRef(false);
   const picker = useRef<HTMLInputElement>(null);
@@ -419,6 +423,16 @@ export function Composer({ port, status, running, queued = false, quote, restore
   const warnPictures = status?.vision === false && shots.some((c) => c.k === "attachment" && c.state === "ready" && isPicture(c));
 
   const setupPage = worktree.stage && <WorktreeSetupPage stage={worktree.stage} task={setupDraft.text} files={setupDraft.files} busy={submitting} onRetry={send} onCancel={() => void worktree.cancel()} onEdit={worktree.dismiss}/>;
+  const stop = () => {
+    if (stoppingRef.current) return;
+    stoppingRef.current = true;
+    setStopping(true);
+    void port.cancel().then(onChanged, (e: unknown) => {
+      stoppingRef.current = false;
+      setStopping(false);
+      onError(e);
+    });
+  };
   return (<>
     {setupPage && (worktreeTarget ? createPortal(setupPage, worktreeTarget) : setupPage)}
     <div className="dropzone" ref={dropzone} data-worktree-setup={worktree.stage ? "" : undefined} inert={!!worktree.stage}>
@@ -663,7 +677,7 @@ export function Composer({ port, status, running, queued = false, quote, restore
             e.target.value = "";
           }}
         />
-        <div className="turntools">
+        <div className="turntools" data-more={phone && toolsOpen ? "" : undefined}>
           <button
             className="mode plain attach studio-attach"
             aria-label={t("composer.add_an_attachment")}
@@ -745,36 +759,14 @@ export function Composer({ port, status, running, queued = false, quote, restore
             label={<>{hasVendorMark(currentMark) && <VendorMark slug={currentMark} size={14} />}<span className="nm">{modelLb}</span>{status && <><i className="studio-model-sep" aria-hidden="true" /><span className="studio-effort-reading"><StudioIcon name="brain" />{declared ? effortShort(status.effort, status.modes) : t("common.not_declared")}</span></>}<StudioIcon name="down" /></>}
           />
         </div>
+        {phone && (
+          <button type="button" className="mode plain turn-more" data-action="composer.more-tools" aria-expanded={toolsOpen} aria-label={t("composer.more_tools")} onClick={() => setToolsOpen((on) => !on)}>
+            <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 8h.01M8 8h.01M12.5 8h.01" /></svg>
+          </button>
+        )}
         </div>
         <span className="go">
-          {running && (
-            <button
-              className="btn stop"
-              data-primary
-              data-action="session.stop"
-              data-pending={stopping ? "" : undefined}
-              aria-label={t(stopping ? "composer.stopping" : "composer.stop")}
-              disabled={stopping}
-              aria-busy={stopping}
-              onClick={() => {
-                if (stoppingRef.current) return;
-                stoppingRef.current = true;
-                setStopping(true);
-                void port.cancel().then(onChanged, (e: unknown) => {
-                  stoppingRef.current = false;
-                  setStopping(false);
-                  onError(e);
-                });
-              }}
-            >
-              <span className="ic" aria-hidden="true">
-                <svg viewBox="0 0 16 16">
-                  <rect x="4.8" y="4.8" width="6.4" height="6.4" rx="1.3" />
-                </svg>
-              </span>
-              <span>{t(stopping ? "composer.stopping" : "composer.stop")}</span>
-            </button>
-          )}
+          {running && <StopButton stopping={stopping} onStop={stop} />}
           <button
             className="btn send"
             aria-label={t(submitting ? "common.sending" : running ? runningIntent === "followup" ? "composer.queue" : "common.steer" : "common.send")}

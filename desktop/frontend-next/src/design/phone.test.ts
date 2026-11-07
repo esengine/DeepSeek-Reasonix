@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import phone from "./phone.css?raw";
 import index from "./design.css?raw";
 import narrow from "../styles/narrow.css?raw";
+import studio from "../styles/studio.css?raw";
 
 const rule = (selector: string): string => {
   const at = phone.indexOf(selector + " {");
@@ -88,5 +89,70 @@ describe("the approval card on a phone", () => {
     expect(rule(footer + "[data-more] .btn:not([data-primary], [data-deny])")).toMatch(/display:\s*grid/);
     expect(rule(".apv-more")).toMatch(/display:\s*none/);
     expect(rule(footer + " .apv-more")).toMatch(/color:\s*var\(--link\)/);
+  });
+});
+
+describe("the composer's tool row on a phone", () => {
+  const row = '[data-fold~="phone"] .compose .turntools';
+
+  it("sizes add as a 32px round button with a hairline", () => {
+    const add = rule(row + " > .studio-attach:first-child");
+    expect(add).toMatch(/width:\s*32px/);
+    expect(add).toMatch(/height:\s*32px/);
+    expect(add).toMatch(/border-radius:\s*50%/);
+    expect(add).toMatch(/border:\s*1px solid var\(--border\)/);
+  });
+
+  it("draws the model as a 28px pill in the muted interface font", () => {
+    const pill = rule(row + " .model-picker");
+    expect(pill).toMatch(/height:\s*28px/);
+    expect(pill).toMatch(/border-radius:\s*999px/);
+    expect(pill).toMatch(/padding:\s*0 10px/);
+    expect(pill).toMatch(/color:\s*var\(--muted\)/);
+    expect(pill).toMatch(/font:\s*var\(--w-reg\) var\(--fs-meta\)/);
+  });
+
+  it("keeps everything else in the row behind the 'more' button until it is opened", () => {
+    expect(rule(row + " > :not(:first-child, .studio-model-group, .turn-more)")).toMatch(/display:\s*none/);
+    expect(rule(row + "[data-more] > :not(:first-child, .studio-model-group, .turn-more)")).toMatch(/display:\s*(flex|inline-flex)/);
+    expect(rule(".turntools .turn-more")).toMatch(/display:\s*none/);
+    expect(rule(row + " > .turn-more")).toMatch(/display:\s*inline-grid/);
+  });
+
+  it("makes send a 36px accent circle, and stop the same size with the pause mark", () => {
+    const both = rule('[data-fold~="phone"] .compose .go .btn.send, [data-fold~="phone"] .compose .go .btn.stop');
+    expect(both).toMatch(/width:\s*36px/);
+    expect(both).toMatch(/height:\s*36px/);
+    expect(both).toMatch(/border-radius:\s*50%/);
+    expect(rule('\n[data-fold~="phone"] .compose .go .btn.send')).toMatch(/background:\s*var\(--accent\)/);
+    expect(rule('\n[data-fold~="phone"] .compose .go .btn.stop')).toMatch(/background:\s*var\(--overlay\)/);
+    expect(rule('[data-fold~="phone"] .compose .btn.stop .ic-stop')).toMatch(/display:\s*none/);
+    expect(rule(".btn.stop .ic-pause")).toMatch(/display:\s*none/);
+  });
+
+  it("drops the keyboard hints, which a touch screen has no keys for", () => {
+    expect(rule('[data-fold~="phone"] .compose .composecaps')).toMatch(/display:\s*none/);
+  });
+});
+
+// An older rule pins the add button's order with !important, so it is scoped
+// away from a phone and the phone's own order wins by source order.
+describe("the order of the phone's tool row", () => {
+  const row = '[data-fold~="phone"] .compose .turntools';
+
+  it("runs add, model, the more button, then a line break, then the revealed controls", () => {
+    expect(rule(row + " > :first-child")).toMatch(/order:\s*0;/);
+    expect(rule(row + " > .studio-model-group")).toMatch(/order:\s*1;/);
+    expect(rule(row + " > .turn-more")).toMatch(/order:\s*2;/);
+    expect(rule(row + "[data-more]::after")).toMatch(/flex:\s*0 0 100%/);
+    expect(rule(row + "[data-more]::after")).toMatch(/order:\s*3;/);
+    expect(rule(row + " > :not(:first-child, .studio-model-group, .turn-more)")).toMatch(/order:\s*4;/);
+  });
+
+  it("is not fought by an !important order on a phone", () => {
+    expect(phone).not.toMatch(/!important/);
+    const pinned = studio.split("\n").filter((l) => /\.turntools > [^{]*\{[^}]*order:[^;]*!important/.test(l));
+    expect(pinned.length).toBeGreaterThanOrEqual(6);
+    for (const line of pinned) expect(line).toMatch(/^:root:not\(\[data-fold~="phone"\]\) /);
   });
 });

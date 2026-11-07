@@ -263,6 +263,7 @@ export const COMPOSER: Messages = {
   "composer.steer_queued": { zh: "插话排队", en: "Steer queued" },
   "composer.steer_waiting": { zh: "插话 · 等待插入", en: "Steer · waiting to land" },
   "composer.stop": { zh: "停下", en: "Stop" },
+  "composer.more_tools": { zh: "更多工具", en: "More tools" },
   "composer.stop_the_current_response_and": { zh: "停止当前回复，把这条作为新一轮立即发出", en: "Stop the current response and send this as a new turn" },
   "composer.stopping": { zh: "正在停止…", en: "Stopping…" },
   "composer.switches_immediately_other_sessions_in": { zh: "选择后立即切换，同目录会话也会受影响", en: "Switches immediately; other sessions in this folder are affected" },

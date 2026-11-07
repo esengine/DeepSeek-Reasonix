@@ -1802,12 +1802,12 @@ button, input, textarea { font-size: var(--fs-ui); }
 .session-pop-group > button.danger { color: var(--err-ink); }
 .session-pop-group > button.danger > .studio-icon { color: var(--err-ink); }
 
-.turntools > .attach { order: 1 !important; }
-.turntools > .studio-mode-control { order: 2 !important; }
-.turntools > .studio-branch-pop { order: 3 !important; }
-.turntools > [data-plan-phase] { order: 4 !important; }
-.turntools > .policy { order: 4 !important; }
-.turntools > .studio-model-group { order: 6 !important; }
+:root:not([data-fold~="phone"]) .turntools > .attach { order: 1 !important; }
+:root:not([data-fold~="phone"]) .turntools > .studio-mode-control { order: 2 !important; }
+:root:not([data-fold~="phone"]) .turntools > .studio-branch-pop { order: 3 !important; }
+:root:not([data-fold~="phone"]) .turntools > [data-plan-phase] { order: 4 !important; }
+:root:not([data-fold~="phone"]) .turntools > .policy { order: 4 !important; }
+:root:not([data-fold~="phone"]) .turntools > .studio-model-group { order: 6 !important; }
 .turntools > .picker:first-of-type { order: unset; }
 .studio-model-group {
   min-width: 0;
