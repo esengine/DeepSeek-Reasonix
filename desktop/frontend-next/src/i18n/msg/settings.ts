@@ -99,6 +99,7 @@ export const SETTINGS: Messages = {
   "settings.never": { zh: "不显示", en: "Never" },
   "settings.new_answer_divider": { zh: "新回答分隔线", en: "New-answer divider" },
   "settings.no_external_services_connected": { zh: "尚未接入外部服务。", en: "No external services connected." },
+  "settings.on_this_page": { zh: "本页包含", en: "On this page" },
   "settings.no_matching_setting": { zh: "没有匹配的设置", en: "No matching setting" },
   "settings.no_plugin_packages_installed": { zh: "尚未安装插件包。", en: "No plugin packages installed." },
   "settings.no_skills_in_this_working": { zh: "当前工作目录下没有技能。", en: "No skills in this working directory." },

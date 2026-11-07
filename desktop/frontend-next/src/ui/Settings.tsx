@@ -6,7 +6,8 @@ import { t } from "../i18n";
 import { listenAction } from "./listen";
 import { useRuntimeReload } from "./RuntimeReload";
 import type { CapabilityScope, McpEntry, ModelEntry, PluginPackage, SkillEntry } from "../port/port";
-import { useSettingsSearch } from "./useSettingsSearch";
+import { usePageIndex, useSettingsSearch } from "./useSettingsSearch";
+import { PageIndex } from "./PageIndex";
 import { useSettingLanding } from "./useSettingLanding";
 import { bytes, tokens as fmtTokens } from "../i18n/format";
 import { STORAGE_TALLY_DELAY, cachedStorageTotal, storageTotal } from "./storageTally";
@@ -313,6 +314,7 @@ export function Settings({ hub, onError, port, networkPort, localWorkspacePort, 
   // 搜索命中的是这张表里的条目，包括当前没有挂载的那些分区；能不能显示由 shown
   // 决定，和它有没有被渲染过无关。
   const found = useSettingsSearch(query, shown, remoteBook);
+  const pageItems = usePageIndex(at, shown, remoteBook);
   // 落点：跳过去之后短暂标一下「就是这里」。这是导航反馈，不是状态变化。
   const pathOf = (section: Section) => {
     const home = pageHome(section);
@@ -413,6 +415,7 @@ export function Settings({ hub, onError, port, networkPort, localWorkspacePort, 
         <div className="prefs-main" key={at} role="tabpanel" aria-labelledby={pageNow ? `prefs-${at}-${pageNow}` : `prefs-${at}`} data-sec={at}>
           <ConfigTrouble port={port} onRepaired={onChanged} />
           {!solo && <SettingsTitle at={at} />}
+          {!solo && !deepAt && <PageIndex items={pageItems} onGo={(entry) => go(entry.section, entry.anchor)} />}
           <Boundary
             fallback={
               <div className="find" data-lvl="err" role="alert">

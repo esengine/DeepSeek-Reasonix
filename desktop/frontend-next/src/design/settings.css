@@ -475,3 +475,6 @@
 .scopeanchor { position: relative; display: inline-block; }
 .scopeanchor .scope-pick { top: calc(100% + 4px); right: 0; left: auto; }
 .scoperow .scopeanchor .scope-pick { top: calc(100% + 4px); right: 0; left: auto; }
+.page-index { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 0 0 14px; }
+.page-index .pi-label { margin-right: 2px; color: var(--faint); font: var(--w-reg) var(--fs-meta) var(--ui); }
+.page-index .spill { height: 26px; }

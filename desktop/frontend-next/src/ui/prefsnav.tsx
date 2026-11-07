@@ -2,6 +2,7 @@ import { GearMark } from "./GearMark";
 import type { ReactNode } from "react";
 import { MODS_SHOWN } from "./modsgate";
 import { t } from "../i18n";
+import { rankTerms, type SettingTerms } from "./settingRank";
 
 /** The settings table of contents: which sections exist, what each is called,
  *  what mark it carries and which question it answers. Kept out of Settings
@@ -215,10 +216,10 @@ export const SETTINGS: SettingEntry[] = [
   // Takes effect on this session at once and is also persisted as the default
   // every later session starts from. Machine is the wider of the two answers
   // and the one a reader cannot see from the screen.
-  { section: "tools", anchor: "approval", title: "settings.tool_approvals", scope: "machine", apply: "immediate", keywords: ["权限", "yolo", "询问", "放行"] },
+  { section: "tools", anchor: "approval", title: "settings.tool_approvals", scope: "machine", apply: "immediate", keywords: ["权限", "yolo", "询问", "放行", "每次都问", "免确认", "自动同意", "确认", "不要问"] },
   { section: "display", anchor: "present-files", title: "settings.ai_file_delivery_cards", scope: "machine", apply: "on-open", keywords: ["文件交付", "交付卡片", "文件预览", "present_files", "tools.present_files", "PDF", "CSV", "HTML", "file delivery", "preview"] },
   { section: "tools", anchor: "external-origin", title: "settings.outside_text", scope: "machine", apply: "runtime-rebuild", keywords: ["外部", "网页", "来源", "注入", "提示注入", "origin", "yolo", "auto", "询问"] },
-  { section: "session", anchor: "plan-approval", title: "settings.plan_approval", scope: "machine", apply: "immediate", keywords: ["plan", "自动批准", "长任务", "无人值守", "plan_approval", "放行", "询问"] },
+  { section: "session", anchor: "plan-approval", title: "settings.plan_approval", scope: "machine", apply: "immediate", keywords: ["plan", "自动批准", "长任务", "无人值守", "plan_approval", "放行", "询问", "每次都问", "免确认", "自动同意"] },
   { section: "tools", anchor: "tool-list", page: true, title: "ext.tools_the_model_can_use", scope: "machine", apply: "on-open", keywords: ["禁用", "关闭工具", "tools.disabled", "省 token", "提示词开销", "web_fetch", "denylist"] },
   { section: "tools", anchor: "rules", page: true, title: "settings.rules_you_spell_out", scope: "machine", apply: "runtime-rebuild", keywords: ["permissions", "允许", "拒绝", "配方"] },
   { section: "tools", anchor: "sandbox", page: true, title: "settings.sandbox", scope: "machine", apply: "runtime-rebuild", keywords: ["隔离", "联网", "写权限", "ssh-agent"] },
@@ -266,11 +267,11 @@ export const SETTINGS: SettingEntry[] = [
   { section: "memory", anchor: "memory", page: true, title: "data.memory", scope: "chosen", apply: "immediate", keywords: ["记住", "忘记", "事实"] },
   { section: "usage", anchor: "currency", title: "usage.cost_display_currency", scope: "machine", apply: "immediate", keywords: ["币种", "货币", "人民币", "美元", "currency", "CNY", "USD", "汇率"] },
   { section: "usage", anchor: "upload-usage", page: true, title: "usage.upload_volume", scope: "machine", apply: "none", keywords: ["流量", "上传", "带宽", "请求", "upload", "traffic", "bandwidth"] },
-  { section: "usage", anchor: "usage", page: true, title: "usage.usage_cost", scope: "machine", apply: "none", keywords: ["token", "花费", "缓存命中"] },
+  { section: "usage", anchor: "usage", page: true, title: "usage.usage_cost", scope: "machine", apply: "none", keywords: ["token", "花费", "缓存命中", "多少钱", "花钱", "费用", "成本", "账单"] },
   { section: "storage", anchor: "storage", page: true, title: "common.storage", scope: "machine", apply: "restart", keywords: ["搬家", "迁移", "磁盘", "位置"] },
   { section: "advanced", anchor: "elsewhere", title: "settings.not_in_this_version_yet", scope: "machine", apply: "none", keywords: ["配置文件"] },
 
-  { section: "common", anchor: "language", title: "common.language", scope: "machine", apply: "restart", keywords: ["中文", "english", "界面语言"] },
+  { section: "common", anchor: "language", title: "common.language", scope: "machine", apply: "restart", keywords: ["中文", "english", "界面语言", "英文", "英语"] },
   { section: "appearance", anchor: "graphics", title: "look.graphics", scope: "machine", apply: "restart", keywords: ["硬件加速", "显卡", "gpu", "软件渲染", "占用", "卡顿"] },
   { section: "controls", anchor: "navrail", title: "settings.icon_rail", scope: "machine", apply: "immediate", keywords: ["侧边栏", "导航", "图标", "sidebar", "nav"] },
   { section: "controls", anchor: "naventries", page: true, title: "settings.navigation_entries", scope: "machine", apply: "immediate", keywords: ["侧边栏", "导航", "隐藏", "排序", "自定义", "入口", "sidebar", "nav", "hide", "reorder", "customize"] },
@@ -294,14 +295,14 @@ export const SETTINGS: SettingEntry[] = [
   { section: "appearance", anchor: "window", page: true, title: "common.window", scope: "machine", apply: "immediate", keywords: ["托盘", "关闭行为", "休眠", "睡眠"] },
   // Immediate because the endpoint hands the holder every running sink reads,
   // not because the file was written: writing it is what a restart would need.
-  { section: "common", anchor: "notify", title: "common.notifications", scope: "machine", apply: "immediate", keywords: ["提醒", "notification", "系统通知", "结束", "批准", "提问"] },
+  { section: "common", anchor: "notify", title: "common.notifications", scope: "machine", apply: "immediate", keywords: ["提醒", "notification", "系统通知", "结束", "批准", "提问", "提示音", "声音", "静音", "铃声", "sound"] },
   { section: "appearance", anchor: "size", page: true, title: "look.size", scope: "machine", apply: "immediate", keywords: ["缩放", "字号", "行宽", "对话区域宽度", "比例", "width", "percentage"] },
   { section: "appearance", anchor: "font", page: true, title: "look.typeface", scope: "machine", apply: "immediate", keywords: ["等宽", "mono"] },
   { section: "appearance", anchor: "wallpaper", page: true, title: "look.wallpaper", scope: "machine", apply: "immediate", keywords: ["背景", "图片"] },
   { section: "appearance", anchor: "weight", title: "look.text_weight", scope: "machine", apply: "immediate", keywords: ["加粗", "字重"] },
   { section: "appearance", anchor: "contrast", title: "look.text_contrast", scope: "machine", apply: "immediate", keywords: ["柔和", "对比"] },
   { section: "appearance", anchor: "effects", title: "look.visual_effects", scope: "machine", apply: "immediate", keywords: ["磨砂", "模糊", "动画", "显卡", "gpu", "性能", "省电", "blur"] },
-  { section: "common", anchor: "mode", title: "settings.light_and_dark", scope: "machine", apply: "immediate", keywords: ["深色", "浅色", "跟随系统", "定时", "时间段", "schedule", "dark", "light"] },
+  { section: "common", anchor: "mode", title: "settings.light_and_dark", scope: "machine", apply: "immediate", keywords: ["深色", "浅色", "跟随系统", "定时", "时间段", "schedule", "dark", "light", "夜间", "夜晚", "暗色", "亮色", "黑色模式", "夜间模式", "深色模式", "浅色模式", "暗色模式"] },
   { section: "appearance", anchor: "advanced-look", title: "look.advanced_look", scope: "machine", apply: "immediate", keywords: ["高级外观", "导入主题", "自定义颜色", "theme", "colours"] },
   { section: "appearance", anchor: "scheme", page: true, title: "settings.palette", scope: "machine", apply: "immediate", keywords: ["主题", "theme", "色板"] },
 ];
@@ -335,8 +336,16 @@ export const SECTION_NAME: Partial<Record<Section, string>> = {
 // Title, aliases, and the page it is on. An alias is a way in and nothing
 // more: it never becomes the setting's name and no judgement reads it.
 export function settingMatches(e: SettingEntry, q: string): boolean {
-  if ([e.title, SECTION_NAME[e.section] ?? "", SECTION_NAME[pageHome(e.section)] ?? ""].some((name) =>
-    name.toLowerCase().includes(q) || t(name).toLowerCase().includes(q),
-  )) return true;
-  return (e.keywords ?? []).some((k) => k.toLowerCase().includes(q));
+  return rankTerms(termsOf(e), q) > 0;
+}
+
+/** Every name a setting can be found by, in both the key's wording and the
+ *  reader's language. */
+export function termsOf(e: SettingEntry): SettingTerms {
+  const names = (key: string | undefined) => (key ? [key, t(key)] : []);
+  return {
+    titles: names(e.title),
+    sections: [...names(SECTION_NAME[e.section]), ...names(SECTION_NAME[pageHome(e.section)])],
+    keywords: e.keywords ?? [],
+  };
 }
