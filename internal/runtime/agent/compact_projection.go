@@ -386,6 +386,10 @@ func compactionTelemetryFromSummary(trigger, cacheState string, sourceTokens int
 type compactionScope struct {
 	ignoreThreshold bool
 	ignoreEconomics bool
+	// ignoreAmount waives only how much was added since the last checkpoint:
+	// a request by hand has decided the fold is worth it, but still declines a
+	// context that has not changed at all.
+	ignoreAmount bool
 }
 
 // compactToProjection installs one content-driven summary checkpoint:
@@ -423,7 +427,7 @@ func (a *contextWindow) compactToProjection(ctx context.Context, trigger, instru
 		// Every checkpoint costs the whole prefix cache, so a second one waits
 		// for a tail's worth of new closed history — otherwise a small window
 		// folds every few rounds and spends more than the fold frees.
-		if a.estimatedPromptTokens(msgs[held:start]) < a.refoldMinTokens() {
+		if !scope.ignoreAmount && a.estimatedPromptTokens(msgs[held:start]) < a.refoldMinTokens() {
 			return CompactionNoop, NoopFoldBelowEconomics, nil
 		}
 	}
@@ -431,7 +435,7 @@ func (a *contextWindow) compactToProjection(ctx context.Context, trigger, instru
 	// original stays whole for resume and rewind.
 	region := msgs[head:start]
 	kept, fold := a.partitionFold(region, msgs[start:])
-	if len(fold) == 0 || (!scope.ignoreEconomics && !a.foldEconomics(fold)) {
+	if len(fold) == 0 || (!scope.ignoreEconomics && !scope.ignoreAmount && !a.foldEconomics(fold)) {
 		return CompactionNoop, NoopFoldBelowEconomics, nil
 	}
 	reason, err := a.foldCannotFit(trigger, msgs, head, start)

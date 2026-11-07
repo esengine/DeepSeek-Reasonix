@@ -138,11 +138,13 @@ func (m ContextManager) prepareOnce(ctx context.Context, policy ContextPreparePo
 		return prepared, nil
 	}
 	// Asking, overflow and a physical ceiling each waive the trigger. Only the
-	// last two, and an explicit force, waive what the fold has to be worth.
+	// last two, and an explicit force, waive what the fold has to be worth; asking
+	// by hand waives only how much was added.
 	scope := compactionScope{
 		ignoreThreshold: policy.IgnoreThreshold || policy.Trigger == CompactionTriggerManual ||
 			policy.Trigger == CompactionTriggerOverflow || est >= hard,
 		ignoreEconomics: policy.IgnoreEconomics || policy.Trigger == CompactionTriggerOverflow || est >= hard,
+		ignoreAmount:    policy.Trigger == CompactionTriggerManual,
 	}
 	if pressure < fold && !scope.ignoreThreshold {
 		return prepared, nil

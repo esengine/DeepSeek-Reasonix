@@ -609,9 +609,9 @@ func (a *Agent) SetSink(sink event.Sink) {
 func (a *Agent) CompactRatio() float64 { return a.compactRatio }
 
 // CompactNow runs one requested projection compaction (canonical transcript
-// untouched). Asking waives the automatic threshold; it does not waive what the
-// fold has to be worth, so a context nothing was added to is declined rather
-// than summarized a second time. Only IgnoreEconomics waives that.
+// untouched). Asking waives the automatic threshold and how much was added since
+// the last checkpoint, but a context nothing was added to is still declined
+// rather than summarized a second time. Only IgnoreEconomics waives that.
 func (a *Agent) CompactNow(ctx context.Context, req CompactRequest) (CompactVerdict, error) {
 	prepared, err := a.window().contextManager().Prepare(ctx, ContextPreparePolicy{
 		Trigger:         CompactionTriggerManual,

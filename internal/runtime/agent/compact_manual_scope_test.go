@@ -80,10 +80,10 @@ func TestManualCompactOnAnUnchangedContextBuysNothing(t *testing.T) {
 	}
 }
 
-// A checkpoint costs the whole prefix cache, so a second one waits for enough
-// new closed history to pay for it — the same rule the automatic path uses,
-// now applied to the path that actually fires in practice.
-func TestManualCompactWaitsForEnoughNewHistory(t *testing.T) {
+// Asking is the person deciding the fold is worth it: a few new turns after a
+// checkpoint do not make /compact answer "too little", only an unchanged
+// context does.
+func TestManualCompactFoldsAfterALittleNewHistory(t *testing.T) {
 	sess := foldableSessionOverForce(60)
 	a, _ := manualAgent(t, sess)
 	if _, err := a.CompactNow(context.Background(), CompactRequest{}); err != nil {
@@ -91,19 +91,13 @@ func TestManualCompactWaitsForEnoughNewHistory(t *testing.T) {
 	}
 	first := archivedFolds(a)
 
-	addTurns(sess, 1, 5)
+	addTurns(sess, 12, 120)
 	verdict, err := a.CompactNow(context.Background(), CompactRequest{})
 	if err != nil {
 		t.Fatalf("CompactNow after a little more history: %v", err)
 	}
-	if archivedFolds(a) != first {
-		t.Errorf("a few hundred new tokens bought %d more folds", archivedFolds(a)-first)
-	}
-	if verdict.Compacted() || verdict.Reason == "" {
-		t.Errorf("verdict = %+v, want a declined one carrying its reason", verdict)
-	}
-	if CompactDeclineText(verdict.Reason) == "" {
-		t.Errorf("no words for reason %q", verdict.Reason)
+	if !verdict.Compacted() || archivedFolds(a)-first != 1 {
+		t.Errorf("verdict = %+v folds=%d, want one more fold when asked by hand", verdict, archivedFolds(a)-first)
 	}
 }
 
