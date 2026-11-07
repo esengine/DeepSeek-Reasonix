@@ -156,3 +156,13 @@ describe("the order of the phone's tool row", () => {
     for (const line of pinned) expect(line).toMatch(/^:root:not\(\[data-fold~="phone"\]\) /);
   });
 });
+
+describe("the phone stylesheets", () => {
+  it("carry no control characters: an escape that was meant as a character is not a NUL", () => {
+    expect(phone).not.toMatch(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/);
+  });
+
+  it("separates the model name from its reasoning level with a middle dot", () => {
+    expect(rule('[data-fold~="phone"] .compose .turntools .model-picker .studio-model-sep::before')).toContain('content: "·"');
+  });
+});

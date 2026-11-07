@@ -78,123 +78,93 @@ describe("the model menu as a sheet on a phone", () => {
   });
 });
 
-describe("the reasoning slider", () => {
+describe("the reasoning depth line", () => {
   const track = (selector: string): string => rule(selector);
 
-  it("is a card with the level named large above a thick rounded track", () => {
+  it("is a card whose header sets the level on the left and the model on the right", () => {
     expect(track("\n.effort-slider")).toMatch(/background:\s*var\(--overlay\)/);
     expect(track("\n.effort-slider")).toMatch(/border-radius:\s*14px/);
-    expect(track(".effort-slider .es-name")).toMatch(/font:\s*var\(--w-semi\) 18px/);
-    const input = track('.effort-slider input[type="range"]');
-    expect(input).toMatch(/height:\s*30px/);
-    expect(input).toMatch(/border-radius:\s*15px/);
+    const head = track(".effort-slider .es-head");
+    expect(head).toMatch(/display:\s*flex/);
+    expect(head).toMatch(/justify-content:\s*space-between/);
+    expect(track(".effort-slider .es-name")).toMatch(/color:\s*var\(--text\)/);
+    expect(track(".effort-slider .es-name")).toMatch(/font:\s*var\(--w-semi\) var\(--fs-lead\)/);
+    expect(track(".effort-slider .es-model")).toMatch(/color:\s*var\(--muted\)/);
   });
 
-  it("fills with a gradient up to the thumb, in a layer of its own that the input sits over", () => {
-    expect(track(".effort-slider .es-track")).toMatch(/--track:\s*linear-gradient\(90deg/);
+  it("is a thin line, filled in the product's own colour as far as the thumb", () => {
+    const line = track(".effort-slider .es-line");
+    expect(line).toMatch(/height:\s*4px/);
+    expect(line).toMatch(/background:\s*var\(--border\)/);
     const fill = track(".effort-slider .es-fill");
-    expect(fill).toMatch(/width:\s*calc\(var\(--p\) \* \(100% - 30px\) \+ 15px\)/);
-    expect(fill).toMatch(/background:\s*var\(--track\)/);
-    expect(fill).toMatch(/overflow:\s*hidden/);
-    expect(track('.effort-slider input[type="range"]')).toMatch(/background:\s*transparent/);
-    expect(track(".effort-slider .es-name")).toMatch(/background-clip:\s*text/);
+    expect(fill).toMatch(/height:\s*4px/);
+    expect(fill).toMatch(/width:\s*calc\(var\(--p\) \* \(100% - 28px\) \+ 14px\)/);
+    expect(fill).toMatch(/var\(--brand\)/);
   });
 
-  it("is lit from inside: stars that twinkle out of step, and a glow that sweeps across", () => {
-    expect(track(".effort-slider .es-fill::before")).toMatch(/animation:[^;]*es-twinkle [\d.]+s/);
-    expect(track(".effort-slider .es-fill::after")).toMatch(/animation:[^;]*es-twinkle [\d.]+s/);
-    expect(track(".effort-slider .es-fill::before")).toMatch(/radial-gradient/);
-    expect(track(".effort-slider .es-glow")).toMatch(/animation:\s*es-sweep [\d.]+s/);
-    expect(css).toMatch(/@keyframes es-twinkle\s*\{[^}]*opacity/);
-    expect(css).toMatch(/@keyframes es-sweep\s*\{[^}]*translateX/);
+  it("carries a current along the filled part toward the thumb, and holds still under reduced motion", () => {
+    expect(track(".effort-slider .es-fill")).toMatch(/animation:\s*es-flow [\d.]+s linear infinite/);
+    expect(css).toMatch(/@keyframes es-flow\s*\{[^}]*background-position-x:\s*\d+px/);
+    expect(css).toMatch(/prefers-reduced-motion: reduce\)[^@]*\.es-fill[^{]*\{[^}]*animation:\s*none/);
+    expect(css).toMatch(/:root\[data-effects="reduced"\] \.effort-slider \.es-fill[^{]*\{[^}]*animation:\s*none/);
   });
 
-  it("holds still, and shows its stars, under reduced motion", () => {
-    expect(css).toMatch(/prefers-reduced-motion: reduce\)[^@]*\.es-fill::before[^{]*\{[^}]*animation:\s*none/);
-    expect(css).toMatch(/:root\[data-effects="reduced"\] \.effort-slider[^{]*\{[^}]*animation:\s*none/);
+  it("marks every level with a node: hollow ahead of the thumb, solid once passed", () => {
+    const node = track(".effort-slider .es-tick");
+    expect(node).toMatch(/left:\s*calc\(14px \+ var\(--k\) \* \(100% - 28px\)\)/);
+    expect(node).toMatch(/width:\s*10px/);
+    expect(node).toMatch(/border-radius:\s*50%/);
+    expect(track(".effort-slider .es-tick[data-on]")).toMatch(/background:\s*var\(--brand\)/);
   });
 
-  it("keeps the native thumb as the hit area, as wide as the track is tall, and draws nothing with it", () => {
+  it("has a thumb that wears the product's own mark inside a ring of its colour", () => {
+    const thumb = track(".effort-slider .es-thumb");
+    expect(thumb).toMatch(/left:\s*calc\(var\(--p\) \* \(100% - 28px\)\)/);
+    expect(thumb).toMatch(/width:\s*28px/);
+    expect(thumb).toMatch(/border:\s*2px solid var\(--brand\)/);
+    expect(thumb).toMatch(/background:\s*var\(--raised\)/);
+    expect(track(".effort-slider .es-r")).toMatch(/stroke:\s*var\(--brand\)/);
+  });
+
+  it("names each level under its node, centred on it, the current one in the text colour", () => {
+    const mark = track(".effort-slider .es-mark");
+    expect(mark).toMatch(/left:\s*calc\(14px \+ var\(--k\) \* \(100% - 28px\)\)/);
+    expect(mark).toMatch(/transform:\s*translateX\(-50%\)/);
+    expect(track(".effort-slider .es-mark[data-on]")).toMatch(/color:\s*var\(--text\)/);
+  });
+
+  it("keeps the native thumb as the hit area, as wide as the thumb, and draws nothing with it", () => {
     const thumb = track('.effort-slider input[type="range"]::-webkit-slider-thumb');
-    expect(thumb).toMatch(/width:\s*30px/);
-    expect(thumb).toMatch(/height:\s*30px/);
+    expect(thumb).toMatch(/width:\s*28px/);
+    expect(thumb).toMatch(/height:\s*28px/);
     expect(thumb).toMatch(/opacity:\s*0/);
   });
-});
 
-describe("the slider's motion", () => {
-  const track = (selector: string): string => rule(selector);
-
-  it("registers its position as a number, so that colour, fill and thumb can all ease together", () => {
+  it("registers its position as a number, so the fill, thumb and nodes ease together", () => {
     expect(css).toMatch(/@property --p\s*\{[^}]*syntax:\s*['"]<number>['"][^}]*initial-value:\s*0/);
     expect(track(".effort-slider .es-track")).toMatch(/transition:\s*--p var\(--m-card\)/);
     expect(track(".effort-slider .es-track[data-drag]")).toMatch(/transition:\s*none/);
   });
 
-  it("draws the thumb itself, at the same place the native one would stand", () => {
-    const thumb = track(".effort-slider .es-thumb");
-    expect(thumb).toMatch(/left:\s*calc\(var\(--p\) \* \(100% - 30px\)\)/);
-    expect(thumb).toMatch(/border-radius:\s*50%/);
-    expect(thumb).toMatch(/background:\s*#fff/);
-    expect(track('.effort-slider input[type="range"]::-webkit-slider-thumb')).toMatch(/opacity:\s*0/);
-  });
-
-  it("lets the colour follow the position instead of switching at a level", () => {
-    expect(track(".effort-slider .es-track")).toMatch(/--track:\s*linear-gradient\([^;]*color-mix\(in oklab[^;]*var\(--p\)/);
-  });
-
-  it("sets the stars drifting, each layer its own way and pace, wrapping without a seam", () => {
-    const a = track(".effort-slider .es-fill::before");
-    const b = track(".effort-slider .es-fill::after");
-    expect(a).toMatch(/background-repeat:\s*repeat-x/);
-    expect(a).toMatch(/animation:[^;]*es-drift-a [\d.]+s linear infinite/);
-    expect(b).toMatch(/animation:[^;]*es-drift-b [\d.]+s linear infinite/);
-    expect(css).toMatch(/@keyframes es-drift-a\s*\{[^}]*background-position-x:\s*-/);
-    expect(css).toMatch(/@keyframes es-drift-b\s*\{[^}]*background-position-x:\s*\d/);
-  });
-
-  it("keeps all of its light inside the card", () => {
+  it("keeps everything inside the card", () => {
     const card = track("\n.effort-slider");
     expect(card).toMatch(/overflow:\s*hidden/);
     expect(card).toMatch(/padding:\s*14px 18px/);
-    expect(track(".effort-slider .es-thumb")).toMatch(/box-shadow:[^;]*0 0 1[0-2]px/);
   });
 
-  it("stops drifting under reduced motion, too", () => {
-    expect(css).toMatch(/prefers-reduced-motion: reduce[^@]*es-fill::before[^{]*\{[^}]*animation:\s*none/);
+  it("is made of the product's own colours alone: nothing borrowed from another product's slider", () => {
+    const slider = css.slice(css.indexOf("@property --p"), css.indexOf("@keyframes sheet-up"));
+    for (const borrowed of ["es-twinkle", "es-drift", "es-sweep", "es-glow", "radial-gradient", "#b36ef0", "#a15ff0", "#6552de", "#fff", "background-clip: text"]) {
+      expect(slider).not.toContain(borrowed);
+    }
   });
 });
 
 describe("the sheet's search box", () => {
   it("lines up with the rows' edges and keeps a gap above the list", () => {
-    const find = rule(S + " :is(.mfind, input[type=\"search\"])");
+    const find = rule(S + ' :is(.mfind, input[type="search"])');
     expect(find).toMatch(/width:\s*calc\(100% - 8px\)/);
     expect(find).toMatch(/margin:\s*0 4px 8px/);
     expect(find).toMatch(/box-sizing:\s*border-box/);
-  });
-});
-
-describe("the slider's steps and bloom", () => {
-  const track = (selector: string): string => rule(selector);
-
-  it("puts a small dot at the centre of the thumb for every level, brighter once passed", () => {
-    const tick = track(".effort-slider .es-tick");
-    expect(tick).toMatch(/left:\s*calc\(15px \+ var\(--k\) \* \(100% - 30px\)\)/);
-    expect(tick).toMatch(/width:\s*4px/);
-    expect(tick).toMatch(/border-radius:\s*50%/);
-    expect(track(".effort-slider .es-tick[data-on]")).toMatch(/background:\s*rgb\(255 255 255 \/ \.8\)/);
-  });
-
-  it("names each level under its dot, centred on it, the current one in the text colour", () => {
-    const mark = track(".effort-slider .es-mark");
-    expect(mark).toMatch(/left:\s*calc\(15px \+ var\(--k\) \* \(100% - 30px\)\)/);
-    expect(mark).toMatch(/transform:\s*translateX\(-50%\)/);
-    expect(track(".effort-slider .es-mark[data-on]")).toMatch(/color:\s*var\(--text\)/);
-  });
-
-  it("carries a soft bloom that follows the thumb and stays inside the card", () => {
-    const bloom = track(".effort-slider .es-track::before");
-    expect(bloom).toMatch(/radial-gradient\([^;]*calc\(var\(--p\) \* \(100% - 30px\) \+ 15px\)/);
-    expect(bloom).toMatch(/pointer-events:\s*none/);
   });
 });

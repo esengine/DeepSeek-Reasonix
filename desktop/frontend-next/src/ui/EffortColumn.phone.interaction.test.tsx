@@ -99,14 +99,20 @@ describe("the same levels on a wider screen", () => {
   });
 });
 
-describe("the slider's light", () => {
+describe("the slider's drawing", () => {
   it("is drawn in layers the reader never meets: decoration, hidden from the accessibility tree", () => {
     document.documentElement.dataset.fold = PHONE;
     draw([heading, ...levels]);
     const fill = document.querySelector(".effort-slider .es-fill");
     expect(fill).not.toBeNull();
     expect(fill?.getAttribute("aria-hidden")).toBe("true");
-    expect(fill?.querySelector(".es-glow")).not.toBeNull();
+    expect(document.querySelector(".effort-slider .es-line")?.getAttribute("aria-hidden")).toBe("true");
+  });
+
+  it("wears the product's own mark in its thumb", () => {
+    document.documentElement.dataset.fold = PHONE;
+    draw([heading, ...levels]);
+    expect(document.querySelector(".effort-slider .es-thumb svg.es-r")).not.toBeNull();
   });
 
   it("keeps the track's reach in step with the thumb", () => {

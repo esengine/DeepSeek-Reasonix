@@ -1,5 +1,6 @@
 import { useEffect, useState, type CSSProperties, type KeyboardEvent } from "react";
 import type { MenuItem } from "./Menu";
+import { RMark } from "./RMark";
 
 /** The reasoning levels as one slider. It moves continuously under the finger
  *  and settles on the nearest level when let go; moving it only previews, and
@@ -50,11 +51,12 @@ export function EffortSlider({ name, model, levels, current, onPick }: {
         {model && <span className="es-model">{model}</span>}
       </div>
       <div className="es-track" data-drag={held ? "" : undefined} style={{ "--p": pos / last } as CSSProperties}>
-        <span className="es-fill" aria-hidden="true"><span className="es-glow" /></span>
+        <span className="es-line" aria-hidden="true" />
+        <span className="es-fill" aria-hidden="true" />
         {levels.map((level, i) => (
           <i key={level.value} className="es-tick" aria-hidden="true" data-on={i <= near ? "" : undefined} style={{ "--k": i / last } as CSSProperties} />
         ))}
-        <span className="es-thumb" aria-hidden="true" />
+        <span className="es-thumb" aria-hidden="true"><RMark className="es-r" /></span>
         <input
           type="range" min={0} max={last} step="any" value={pos}
           aria-label={name} aria-valuetext={levels[near].label}
