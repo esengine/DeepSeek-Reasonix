@@ -103,7 +103,7 @@ it("does not commit a discarded quiet read after a draft edit", async () => {
 it("leaves the rendered Workbench untouched when Markdown polls are unchanged", async () => {
   const user = userEvent.setup();
   const port = new MockPort();
-  vi.spyOn(port, "workspaceFiles").mockResolvedValue({ files: ["notes.md"], directories: [] });
+  const listed = vi.spyOn(port, "workspaceFiles").mockResolvedValue({ files: ["notes.md"], directories: [] });
   const read = vi.spyOn(port, "workspaceFile").mockResolvedValue({ path: "notes.md", content: "# Saved", revision: "r1" });
   const commits = vi.fn();
   render(<Profiler id="workbench" onRender={commits}><WorkbenchPanel port={port} workspaceRoot="/fixture"
@@ -114,8 +114,11 @@ it("leaves the rendered Workbench untouched when Markdown polls are unchanged", 
   await act(async () => {});
   await quiet(commits);
   commits.mockClear();
-  await tick();
-  await tick();
+  const seen: string[] = [];
+  for (const n of [1, 2]) {
+    await tick();
+    seen.push(`after poll ${n}: ${commits.mock.calls.length} commits [${commits.mock.calls.map((c) => c[1]).join(",")}], file reads ${read.mock.calls.length}, listings ${listed.mock.calls.length}`);
+  }
   expect(read).toHaveBeenCalledTimes(3);
-  expect(commits).not.toHaveBeenCalled();
+  expect(commits.mock.calls.length, seen.join("; ")).toBe(0);
 });
