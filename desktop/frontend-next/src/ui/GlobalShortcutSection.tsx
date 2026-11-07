@@ -63,25 +63,33 @@ export function GlobalShortcutSection() {
   return (
     <Group id="global-shortcut" title={t("settings.global_show_hide_shortcut")} hint={t("settings.off_by_default_while_studio") }>
       <form data-action="window.global-shortcut" data-value="apply" onSubmit={event => { event.preventDefault(); void apply(draft); }}>
-        <label className="lrow">
-          <span className="tx"><span className="lb">{t("settings.shortcut_binding")}</span></span>
-          <input ref={input} className="fontown" data-action-change="window.global-shortcut" data-action-keydown="window.global-shortcut" data-value="binding" aria-label={t("settings.shortcut_binding")} maxLength={128} placeholder={recording ? t("settings.press_a_modifier_and_key") : "CommandOrControl+Shift+Space"} value={draft} readOnly={recording} onChange={event => setDraft(event.target.value)} onBlur={() => setRecording(false)} onKeyDown={event => {
-            if (!recording || event.key === "Tab") return;
-            event.preventDefault(); event.stopPropagation();
-            if (event.key === "Escape" && !event.ctrlKey && !event.altKey && !event.shiftKey && !event.metaKey) { setRecording(false); return; }
-            const binding = capturedBinding(event);
-            if (binding) { setDraft(binding); setRecording(false); }
-          }} disabled={!now || busy} />
-        </label>
-        {draft && <p className="note"><kbd>{acceleratorLabel(draft)}</kbd></p>}
-        <p className="note">{t("settings.click_record_and_press_a")}</p>
-        <div className="seg" data-text>
-          <button type="button" data-action="window.global-shortcut" data-value="record" disabled={!now || busy} onClick={() => { setRecording(true); input.current?.focus(); }}>{t("settings.record_shortcut")}</button>
-          <button type="submit" data-action="window.global-shortcut" data-value="apply" disabled={!now || busy}>{t("settings.apply_shortcut")}</button>
-          <button type="button" data-action="window.global-shortcut" data-value="disable" disabled={!now || busy || (!now.binding && !draft)} onClick={() => void apply("")}>{t("settings.clear_shortcut")}</button>
+        <div className="srow">
+          <div className="srow-meta">
+            <span className="srow-name">{t("settings.shortcut_binding")}</span>
+            {now && <span className="srow-desc" role="status">{t(STATUS[now.status], { value: acceleratorLabel(now.binding) })}</span>}
+          </div>
+          <div className="srow-ctl">
+            <input ref={input} className="keybind" data-recording={recording ? "" : undefined} data-action-change="window.global-shortcut" data-action-keydown="window.global-shortcut" data-value="binding" aria-label={t("settings.shortcut_binding")} maxLength={128} placeholder={recording ? t("settings.press_a_modifier_and_key") : acceleratorLabel("CommandOrControl+Shift+Space")} value={draft} readOnly={recording} onChange={event => setDraft(event.target.value)} onBlur={() => setRecording(false)} onKeyDown={event => {
+              if (!recording || event.key === "Tab") return;
+              event.preventDefault(); event.stopPropagation();
+              if (event.key === "Escape" && !event.ctrlKey && !event.altKey && !event.shiftKey && !event.metaKey) { setRecording(false); return; }
+              const binding = capturedBinding(event);
+              if (binding) { setDraft(binding); setRecording(false); }
+            }} disabled={!now || busy} />
+          </div>
+        </div>
+        <div className="srow keyacts">
+          <div className="srow-meta">
+            {draft && <kbd className="keycap">{acceleratorLabel(draft)}</kbd>}
+            <span className="srow-desc">{t("settings.click_record_and_press_a")}</span>
+          </div>
+          <div className="srow-ctl">
+            <button type="button" className="spill" data-action="window.global-shortcut" data-value="record" disabled={!now || busy} onClick={() => { setRecording(true); input.current?.focus(); }}>{t("settings.record_shortcut")}</button>
+            <button type="submit" className="spill" data-action="window.global-shortcut" data-value="apply" disabled={!now || busy}>{t("settings.apply_shortcut")}</button>
+            <button type="button" className="spill" data-action="window.global-shortcut" data-value="disable" disabled={!now || busy || (!now.binding && !draft)} onClick={() => void apply("")}>{t("settings.clear_shortcut")}</button>
+          </div>
         </div>
       </form>
-      {now && <p className="note" role="status">{t(STATUS[now.status], { value: acceleratorLabel(now.binding) })}</p>}
       {now?.error && <p className="note" role="alert">{t(ERRORS[now.error])}</p>}
       {failed && <p className="note" role="alert">{t("settings.could_not_read_or_change")}</p>}
     </Group>

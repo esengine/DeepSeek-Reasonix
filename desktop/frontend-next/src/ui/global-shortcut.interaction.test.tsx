@@ -140,3 +140,32 @@ it.each([
   expect(input.value).toBe(binding);
   expect(fixture.apply).not.toHaveBeenCalled();
 });
+
+it("suggests a chord in the notation the person reads, not Electron's accelerator grammar", async () => {
+  render(<GlobalShortcutSection />);
+  await screen.findByRole("status");
+  const input = screen.getByRole("textbox") as HTMLInputElement;
+  expect(input.placeholder).toBe(acceleratorLabel("CommandOrControl+Shift+Space"));
+  expect(input.placeholder).not.toContain("CommandOrControl");
+});
+
+it("marks the field while it is listening for a chord and releases it afterwards", async () => {
+  render(<GlobalShortcutSection />);
+  await screen.findByRole("status");
+  const input = screen.getByRole("textbox") as HTMLInputElement;
+  expect(input.hasAttribute("data-recording")).toBe(false);
+  await userEvent.click(screen.getByRole("button", { name: t("settings.record_shortcut") }));
+  expect(input.hasAttribute("data-recording")).toBe(true);
+  fireEvent.keyDown(input, { key: "k", code: "KeyK", ctrlKey: true });
+  expect(input.hasAttribute("data-recording")).toBe(false);
+});
+
+it("keeps the status and the actions inside one form, so Enter applies what the field holds", async () => {
+  fixture.apply.mockImplementation(async (binding: string) => ({ binding, status: "registered" }));
+  render(<GlobalShortcutSection />);
+  await screen.findByRole("status");
+  const input = screen.getByRole("textbox") as HTMLInputElement;
+  await userEvent.type(input, "Control+Space{Enter}");
+  expect(fixture.apply).toHaveBeenLastCalledWith("Control+Space");
+  expect(input.form).toBe(screen.getByRole("button", { name: t("settings.apply_shortcut") }).closest("form"));
+});

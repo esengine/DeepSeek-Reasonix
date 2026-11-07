@@ -33,7 +33,7 @@
   .prefs-col[data-cols="2"] { max-width: 1400px; column-count: 2; column-gap: 16px; }
   .prefs-col[data-cols="2"] > .prefs-card { break-inside: avoid; }
 }
-.prefs-card > .srow { display: flex; align-items: center; gap: 16px; padding: 10px 0; border-top: 1px solid var(--hair); }
+.prefs-card > .srow, .grp[data-setting="global-shortcut"] .srow { display: flex; align-items: center; gap: 16px; padding: 10px 0; border-top: 1px solid var(--hair); }
 .srow-meta { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .srow-name { color: var(--text); font: var(--w-med) var(--fs-ui)/1.4 var(--ui); }
 .srow-desc { color: var(--faint); font: var(--w-reg) var(--fs-meta)/1.5 var(--ui); }
@@ -41,6 +41,16 @@
 .srow-ctl { flex: none; display: flex; align-items: center; gap: 8px; }
 .spill { height: 24px; padding: 0 10px; border: 1px solid var(--border); border-radius: 999px; background: transparent; color: var(--text); font: var(--w-reg) var(--fs-meta) var(--ui); white-space: nowrap; cursor: pointer; }
 .spill:hover:not(:disabled) { background: var(--overlay); }
+.spill:disabled { opacity: .5; cursor: default; }
+.keybind { box-sizing: border-box; width: 220px; height: 28px; padding: 0 10px; border: 1px solid var(--border); border-radius: var(--r-sm); background: transparent; color: var(--text); font: var(--w-reg) var(--fs-meta) var(--mono); }
+.keybind::placeholder { color: var(--faint); }
+.keybind:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+.keybind[data-recording] { border-color: var(--net); background: var(--net-wash); }
+.keyacts { flex-wrap: wrap; row-gap: 8px; }
+.keyacts > .srow-meta { flex: 1 1 16em; flex-direction: row; flex-wrap: wrap; align-items: center; gap: 4px 10px; }
+.keyacts > .srow-meta > .srow-desc { flex: 1 1 14em; min-width: 0; }
+.keycap { display: inline-flex; align-items: center; height: 22px; padding: 0 8px; border: 1px solid var(--border); border-radius: var(--r-sm); background: var(--raised); color: var(--text); font: var(--w-reg) var(--fs-micro) var(--mono); }
+.grp[data-setting="global-shortcut"] > .hint { overflow: visible; text-overflow: clip; white-space: normal; }
 .srow-more { padding: 0 0 6px; }
 .srow-more .lrow { padding: 8px 0 8px 16px; border-top: 1px solid var(--hair); }
 .apply::before { display: none; }
