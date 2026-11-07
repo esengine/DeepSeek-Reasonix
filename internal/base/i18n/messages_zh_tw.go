@@ -202,6 +202,7 @@ var ChineseTraditional = Messages{
 	QueueMessages:                   queueZHTW,
 	ResumePickerMessages:            resumePickerZHTW,
 	GoalMessages:                    goalZHTW,
+	UsageMessages:                   usageZHTW,
 	SettingMessages:                 settingZHTW,
 	ApprovalNeededFmt:               "需要核准：%s",
 	ApprovalNeededWithSubjectFmt:    "需要核准：%s %s",

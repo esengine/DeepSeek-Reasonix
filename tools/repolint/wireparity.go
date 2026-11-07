@@ -122,6 +122,7 @@ var mirroredWireTypesHead = []wireMirror{
 	{"internal/frontend/serve/subagents.go", "subagentRunView", tsSubagentFile, "SubagentRun"},
 	{"internal/frontend/serve/subagents.go", "subagentTranscriptView", tsSubagentFile, "SubagentTranscript"},
 	{"internal/frontend/serve/session_usage.go", "SourceUsage", tsSessionFile, "SourceUsage"},
+	{"internal/frontend/serve/session_usage.go", "ColdStartUsage", tsSessionFile, "ColdStartUsage"},
 	// The agent's tabs. The target id is what the window draws a view by, so a
 	// tab the page cannot read one for is a tab it cannot show.
 	{"internal/platform/browser/session.go", "TabInfo", tsSessionFile, "BrowserTab"},

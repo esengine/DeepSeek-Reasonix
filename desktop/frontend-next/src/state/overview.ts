@@ -14,6 +14,20 @@ export function cacheRate(hit: number, miss: number, unknown = 0): number | null
   return Math.min(1, hit / known);
 }
 
+/** The session rate with its cold start taken out of hit, miss and unknown alike:
+ *  the first executor request pays for the prefix every later one reuses. Null
+ *  until a request after it split its prompt. */
+export function warmCacheRate(u: Pick<SessionUsage, "cacheHit" | "cacheMiss" | "cacheUnknown" | "coldStart">): number | null {
+  const c = u.coldStart;
+  if (!c) return null;
+  return cacheRate(u.cacheHit - c.cacheHit, u.cacheMiss - c.cacheMiss, (u.cacheUnknown ?? 0) - (c.cacheUnknown ?? 0));
+}
+
+/** output ÷ input tokens over the same requests. Null with no input. */
+export function outputRatio(u: Pick<SessionUsage, "promptTokens" | "completionTokens">): number | null {
+  return u.promptTokens > 0 ? u.completionTokens / u.promptTokens : null;
+}
+
 export type CostSay =
   | { kind: "exact"; amount: number; currency: string }
   | { kind: "atLeast"; amount: number; currency: string }

@@ -35,6 +35,24 @@ type SessionUsage struct {
 	CacheUnknown     int           `json:"cacheUnknown,omitempty"`
 	WorkMs           int64         `json:"workMs"`
 	Sources          []SourceUsage `json:"sources"`
+	// ColdStart is the first executor request in these totals, which it is also
+	// in; subtracting it gives the rate once the prefix it paid for was warm.
+	ColdStart *ColdStartUsage `json:"coldStart,omitempty"`
+}
+
+// ColdStartUsage is the session's opening executor request, split the way the
+// ledger split it. It pays for the prefix every later request reuses, so it is
+// the one request a warm hit rate leaves out.
+type ColdStartUsage struct {
+	PromptTokens int `json:"promptTokens"`
+	CacheHit     int `json:"cacheHit"`
+	CacheMiss    int `json:"cacheMiss"`
+	CacheUnknown int `json:"cacheUnknown,omitempty"`
+}
+
+func coldStartOf(tokens pricing.UsageTokens) *ColdStartUsage {
+	hit, miss, unknown := tokens.CacheSplit()
+	return &ColdStartUsage{PromptTokens: tokens.PromptTokens, CacheHit: hit, CacheMiss: miss, CacheUnknown: unknown}
 }
 
 // SessionUsage totals the ledger by source. WorkMs is the answered work time of
@@ -47,6 +65,10 @@ func (b *Broadcaster) SessionUsage() SessionUsage {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	out.WorkMs = b.workMs
+	if b.coldStart != nil {
+		cold := *b.coldStart
+		out.ColdStart = &cold
+	}
 	grouped := b.ledger.EntriesBySource()
 	names := make([]string, 0, len(grouped))
 	for name := range grouped {

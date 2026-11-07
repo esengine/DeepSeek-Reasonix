@@ -93,6 +93,34 @@ describe("the session overview behind the cache meter", () => {
     expect(button().textContent).toContain("99%");
   });
 
+  it("states the hit rate with the cold start left out of hit, miss and unknown alike", () => {
+    rail({ usage: { ...usage, coldStart: { promptTokens: 1000, cacheHit: 800, cacheMiss: 200 } } });
+    const row = within(card()).getByText("扣除冷启动后命中").closest("div")!;
+    expect(row.textContent).toContain("75%");
+    expect(row.textContent).toContain("不含首个主代理请求（冷启动，1k tokens）");
+    expect(within(card()).getByText("缓存命中").closest("div")!.textContent).toContain("76%");
+    expect(button().textContent).toContain("76%");
+  });
+
+  it("owes no warm rate before a cold start is known, or before a request follows it", () => {
+    rail({ usage: { ...usage, coldStart: undefined } });
+    expect(within(card()).getByText("扣除冷启动后命中").closest("div")!.textContent).toContain("—");
+    cleanup();
+    const only = { promptTokens: 3000, cacheHit: 2300, cacheMiss: 700 };
+    rail({ usage: { ...usage, ...only, cacheUnknown: 0, completionTokens: 10, requests: 1, coldStart: only } });
+    expect(within(card()).getByText("扣除冷启动后命中").closest("div")!.textContent).toContain("—");
+  });
+
+  it("states output over input for the same requests", () => {
+    rail();
+    const row = within(card()).getByText("输出比").closest("div")!;
+    expect(row.textContent).toContain("5.6%");
+    expect(row.textContent).toContain("输出 ÷ 输入");
+    cleanup();
+    rail({ usage: { ...usage, promptTokens: 0, completionTokens: 0 } });
+    expect(within(card()).getByText("输出比").closest("div")!.textContent).toContain("—");
+  });
+
   it("lists each source with its own cache and cost, and an unpriced one as unknown", () => {
     rail();
     const lines = [...card().querySelectorAll(".studio-overview-row")];

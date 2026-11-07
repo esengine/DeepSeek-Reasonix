@@ -201,6 +201,7 @@ var Chinese = Messages{
 	QueueMessages:                   queueZH,
 	ResumePickerMessages:            resumePickerZH,
 	GoalMessages:                    goalZH,
+	UsageMessages:                   usageZH,
 	SettingMessages:                 settingZH,
 	ApprovalNeededFmt:               "需要审批：%s",
 	ApprovalNeededWithSubjectFmt:    "需要审批：%s %s",

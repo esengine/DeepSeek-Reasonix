@@ -2,11 +2,12 @@ import { t } from "../i18n";
 import { money } from "../i18n/format";
 import type { SessionUsage } from "../port/session";
 import type { CostQuote } from "../port/wire";
-import { cacheRate, costSay, sessionTokens, sourceTokens, type CostSay } from "../state/overview";
+import { cacheRate, costSay, outputRatio, sessionTokens, sourceTokens, warmCacheRate, type CostSay } from "../state/overview";
 import { MASK } from "./wallet";
 
 const tokens = (n: number): string => (n >= 1_000_000 ? `${(n / 1_000_000).toFixed(1)}M` : n >= 1_000 ? `${Math.round(n / 100) / 10}k` : String(n));
 const percent = (r: number | null): string => (r === null ? "—" : `${Math.floor(r * 100)}%`);
+const fine = (r: number | null): string => (r === null ? "—" : `${(r * 100).toFixed(1)}%`);
 
 function clock(ms: number): string {
   if (ms <= 0) return "—";
@@ -78,6 +79,11 @@ export function SessionOverviewCard({ usage, quote, hideAmounts, onContext, clas
               <dt>{t("common.cache_hit")}</dt><dd>{percent(cacheRate(usage.cacheHit, usage.cacheMiss, unknown))}</dd>
               <small>{unknown > 0 ? t("session.hit_hit_miss_leaves_out", { n: tokens(unknown) }) : t("session.hit_hit_miss")}</small>
             </div>
+            <div>
+              <dt>{t("session.warm_cache_hit")}</dt><dd>{percent(warmCacheRate(usage))}</dd>
+              <small>{usage.coldStart ? t("session.leaves_out_the_cold_start_n", { n: tokens(usage.coldStart.promptTokens) }) : t("session.leaves_out_the_cold_start")}</small>
+            </div>
+            <div><dt>{t("session.output_ratio")}</dt><dd>{fine(outputRatio(usage))}</dd><small>{t("session.output_input")}</small></div>
           </dl>
           {sources.length > 0 && (
             <section aria-label={t("common.by_source")}>

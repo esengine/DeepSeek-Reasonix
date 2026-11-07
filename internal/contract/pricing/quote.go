@@ -146,6 +146,16 @@ type UsageTokens struct {
 	Estimated              bool
 }
 
+// CacheSplit is how a ledger counts one request's prompt: a request the
+// endpoint did not split bills its whole prompt as a miss, and reports it as
+// unknown too so a hit rate can leave it out.
+func (t UsageTokens) CacheSplit() (hit, miss, unknown int) {
+	if t.CacheHitTokens+t.CacheMissTokens > 0 {
+		return t.CacheHitTokens, t.CacheMissTokens, 0
+	}
+	return 0, t.PromptTokens, t.PromptTokens
+}
+
 // QuoteInput drives a single CostQuote computation.
 type QuoteInput struct {
 	Usage              UsageTokens

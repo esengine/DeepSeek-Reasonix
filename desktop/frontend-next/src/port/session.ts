@@ -399,4 +399,14 @@ export interface SessionUsage {
   cacheUnknown?: number;
   workMs: number;
   sources: SourceUsage[];
+  // The first executor request in these totals, which it is also in.
+  coldStart?: ColdStartUsage;
+}
+
+// The session's opening executor request, split the way the ledger split it.
+export interface ColdStartUsage {
+  promptTokens: number;
+  cacheHit: number;
+  cacheMiss: number;
+  cacheUnknown?: number;
 }

@@ -150,6 +150,40 @@ func TestStatusReportsTheFieldsTheFooterCompresses(t *testing.T) {
 	}
 }
 
+// Both rows read the ledger /status sends: the warm rate leaves the cold start
+// out of hit and of the split prompt, and the ratio is output over input.
+func TestStatusReportsTheWarmCacheRateAndTheOutputRatio(t *testing.T) {
+	m, _ := queueModel(t, map[string]any{
+		"GET /status": map[string]any{
+			"label": "deepseek-chat", "cacheHit": 0, "cacheMiss": 0,
+			"sessionUsage": map[string]any{
+				"promptTokens": 20000, "completionTokens": 500, "cacheHit": 13000, "cacheMiss": 7000, "cacheUnknown": 2000,
+				"coldStart": map[string]any{"promptTokens": 5000, "cacheHit": 1000, "cacheMiss": 4000},
+			},
+		},
+	})
+	queueSend(m, "/status")
+	got := queueLastNotice(m)
+	for _, want := range []string{"warm cache 92.31% after the cold start", "out/in     2.5% (out 500 / in 20.0K)"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("status lacks %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestStatusOwesNoWarmRateUntilARequestFollowsTheColdStart(t *testing.T) {
+	m, _ := queueModel(t, map[string]any{
+		"GET /status": map[string]any{
+			"label":        "deepseek-chat",
+			"sessionUsage": map[string]any{"promptTokens": 5000, "cacheHit": 1000, "cacheMiss": 4000, "coldStart": map[string]any{"promptTokens": 5000, "cacheHit": 1000, "cacheMiss": 4000}},
+		},
+	})
+	queueSend(m, "/status")
+	if got := queueLastNotice(m); strings.Contains(got, "warm cache") {
+		t.Fatalf("a session of one request has no warm rate:\n%s", got)
+	}
+}
+
 // The kernel owns where the file goes; this screen only reports it.
 func TestExportAsksTheKernelAndReportsItsPath(t *testing.T) {
 	m, k := queueModel(t, map[string]any{

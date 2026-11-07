@@ -240,7 +240,25 @@ type Status struct {
 		CacheHitTokens  int
 		CacheMissTokens int
 	} `json:"lastUsage"`
-	SessionCostQuote *CostQuote `json:"sessionCostQuote"`
+	SessionCostQuote *CostQuote    `json:"sessionCostQuote"`
+	SessionUsage     *SessionUsage `json:"sessionUsage"`
+}
+
+// SessionUsage is the slice of the kernel's ledger totals /status reports.
+type SessionUsage struct {
+	PromptTokens     int             `json:"promptTokens"`
+	CompletionTokens int             `json:"completionTokens"`
+	CacheHit         int             `json:"cacheHit"`
+	CacheMiss        int             `json:"cacheMiss"`
+	CacheUnknown     int             `json:"cacheUnknown"`
+	ColdStart        *ColdStartUsage `json:"coldStart"`
+}
+
+// ColdStartUsage is the session's opening executor request, already in the totals.
+type ColdStartUsage struct {
+	CacheHit     int `json:"cacheHit"`
+	CacheMiss    int `json:"cacheMiss"`
+	CacheUnknown int `json:"cacheUnknown"`
 }
 
 // CostQuote is the session's spend as the kernel priced it.

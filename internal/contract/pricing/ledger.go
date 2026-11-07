@@ -57,6 +57,18 @@ func NewLedger() *Ledger {
 	return &Ledger{Version: LedgerVersion, Entries: map[string]LedgerEntry{}}
 }
 
+// LedgerSource is the usage source a ledger files q under. A quote that names
+// none is the executor's: the field postdates it.
+func LedgerSource(q CostQuote) string {
+	if q.UsageSource != "" {
+		return q.UsageSource
+	}
+	return LedgerSourceExecutor
+}
+
+// LedgerSourceExecutor is the main agent's source, the one a session opens on.
+const LedgerSourceExecutor = "executor"
+
 // Add merges a quote into the ledger under its natural key.
 func (l *Ledger) Add(q CostQuote, tokens UsageTokens, occurred time.Time) {
 	if l == nil {
@@ -72,10 +84,7 @@ func (l *Ledger) Add(q CostQuote, tokens UsageTokens, occurred time.Time) {
 		occurred = time.Now().UTC()
 	}
 	q = NormalizeQuote(q)
-	source := q.UsageSource
-	if source == "" {
-		source = "executor"
-	}
+	source := LedgerSource(q)
 	key := LedgerKey(q.ModelRef, source, q.PricingFingerprint, q.RateDate)
 	ent, ok := l.Entries[key]
 	if !ok {
@@ -151,13 +160,10 @@ func (l *Ledger) Add(q CostQuote, tokens UsageTokens, occurred time.Time) {
 	ent.PromptTokens += tokens.PromptTokens
 	ent.CompletionTokens += tokens.CompletionTokens
 	ent.TotalTokens += tokens.PromptTokens + tokens.CompletionTokens
-	if tokens.CacheHitTokens+tokens.CacheMissTokens > 0 {
-		ent.CacheHitTokens += tokens.CacheHitTokens
-		ent.CacheMissTokens += tokens.CacheMissTokens
-	} else {
-		ent.CacheMissTokens += tokens.PromptTokens
-		ent.CacheUnknownTokens += tokens.PromptTokens
-	}
+	hit, miss, unknown := tokens.CacheSplit()
+	ent.CacheHitTokens += hit
+	ent.CacheMissTokens += miss
+	ent.CacheUnknownTokens += unknown
 	ent.RequestCount++
 	if occurred.After(ent.OccurredAt) {
 		ent.OccurredAt = occurred

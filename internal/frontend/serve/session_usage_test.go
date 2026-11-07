@@ -63,3 +63,45 @@ func TestSessionUsageStartsAgainWhenTheSessionDoes(t *testing.T) {
 		t.Fatalf("after a reset: %+v", got)
 	}
 }
+
+// The cold start is the first request the ledger files under the executor:
+// requests from other sources before it carry their own prefixes and are not it.
+func TestSessionUsageColdStartIsTheLedgersFirstExecutorRequest(t *testing.T) {
+	bc := NewBroadcaster()
+	if got := bc.SessionUsage(); got.ColdStart != nil {
+		t.Fatalf("no request yet, cold start = %+v", got.ColdStart)
+	}
+	bc.Emit(usageEvent("title", 300, 10, 0, 300))
+	bc.Emit(usageEvent("", 4000, 100, 1000, 3000))
+	bc.Emit(usageEvent("executor", 5000, 50, 4900, 100))
+	got := bc.SessionUsage()
+	want := ColdStartUsage{PromptTokens: 4000, CacheHit: 1000, CacheMiss: 3000}
+	if got.ColdStart == nil || *got.ColdStart != want {
+		t.Fatalf("cold start = %+v, want %+v", got.ColdStart, want)
+	}
+	if got.CacheHit-got.ColdStart.CacheHit != 4900 {
+		t.Fatalf("the cold start must be part of the totals it is subtracted from: %+v", got)
+	}
+}
+
+func TestSessionUsageColdStartKeepsAnUnsplitPromptUnknown(t *testing.T) {
+	bc := NewBroadcaster()
+	bc.Emit(usageEvent("executor", 2000, 10, 0, 0))
+	got := bc.SessionUsage().ColdStart
+	if got == nil || got.CacheMiss != 2000 || got.CacheUnknown != 2000 || got.CacheHit != 0 {
+		t.Fatalf("cold start = %+v, want the prompt billed as a miss and held as unknown", got)
+	}
+}
+
+func TestSessionUsageColdStartStartsAgainWhenTheSessionDoes(t *testing.T) {
+	bc := NewBroadcaster()
+	bc.Emit(usageEvent("executor", 100, 10, 0, 100))
+	bc.ResetSession()
+	if got := bc.SessionUsage().ColdStart; got != nil {
+		t.Fatalf("after a reset: %+v", got)
+	}
+	bc.Emit(usageEvent("executor", 900, 10, 800, 100))
+	if got := bc.SessionUsage().ColdStart; got == nil || got.PromptTokens != 900 {
+		t.Fatalf("the next session's cold start = %+v", got)
+	}
+}

@@ -22,6 +22,7 @@ type Broadcaster struct {
 	ledger          *pricing.Ledger
 	displayCurrency string
 	workMs          int64
+	coldStart       *ColdStartUsage
 	// The transport's, not the session's: numbering outlives /new and /resume, so
 	// resuming across one is told to rebuild rather than handed another
 	// conversation's frames under numbers it already has.
@@ -85,6 +86,7 @@ func (b *Broadcaster) ResetSession() {
 	b.mu.Lock()
 	b.ledger = pricing.NewLedger()
 	b.workMs = 0
+	b.coldStart = nil
 	b.replay.reset()
 	b.initialNoticesReplayed = false
 	b.mu.Unlock()
@@ -150,12 +152,16 @@ func (b *Broadcaster) Emit(e event.Event) {
 		if b.ledger == nil {
 			b.ledger = pricing.NewLedger()
 		}
-		b.ledger.Add(*e.CostQuote, pricing.UsageTokens{
+		tokens := pricing.UsageTokens{
 			PromptTokens: e.Usage.PromptTokens, CompletionTokens: e.Usage.CompletionTokens,
 			CacheHitTokens: e.Usage.CacheHitTokens, CacheMissTokens: e.Usage.CacheMissTokens,
 			CacheWriteTokens: e.Usage.CacheWriteTokens, CacheWriteBilledTokens: e.Usage.CacheWriteBilledTokens,
 			Estimated: e.Usage.Estimated,
-		}, time.Now().UTC())
+		}
+		b.ledger.Add(*e.CostQuote, tokens, time.Now().UTC())
+		if b.coldStart == nil && pricing.LedgerSource(*e.CostQuote) == pricing.LedgerSourceExecutor {
+			b.coldStart = coldStartOf(tokens)
+		}
 	}
 	for s := range b.subs {
 		s.push(Frame{Seq: w.Seq, Data: data}, drop)

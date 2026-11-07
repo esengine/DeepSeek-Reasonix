@@ -34,6 +34,13 @@ func (m *model) statusDetails() string {
 	if body, _, ok := cacheStatus(s); ok {
 		lines = append(lines, "  cache      "+body)
 	}
+	if rate, ok := warmCacheRate(s.SessionUsage); ok {
+		lines = append(lines, "  warm cache "+fmt.Sprintf(i18n.M.ChatStatusCacheWarmFmt, fmt.Sprintf("%.2f%%", rate)))
+	}
+	if u := s.SessionUsage; u != nil && u.PromptTokens > 0 {
+		ratio := fmt.Sprintf("%.1f%%", pct(u.CompletionTokens, u.PromptTokens))
+		lines = append(lines, "  out/in     "+fmt.Sprintf(i18n.M.ChatStatusOutputRatioFmt, ratio, shortTokens(u.CompletionTokens), shortTokens(u.PromptTokens)))
+	}
 	if git := m.gitText(); git != "" {
 		lines = append(lines, "  git        "+git)
 	}
@@ -47,6 +54,22 @@ func (m *model) statusDetails() string {
 		lines = append(lines, "  mouse      "+i18n.M.MouseCaptureTag)
 	}
 	return strings.Join(append(lines, "  config     "+activeConfigTag()), "\n")
+}
+
+// warmCacheRate is the ledger's hit rate with its cold start taken out of both
+// sides: hit over the prompt the endpoint split, the same rate the desktop's
+// session overview states. Not owed until a request after the cold start split.
+func warmCacheRate(u *SessionUsage) (float64, bool) {
+	if u == nil || u.ColdStart == nil {
+		return 0, false
+	}
+	c := u.ColdStart
+	hit := u.CacheHit - c.CacheHit
+	known := hit + (u.CacheMiss - c.CacheMiss) - (u.CacheUnknown - c.CacheUnknown)
+	if known <= 0 {
+		return 0, false
+	}
+	return pct(min(hit, known), known), true
 }
 
 // modeText is the footer's mode badge without its colour.
