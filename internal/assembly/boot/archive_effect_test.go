@@ -127,3 +127,69 @@ model = "x"
 		t.Fatalf("the archive the pointer names does not hold the folded work (%v)", err)
 	}
 }
+
+// Through the real assembly: after a fold, asking again by hand folds once a
+// little more was said, the report names the fold an archive, and asking with
+// nothing new is declined in words that do not claim a summary is written.
+func TestEffectManualCompactAfterAFoldAndItsReporting(t *testing.T) {
+	isolateConfigHome(t)
+	dir := robustTempDir(t)
+	t.Chdir(dir)
+
+	rec := &bulkReplyProvider{}
+	provider.Register("boot-archive-again-test", func(provider.Config) (provider.Provider, error) { return rec, nil })
+	writeFile(t, dir, "reasonix.toml", `
+default_model = "test-model"
+
+[agent]
+system_prompt = "BASE"
+
+[[providers]]
+name = "test-model"
+kind = "boot-archive-again-test"
+model = "x"
+`)
+	approveWorkspace(t, dir)
+	ctrl, err := Build(context.Background(), Options{Sink: event.Discard})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	defer ctrl.Close()
+	say := func(n int) {
+		t.Helper()
+		for i := range n {
+			if err := ctrl.Run(context.Background(), "continue "+strings.Repeat("y", i+1)); err != nil {
+				t.Fatalf("Run: %v", err)
+			}
+		}
+	}
+
+	say(10)
+	if v, err := ctrl.Compact(context.Background(), agent.CompactRequest{}); err != nil || !v.Compacted() {
+		t.Fatalf("first fold = %+v, %v", v, err)
+	}
+	say(4)
+	again, err := ctrl.Compact(context.Background(), agent.CompactRequest{})
+	if err != nil {
+		t.Fatalf("second Compact: %v", err)
+	}
+	if !again.Compacted() {
+		t.Fatalf("a request by hand after a little more was said was declined: %+v (%s)", again, agent.CompactDeclineText(again.Reason))
+	}
+	if n := rec.summaryRequests(); n != 0 {
+		t.Fatalf("folding made %d summarizer request(s)", n)
+	}
+	if _, detail := ctrl.ContextReport(); !strings.Contains(detail, "archived") || strings.Contains(detail, "summarized") {
+		t.Fatalf("the report does not name the fold an archive:\n%s", detail)
+	}
+	declined, err := ctrl.Compact(context.Background(), agent.CompactRequest{})
+	if err != nil {
+		t.Fatalf("third Compact: %v", err)
+	}
+	if declined.Compacted() {
+		t.Fatalf("asking with nothing new folded again: %+v", declined)
+	}
+	if text := agent.CompactDeclineText(declined.Reason); text == "" || strings.Contains(strings.ToLower(text), "summar") {
+		t.Fatalf("decline wording = %q", text)
+	}
+}
