@@ -1,9 +1,10 @@
-import { Fragment } from "react";
+import { Fragment, useEffect, useRef } from "react";
 import { t } from "../i18n";
 import { ICON, NAV, SECTION_DESC, SETTINGS, pageHome, type Section } from "./prefsnav";
 import { arrowTabs } from "./tablist";
 import { pagesOf } from "./settingPages";
 import { UpdateDot } from "./UpdateDot";
+import { useFolded } from "./usefold";
 
 interface Props {
   at: Section;
@@ -19,8 +20,25 @@ interface Props {
 const countOf = (id: Section) => SETTINGS.filter((e) => !e.hidden && !e.within && pageHome(e.section) === id).length;
 
 export function SettingsNav({ at, values, shown, danger, disabled, onSelect, page, onPage }: Props) {
+  const strip = useRef<HTMLElement>(null);
+  const phone = useFolded("phone");
+  useEffect(() => {
+    const nav = strip.current;
+    if (!phone || !nav) return;
+    const sideways = (e: WheelEvent) => {
+      if (e.deltaX !== 0 || e.deltaY === 0) return;
+      nav.scrollLeft += e.deltaY;
+      e.preventDefault();
+    };
+    nav.addEventListener("wheel", sideways, { passive: false });
+    return () => nav.removeEventListener("wheel", sideways);
+  }, [phone]);
+  useEffect(() => {
+    if (!phone) return;
+    strip.current?.querySelector("[aria-selected='true'], [data-open]")?.scrollIntoView?.({ inline: "nearest", block: "nearest" });
+  }, [phone, at, page]);
   return (
-    <nav className="prefs-nav" role="tablist" aria-label={t("settings.settings_sections")} onKeyDown={arrowTabs}>
+    <nav ref={strip} className="prefs-nav" role="tablist" aria-label={t("settings.settings_sections")} onKeyDown={arrowTabs}>
       {NAV.map(([group, items]) => {
         const rows = items.filter(([id]) => shown(id));
         if (rows.length === 0) return null;

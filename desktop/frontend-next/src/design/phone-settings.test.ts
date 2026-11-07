@@ -141,3 +141,11 @@ describe("the desktop's nav-column decorations on a phone", () => {
     expect(rule(S + "::before, " + S + "::after")).toMatch(/display:\s*none/);
   });
 });
+
+describe("the category strip's edge", () => {
+  it("fades out at the right edge, so a cut-off tab reads as more to scroll to, and leaves room to scroll it clear", () => {
+    const nav = rule(S + " .prefs-nav");
+    expect(nav).toMatch(/mask-image:\s*linear-gradient\(90deg, #000 calc\(100% - 28px\), transparent\)/);
+    expect(nav).toMatch(/padding:\s*4px 28px 8px 10px/);
+  });
+});

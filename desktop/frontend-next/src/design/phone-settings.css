@@ -4,7 +4,7 @@
 [data-fold~="phone"] .prefs-sheet .prefs-actions { grid-column: 1; grid-row: 1; justify-self: end; align-self: center; padding: 8px 10px; }
 [data-fold~="phone"] .prefs-sheet .prefs-find { grid-column: 1; grid-row: 2; width: calc(100% - 24px); margin: 0 12px 8px; }
 [data-fold~="phone"] .prefs-sheet > .prefs-hd > .prefs-find { grid-column: 1; grid-row: 2; width: calc(100% - 24px); margin: 0 12px 8px; }
-[data-fold~="phone"] .prefs-sheet .prefs-nav { grid-column: 1; grid-row: 3; display: flex; flex-direction: row; gap: 4px; padding: 4px 10px 8px; overflow-x: auto; overflow-y: hidden; border-right: 0; border-bottom: 1px solid var(--hair); scrollbar-width: none; }
+[data-fold~="phone"] .prefs-sheet .prefs-nav { grid-column: 1; grid-row: 3; display: flex; flex-direction: row; gap: 4px; padding: 4px 28px 8px 10px; mask-image: linear-gradient(90deg, #000 calc(100% - 28px), transparent); overflow-x: auto; overflow-y: hidden; border-right: 0; border-bottom: 1px solid var(--hair); scrollbar-width: none; }
 [data-fold~="phone"] .prefs-sheet .prefs-nav::-webkit-scrollbar { display: none; }
 [data-fold~="phone"] .prefs-sheet .prefs-nav :is(.navsec, .nv) { display: none; }
 [data-fold~="phone"] .prefs-sheet .prefs-nav button { flex: none; min-height: 32px; padding: 6px 10px; }
