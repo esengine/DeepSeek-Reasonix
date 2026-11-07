@@ -134,18 +134,17 @@ it("changes the real paint through appearance controls and leaves contrast, pale
   }
   const view = render(<Picker />);
   expect(screen.queryByLabelText(t("深色开始时间"))).toBeNull();
-  fireEvent.click(screen.getByRole("button", { name: t("定时") }));
+  fireEvent.click(screen.getByRole("radio", { name: t("定时") }));
   view.rerender(<Picker />);
   expect(result.current.scheme).toBe("dark");
   fireEvent.change(screen.getByLabelText(t("深色开始时间")), { target: { value: "22:00" } });
   expect(result.current.scheme).toBe("light");
   expect(screen.getByLabelText(t("恢复浅色时间"))).toBeTruthy();
   expect(screen.getByRole("group", { name: t("look.interface_theme") })).toBeTruthy();
-  fireEvent.click(view.container.querySelector(".appearance-advanced summary")!);
-  fireEvent.click(screen.getByRole("button", { name: t("更强") }));
+  fireEvent.click(screen.getByRole("radio", { name: t("更强") }));
   view.rerender(<Picker />);
   expect(result.current.contrast).toBe("strong");
-  fireEvent.click(screen.getByRole("button", { name: t("深色") }));
+  fireEvent.click(screen.getByRole("radio", { name: t("深色") }));
   view.rerender(<Picker />);
   expect(result.current.scheme).toBe("dark");
   expect(screen.queryByLabelText(t("深色开始时间"))).toBeNull();

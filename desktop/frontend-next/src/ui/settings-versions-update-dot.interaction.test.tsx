@@ -26,10 +26,10 @@ const watch = async (newer: boolean) => {
 };
 
 describe("the update mark in the settings list", () => {
-  it("sits on the versions row, where the window's gear points", async () => {
+  it("sits on the account row, which versions folds into, where the window's gear points", async () => {
     const stop = await watch(true);
     render(settings(new MockPort()));
-    const row = (await screen.findAllByRole("tab")).find((el) => el.getAttribute("data-value") === "versions");
+    const row = (await screen.findAllByRole("tab")).find((el) => el.getAttribute("data-value") === "account");
     expect(row?.querySelector(".upd-dot")).not.toBeNull();
     expect(row?.textContent).toContain("有新版本 2.21.0");
     for (const other of screen.getAllByRole("tab").filter((el) => el !== row)) expect(other.querySelector(".upd-dot")).toBeNull();

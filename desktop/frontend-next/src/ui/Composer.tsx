@@ -696,6 +696,7 @@ export function Composer({ port, status, running, queued = false, quote, restore
           <Picker
             className="mode studio-mode-picker"
             triggerAction="plan.mode"
+            data-action="plan.mode"
             ariaPressed={status?.plan ?? false}
             place="bottom"
             title={t("composer.work_mode")}
@@ -738,7 +739,7 @@ export function Composer({ port, status, running, queued = false, quote, restore
             searchAlways
             searchPlaceholder={t("composer.search_models_or_providers")}
             menuTitle={<><b>{t("composer.choose_model")}</b><small>{t("composer.for_future_tasks")}</small></>}
-            onOpen={() => { void modelHealth.check(loadModels()); loadModels(); }}
+            onOpen={() => { void modelHealth.check(loadModels()); }}
             pending={busy["model"] || busy["effort"] || busy["mode"]}
             asideClassName="studio-effort-menu"
             stayOpen={(ref) => ref !== "__manage-models"}

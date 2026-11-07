@@ -117,11 +117,12 @@ describe("the emphasised action while a turn runs", () => {
     expect(primary?.textContent).toBe("停下");
   });
 
-  it("shows only stop during a live turn with an empty draft", () => {
+  it("offers stop and a disabled steer during a live turn with an empty draft", () => {
     const idle = draw().container.querySelector(".go .btn:last-child span:last-child")?.textContent;
     cleanup();
-    const live = draw(status(), true).container.querySelector(".go .btn:last-child span:last-child")?.textContent;
-    expect([idle, live]).toEqual(["发送", "停下"]);
+    const { container } = draw(status(), true);
+    expect([idle, container.querySelector(".go .btn.stop span:last-child")?.textContent]).toEqual(["发送", "停下"]);
+    expect(container.querySelector<HTMLButtonElement>(".go .btn.send")?.disabled).toBe(true);
   });
 
   it("puts it back on sending once the turn is over", () => {

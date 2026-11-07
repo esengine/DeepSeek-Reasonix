@@ -122,9 +122,9 @@ it("cancels a pending landing when the user chooses another category", async () 
   let finish!: (value: typeof saved) => void;
   vi.spyOn(port, "observabilitySettings").mockReturnValue(new Promise((resolve) => { finish = resolve; }));
   draw("account:trace-export", port);
-  await userEvent.click(screen.getByRole("tab", { name: /^版本/ }));
+  await userEvent.click(screen.getByRole("tab", { name: /^数据/ }));
   await act(async () => { finish(saved); });
-  await userEvent.click(screen.getByRole("tab", { name: /^网络/ }));
+  await userEvent.click(screen.getByRole("tab", { name: /^账号/ }));
   const target = await waitFor(() => {
     const found = document.querySelector<HTMLElement>('[data-setting="trace-export"]');
     expect(found).toBeTruthy();

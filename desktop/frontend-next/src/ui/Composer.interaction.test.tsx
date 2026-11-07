@@ -48,14 +48,14 @@ describe("composer model tooltip", () => {
     view.rerender(<Composer {...props} pulse={1} status={status({ modelRef: models[1].ref })} />);
     expect(screen.getByRole("button", { name: /plain-v2/ }).title).toBe("Other account / plain-v2");
     view.rerender(<Composer {...props} pulse={1} status={status({ modelRef: "missing/vendor/model" })} />);
-    expect(screen.getByRole("button", { name: "vendor/model" }).title).toBe("missing/vendor/model");
+    expect(screen.getByRole("button", { name: /^vendor\/model/ }).title).toMatch(/^missing\/vendor\/model/);
   });
 
   it("uses canonical provider naming when aliases are blank", async () => {
     const port = new MockPort();
     vi.spyOn(port, "models").mockResolvedValue([{ ref: "local/model", provider: "Local account", model: "model", displayName: " ", modelAlias: " " }]);
     draw({ port, st: status({ modelRef: "local/model" }) });
-    expect((await screen.findByRole("button", { name: "model" })).title).toBe("Local account / model");
+    expect((await screen.findByRole("button", { name: /^model/ })).title).toBe("Local account / model");
   });
 });
 
@@ -342,26 +342,26 @@ describe("composer drafts", () => {
 });
 
 describe("composer run controls", () => {
-  it.each([false, true])("shows steering only with content during a live turn (pending ask: %s)", async (asking) => {
+  it.each([false, true])("enables steering only with content during a live turn (pending ask: %s)", async (asking) => {
     const port = new MockPort();
     const cancel = vi.spyOn(port, "cancel").mockResolvedValue();
     const onSubmit = vi.fn(async () => true);
     const { box } = draw({ port, running: true, onSubmit,
       st: status({ running: true, decisions: asking ? [{ id: "ask-1", kind: "ask" }] : [] }),
     });
-    expect(screen.queryByRole("button", { name: "插话" })).toBeNull();
+    expect((screen.getByRole("button", { name: "插话" }) as HTMLButtonElement).disabled).toBe(true);
     expect((screen.getByRole("button", { name: "停下" }) as HTMLButtonElement).disabled).toBe(false);
     fireEvent.change(box, { target: { value: "   " } });
-    expect(screen.queryByRole("button", { name: "插话" })).toBeNull();
+    expect((screen.getByRole("button", { name: "插话" }) as HTMLButtonElement).disabled).toBe(true);
     fireEvent.change(box, { target: { value: "Check" } });
     expect((screen.getByRole("button", { name: "插话" }) as HTMLButtonElement).disabled).toBe(false);
     expect(screen.getByRole("button", { name: "停下" })).toBeTruthy();
     fireEvent.change(box, { target: { value: "" } });
-    expect(screen.queryByRole("button", { name: "插话" })).toBeNull();
+    expect((screen.getByRole("button", { name: "插话" }) as HTMLButtonElement).disabled).toBe(true);
     fireEvent.change(box, { target: { value: "先检查日志", selectionStart: 5 } });
     fireEvent.click(screen.getByRole("button", { name: "插话" }));
     await waitFor(() => expect(onSubmit).toHaveBeenCalledWith("先检查日志"));
-    await waitFor(() => expect(screen.queryByRole("button", { name: "插话" })).toBeNull());
+    await waitFor(() => expect((screen.getByRole("button", { name: "插话" }) as HTMLButtonElement).disabled).toBe(true));
     fireEvent.click(screen.getByRole("button", { name: "停下" }));
     await waitFor(() => expect(cancel).toHaveBeenCalledTimes(1));
   });
@@ -404,7 +404,7 @@ describe("composer run controls", () => {
     expect((pending as HTMLButtonElement).disabled).toBe(true);
     fireEvent.click(pending);
     expect(cancel).toHaveBeenCalledTimes(1);
-    expect(screen.queryByRole("button", { name: "插话" })).toBeNull();
+    expect((screen.getByRole("button", { name: "插话" }) as HTMLButtonElement).disabled).toBe(true);
     view.rerender(<Composer {...props} running={false} />);
     await waitFor(() => expect(screen.queryByRole("button", { name: "正在停止…" })).toBeNull());
   });
@@ -482,14 +482,13 @@ describe("composer menus", () => {
       onSubmit: async () => true, onChanged, onError: vi.fn() };
     const view = render(<Composer {...props} />);
     fireEvent.click(view.container.querySelector('button.model-picker')!);
-    await waitFor(() => expect(screen.getAllByRole("menuitem")).toHaveLength(4));
+    await waitFor(() => expect(screen.getAllByRole("menuitem").filter((el) => !el.closest(".menu-aside"))).toHaveLength(4));
     expect(screen.getAllByRole("menuitem")[0].getAttribute("data-value")).toBe("beta/third");
     expect(screen.getAllByRole("menuitem")[0].hasAttribute("data-on")).toBe(true);
     fireEvent.click(screen.getAllByRole("menuitem").find((el) => el.getAttribute("data-value") === "alpha/second")!);
     await waitFor(() => expect(onChanged).toHaveBeenCalledOnce());
     expect(setModel).toHaveBeenCalledExactlyOnceWith("alpha/second");
     view.rerender(<Composer {...props} status={status({ modelRef: "alpha/second" })} />);
-    fireEvent.click(view.container.querySelector('button.model-picker')!);
     expect(screen.getAllByRole("menuitem")[0].getAttribute("data-value")).toBe("alpha/second");
     expect(screen.getAllByRole("menuitem")[0].hasAttribute("data-on")).toBe(true);
     expect(screen.getAllByRole("menuitem").filter((el) => el.getAttribute("data-value") === "alpha/second")).toHaveLength(1);

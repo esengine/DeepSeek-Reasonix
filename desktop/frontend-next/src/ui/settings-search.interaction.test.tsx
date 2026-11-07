@@ -64,7 +64,7 @@ describe("finding a setting", () => {
     const { find, block } = draw();
     await userEvent.type(find(), "todo");
     const hit = await screen.findByRole("option", { name: /收起时显示计划进度/ });
-    expect(hit.getAttribute("data-value")).toBe("appearance");
+    expect(hit.getAttribute("data-value")).toBe("display");
     expect(hit.getAttribute("data-target")).toBe("plan-progress");
     await userEvent.click(hit);
     await waitFor(() => expect(block("plan-progress")).toBeTruthy());
@@ -72,19 +72,21 @@ describe("finding a setting", () => {
     expect(section.closest("[hidden]")).toBeNull();
     expect(section.querySelector("[data-apply]")?.getAttribute("data-apply")).toBe("immediate");
     expect(section.querySelector("[data-scope]")?.getAttribute("data-scope")).toBe("machine");
-    await userEvent.click(section.querySelector<HTMLButtonElement>('[data-value="on"]')!);
-    expect(localStorage.getItem("rx-plan-progress")).toBe("on");
-    await userEvent.click(section.querySelector<HTMLButtonElement>('[data-value="off"]')!);
+    const toggle = section.querySelector<HTMLButtonElement>('[role="switch"]')!;
+    expect(toggle.getAttribute("aria-checked")).toBe("true");
+    await userEvent.click(toggle);
     expect(localStorage.getItem("rx-plan-progress")).toBe("off");
+    await userEvent.click(toggle);
+    expect(localStorage.getItem("rx-plan-progress")).toBe("on");
   });
-  it("finds file delivery by its config key and opens its switch under tools", async () => {
+  it("finds file delivery by its config key and opens its switch under conversation display", async () => {
     const { find, block } = draw();
     await userEvent.type(find(), "tools.present_files");
     const hit = await screen.findByRole("option", { name: /AI 文件交付卡片/ });
-    expect(hit.getAttribute("data-value")).toBe("tools");
+    expect(hit.getAttribute("data-value")).toBe("display");
     await userEvent.click(hit);
     await waitFor(() => expect(block("present-files")).toBeTruthy());
-    expect(block("present-files")?.previousElementSibling?.getAttribute("data-setting")).toBe("approval");
+    expect(block("present-files")?.previousElementSibling?.getAttribute("data-setting")).toBe("changed-files");
     expect((await screen.findByRole("switch", { name: "启用 AI 文件交付卡片" })).getAttribute("aria-checked")).toBe("false");
     expect(block("present-files")?.querySelector("[data-apply]")?.getAttribute("data-apply")).toBe("on-open");
     expect(screen.queryByRole("switch", { name: "启用内置浏览器" })).toBeNull();

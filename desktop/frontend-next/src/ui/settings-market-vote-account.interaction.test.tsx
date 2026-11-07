@@ -75,6 +75,7 @@ async function fixture(strict: boolean, initial: AccountState, target: AccountSt
   render(strict ? <StrictMode>{form}</StrictMode> : form);
   const user = userEvent.setup();
   const requests = (path: string, method?: string) => fetcher.mock.calls.filter(([url, init]) => url === path && (!method || init?.method === method));
+  await user.click(document.querySelector<HTMLButtonElement>('[data-action="settings.open-page"][data-target="account"]')!);
   if (!initial.signedIn) {
     await user.click(screen.getByRole("button", { name: "登录" }));
     await waitFor(() => expect(requests("/kernel/account/poll")).toHaveLength(1), { timeout: 2500 });
@@ -95,8 +96,7 @@ async function fixture(strict: boolean, initial: AccountState, target: AccountSt
   const settle = async () => {
     await act(async () => transition.resolve());
     await waitFor(() => expect(requests("/kernel/account").length).toBeGreaterThan(0));
-    expect(document.querySelector('[data-action="settings.section"][data-value="account"]')?.textContent)
-      .toContain(target.signedIn ? target.user?.label ?? "已登录" : "未登录");
+    if (target.user || !target.signedIn) await waitFor(() => expect(document.querySelector(".mkt-signin") === null).toBe(target.signedIn));
   };
   return { user, port, pkg, requests, votePath, readReplies, writeReplies, openMarket, settle, list, detail, install };
 }

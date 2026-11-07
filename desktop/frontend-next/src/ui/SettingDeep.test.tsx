@@ -58,7 +58,8 @@ it("draws a block that names its action as a setting row with a pill, and opens 
     </SettingDeepContext.Provider>,
   );
   const row = document.querySelector('.srow[data-setting="rules"]')!;
-  expect(row.querySelector(".srow-name")?.textContent).toBe("明确的规则");
+  expect(row.querySelector(".srow-name")?.firstChild?.textContent).toBe("明确的规则");
+  expect(row.querySelector(".srow-name .scope-tag")?.textContent).toBe("重建运行时");
   expect(row.querySelector(".srow-desc")?.textContent).toBe("哪些操作始终禁止");
   expect(row.querySelector(".apply")?.textContent).toContain("本机");
   fireEvent.click(screen.getByRole("button", { name: "编辑规则（3 条）" }));

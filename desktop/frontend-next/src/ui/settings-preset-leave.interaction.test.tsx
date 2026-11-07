@@ -22,12 +22,12 @@ function draw(port = new MockPort()) {
 it.each(["close", "navigation", "search"])("protects a draft on settings %s", async (destination) => {
   const user = userEvent.setup();
   const { onClose } = draw();
-  expect(screen.getByRole("tab", { name: "人设" })).toBeTruthy();
+  expect(screen.getByRole("tab", { name: /^Agent 行为/ })).toBeTruthy();
   await user.click(await screen.findByRole("button", { name: "新建预设" }));
   await user.type(screen.getByLabelText("预设名称"), "保留草稿");
   const leave = async () => {
     if (destination === "close") await user.click(screen.getByRole("button", { name: /关闭.*Esc/ }));
-    else if (destination === "navigation") await user.click(screen.getAllByRole<HTMLButtonElement>("tab").find(el => el.id === "prefs-session")!);
+    else if (destination === "navigation") await user.click(screen.getAllByRole<HTMLButtonElement>("tab").find(el => el.id === "prefs-model")!);
     else {
       const search = screen.getByRole("textbox", { name: "搜索设置" });
       await user.clear(search);

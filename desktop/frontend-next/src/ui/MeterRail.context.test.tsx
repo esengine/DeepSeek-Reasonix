@@ -25,6 +25,6 @@ describe("the context reading", () => {
   it("turns warm from 80% so the limit is seen coming, with no dialog", () => {
     const { container } = rail(86);
     expect(level(container)).toBe("high");
-    expect(container.querySelector('[role="dialog"]')).toBeNull();
+    expect(container.querySelector('[data-open] [role="dialog"]')).toBeNull();
   });
 });

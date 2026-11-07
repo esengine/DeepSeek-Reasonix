@@ -19,19 +19,19 @@ it("keeps account headings, visible hosts and row metadata with checks off and o
   const probe = vi.spyOn(port, "providerHealth").mockResolvedValue({ connection: "reachable", wallet: "available", checkedAt: 1 });
   const props = { port, status: { modelRef: "a/current" } as SessionStatus, running: false, onSubmit: async () => true as const, onChanged: vi.fn(), onError: vi.fn() };
   const view = render(<Composer {...props} pulse={0} />);
-  fireEvent.click(await screen.findByRole("button", { name: "current" }));
+  fireEvent.click(await screen.findByRole("button", { name: /^current/ }));
   const menu = screen.getByRole("menu");
   expect(menu.classList.contains("compact-model-menu")).toBe(false);
   expect(within(menu).getByText("one.example")).toBeTruthy();
   expect(within(menu).getByText("two.example")).toBeTruthy();
-  expect(within(menu).getAllByRole("menuitem")).toHaveLength(4);
+  expect(within(menu).getAllByRole("menuitem").filter((it) => !it.closest(".menu-aside"))).toHaveLength(4);
   expect(probe).not.toHaveBeenCalled();
   fireEvent.keyDown(menu, { key: "Escape" });
   await port.saveProviderHealthSettings(true);
   view.rerender(<Composer {...props} pulse={1} />);
-  fireEvent.click(screen.getByRole("button", { name: "current" }));
+  fireEvent.click(screen.getByRole("button", { name: /^current/ }));
   await within(screen.getByRole("menu")).findAllByText(t("models.connected"));
-  expect(screen.getByRole("menu").querySelectorAll(".mi.head .rt")).toHaveLength(2);
+  expect(screen.getByRole("menu").querySelectorAll(".mi.head .rt:not(.menu-aside *)")).toHaveLength(2);
   expect(screen.getByRole("menuitem", { name: /second/ }).textContent).toContain(t("OpenAI 兼容"));
   expect(screen.getByRole("menuitem", { name: /second/ }).textContent).not.toContain("Gateway");
 });
@@ -49,7 +49,7 @@ it("checks on opening, shows wallet failures and keeps selection and management 
   const pick = vi.spyOn(port, "setModel").mockResolvedValue();
   const settings = vi.fn();
   render(<Composer port={port} status={{ modelRef: "one/alpha" } as SessionStatus} running={false} onSubmit={async () => true} onChanged={vi.fn()} onError={vi.fn()} onSettings={settings} />);
-  const trigger = await screen.findByRole("button", { name: "alpha" });
+  const trigger = await screen.findByRole("button", { name: /^alpha/ });
   expect(check).not.toHaveBeenCalled();
   fireEvent.click(trigger);
   await screen.findAllByText(/Insufficient balance|余额不足/);
@@ -58,7 +58,6 @@ it("checks on opening, shows wallet failures and keeps selection and management 
   expect(screen.getByRole("menuitem", { name: /alpha/ }).hasAttribute("data-on")).toBe(true);
   fireEvent.click(screen.getByRole("menuitem", { name: /gamma/ }));
   await waitFor(() => expect(pick).toHaveBeenCalledWith("two/gamma"));
-  fireEvent.click(trigger);
   fireEvent.click(screen.getByRole("menuitem", { name: /Manage models and connections|管理模型与连接/ }));
   expect(settings).toHaveBeenCalledWith("providers");
 });
@@ -75,7 +74,7 @@ it("ignores a late health result after switching runtime", async () => {
   vi.spyOn(port, "providerHealth").mockResolvedValue({ connection: "reachable", wallet: "available", checkedAt: Date.now() });
   const props = { status: { modelRef: "one/alpha" } as SessionStatus, running: false, onSubmit: async () => true as const, onChanged: vi.fn(), onError: vi.fn() };
   const view = render(<Composer {...props} port={oldPort} />);
-  fireEvent.click(await screen.findByRole("button", { name: "alpha" }));
+  fireEvent.click(await screen.findByRole("button", { name: /^alpha/ }));
   await waitFor(() => expect(finish).toBeDefined());
   view.rerender(<Composer {...props} port={port} />);
   await act(async () => { finish({ connection: "auth", wallet: "insufficient", checkedAt: Date.now() }); });
@@ -92,7 +91,7 @@ it("limits background checks, tolerates older servers and excludes extension mod
   const pending: Array<() => void> = [];
   const check = vi.spyOn(port, "providerHealth").mockImplementation(() => new Promise((_, reject) => { pending.push(() => reject(new Error("old server"))); }));
   render(<Composer port={port} status={{ modelRef: "one/alpha" } as SessionStatus} running={false} onSubmit={async () => true} onChanged={vi.fn()} onError={vi.fn()} />);
-  fireEvent.click(await screen.findByRole("button", { name: "alpha" }));
+  fireEvent.click(await screen.findByRole("button", { name: /^alpha/ }));
   await waitFor(() => expect(check).toHaveBeenCalledTimes(3));
   await act(async () => { pending[0](); });
   await waitFor(() => expect(check).toHaveBeenCalledTimes(4));

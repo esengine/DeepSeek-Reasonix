@@ -28,7 +28,8 @@ describe("optional progress below the collapsed plan", () => {
     const settings = render(<PlanProgressSection />);
     const cards = render(<><PlanFold plan={plan} shown /><PlanFold plan={plan} shown /></>);
     expect(screen.queryAllByRole("progressbar")).toHaveLength(0);
-    await userEvent.click(within(settings.container).getByRole("button", { name: "显示" }));
+    const toggle = within(settings.container).getByRole("switch");
+    await userEvent.click(toggle);
     expect(localStorage.getItem("rx-plan-progress")).toBe("on");
     expect(screen.getAllByRole("progressbar")).toHaveLength(2);
     const progress = screen.getAllByRole("progressbar")[0];
@@ -39,7 +40,7 @@ describe("optional progress below the collapsed plan", () => {
     cards.unmount();
     render(<PlanFold plan={plan} shown />);
     expect(screen.getByRole("progressbar")).toBeTruthy();
-    await userEvent.click(within(settings.container).getByRole("button", { name: "关闭" }));
+    await userEvent.click(toggle);
     expect(screen.queryByRole("progressbar")).toBeNull();
     expect(localStorage.getItem("rx-plan-progress")).toBe("off");
   });
