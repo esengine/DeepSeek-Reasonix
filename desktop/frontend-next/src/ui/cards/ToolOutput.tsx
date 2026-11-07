@@ -298,7 +298,7 @@ function Clip({ id, deps, children }: { id?: string; deps?: unknown; children: R
       // Collapsing now takes time, and mid-transition this measures an intermediate
       // height — at that instant the test flips to "not overflowing" and pulls the
       // expand button. While one is running, wait for it to settle.
-      if (!el.getAnimations().length) measure();
+      if (!el.getAnimations?.().length) measure();
     });
     el.addEventListener("transitionend", measure);
     return () => {

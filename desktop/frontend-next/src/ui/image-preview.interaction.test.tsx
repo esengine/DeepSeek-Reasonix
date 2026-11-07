@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import "./testkit";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { UserCard } from "./cards/UserCard";
@@ -12,6 +12,8 @@ import type { AgentPort, SessionStatus } from "../port/port";
 
 Element.prototype.getAnimations ??= () => [];
 
+// jsdom has no pointer capture, which the viewer takes when a drag starts.
+beforeEach(() => { HTMLElement.prototype.setPointerCapture = vi.fn(); });
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
 const path = ".reasonix/attachments/preview.png";
