@@ -777,42 +777,6 @@ jobs:
         timeout-minutes: 5
         run: go test -count=1 -timeout=3m -run '^TestBashPowerShellExecuteDetailedContract$|^TestBashPowerShell51PreflightRejectsAndAndDetailed$|^TestBashPowerShellOutputIsUTF8$|^TestBashPowerShellSurfacesNonZeroExit$|^TestBashPowerShellRejectsChaining$' ./internal/tools/builtin
 
-      # Full push suite: a 36m package timeout inside a 45m step budget. -count=1
-      # as at the smoke step. A failure prints the failed tests' output and the 15
-      # slowest boot tests.
-      - name: test (full)
-        if: env.RUN_STEPS == 'true' && runner.os == 'Windows' && github.event_name != 'pull_request'
-        timeout-minutes: 45
-        env:
-          # Run the prompt-cache prefix-stability guard (TestCacheHit*) in CI: a
-          # regression there silently tanks the cache hit rate the project is
-          # built around.
-          REASONIX_RELEASE_CACHE_GUARD: "1"
-          # Bound sandbox helper children in Windows tests so a failed OS-level
-          # launch cannot pin the Actions step after Go's package timeout fires.
-          WINDOWS_SANDBOX_WAIT_MS: "20000"
-        shell: bash
-        run: |
-          # internal/assembly/boot alone can take over 25 minutes on a Windows runner;
-          # the package limit leaves headroom inside the step limit above.
-          go test -count=1 -p 4 -timeout=36m -json ./... | tee "$RUNNER_TEMP/full.jsonl" |
-            jq -rj --unbuffered 'select(.Action == "output" and .Test == null) | .Output'
-
-      - name: test (full) failure detail
-        if: failure() && env.RUN_STEPS == 'true' && runner.os == 'Windows' && github.event_name != 'pull_request'
-        shell: bash
-        run: |
-          f="$RUNNER_TEMP/full.jsonl"
-          [ -s "$f" ] || exit 0
-          echo "::group::output of failed tests"
-          jq -rn '[inputs | select(.Test != null)] | group_by(.Package + "/" + .Test)
-            | map(select(any(.[]; .Action == "fail")))[]
-            | map(select(.Action == "output") | .Output) | join("")' "$f" || true
-          echo "::endgroup::"
-          echo "slowest internal/assembly/boot tests (seconds, name):"
-          jq -rn '[inputs | select((.Package | endswith("/internal/assembly/boot")) and .Test != null and .Action == "pass")]
-            | sort_by(-.Elapsed)[:15][] | "\(.Elapsed)\t\(.Test)"' "$f" || true
-
   race:
     needs: changes
     if: always() && (github.event_name != 'pull_request' || needs.changes.outputs.code != 'false')
@@ -849,13 +813,128 @@ jobs:
           REASONIX_RELEASE_CACHE_GUARD: "1"
         run: go test -race ./internal/runtime/agent/... ./internal/runtime/delegation/... ./internal/platform/worktree/... ./internal/state/mutation/... ./internal/ext/plugin/... ./internal/tools/jobs/... ./internal/base/proc/... ./internal/safety/sandbox/... ./internal/base/filelock/... ./internal/contract/eventwire/... ./internal/platform/remote/... ./internal/ext/extension/... ./internal/assembly/boot/... ./internal/session/control/... ./internal/contract/tool/...
 
-      - name: test -race (full)
-        if: github.event_name != 'pull_request'
+  # Push-only full suites. internal/frontend/serve and internal/assembly/boot run
+  # hundreds of serial tests and set the wall time of one whole-tree `go test`,
+  # so each is cut by test name into shards that run on their own runners. The
+  # -run / -skip patterns partition the names exactly: every test lands in one
+  # shard. `rest` is every other package. Pull requests keep the focused steps
+  # in the `test` and `race` jobs above.
+  test-windows-shards:
+    if: github.event_name != 'pull_request'
+    name: test (windows-latest, ${{ matrix.shard }})
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { shard: rest }
+          - { shard: serve-1, pkg: ./internal/frontend/serve, flag: -run, filter: '^Test[A-E]' }
+          - { shard: serve-2, pkg: ./internal/frontend/serve, flag: -run, filter: '^Test[F-R]' }
+          - { shard: serve-3, pkg: ./internal/frontend/serve, flag: -skip, filter: '^Test[A-R]' }
+          - { shard: boot-1, pkg: ./internal/assembly/boot, flag: -skip, filter: '^TestEffect([^0-9A-C]|$)' }
+          - { shard: boot-2, pkg: ./internal/assembly/boot, flag: -run, filter: '^TestEffect[D-O]' }
+          - { shard: boot-3, pkg: ./internal/assembly/boot, flag: -run, filter: '^TestEffect([^0-9A-O]|$)' }
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: test (shard)
+        timeout-minutes: 40
+        env:
+          # Run the prompt-cache prefix-stability guard (TestCacheHit*) in CI: a
+          # regression there silently tanks the cache hit rate the project is
+          # built around.
+          REASONIX_RELEASE_CACHE_GUARD: "1"
+          # Bound sandbox helper children in Windows tests so a failed OS-level
+          # launch cannot pin the Actions step after Go's package timeout fires.
+          WINDOWS_SANDBOX_WAIT_MS: "20000"
+          SHARD: ${{ matrix.shard }}
+          PKG: ${{ matrix.pkg }}
+          FLAG: ${{ matrix.flag }}
+          FILTER: ${{ matrix.filter }}
+        shell: bash
+        run: |
+          if [ "$SHARD" = rest ]; then
+            mapfile -t pkgs < <(go list ./... | tr -d '\r' | grep -v -E '/internal/(frontend/serve|assembly/boot)$')
+          else
+            pkgs=("$PKG")
+          fi
+          filter=()
+          if [ -n "$FILTER" ]; then filter=("$FLAG" "$FILTER"); fi
+          go test -count=1 -p 4 -timeout=36m -json "${filter[@]}" "${pkgs[@]}" | tee "$RUNNER_TEMP/shard.jsonl" |
+            jq -rj --unbuffered 'select(.Action == "output" and .Test == null) | .Output'
+
+      - name: test (shard) failure detail
+        if: failure()
+        shell: bash
+        run: |
+          f="$RUNNER_TEMP/shard.jsonl"
+          [ -s "$f" ] || exit 0
+          echo "::group::output of failed tests"
+          jq -rn '[inputs | select(.Test != null)] | group_by(.Package + "/" + .Test)
+            | map(select(any(.[]; .Action == "fail")))[]
+            | map(select(.Action == "output") | .Output) | join("")' "$f" || true
+          echo "::endgroup::"
+          echo "slowest tests (seconds, package, name):"
+          jq -rn '[inputs | select(.Test != null and .Action == "pass")]
+            | sort_by(-.Elapsed)[:15][] | "\(.Elapsed)	\(.Package)	\(.Test)"' "$f" || true
+
+  race-shards:
+    if: github.event_name != 'pull_request'
+    name: race (${{ matrix.shard }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { shard: rest }
+          - { shard: serve-1, pkg: ./internal/frontend/serve, flag: -run, filter: '^Test[A-E]' }
+          - { shard: serve-2, pkg: ./internal/frontend/serve, flag: -run, filter: '^Test[F-R]' }
+          - { shard: serve-3, pkg: ./internal/frontend/serve, flag: -skip, filter: '^Test[A-R]' }
+          - { shard: boot-1, pkg: ./internal/assembly/boot, flag: -skip, filter: '^TestEffect([^0-9A-C]|$)' }
+          - { shard: boot-2, pkg: ./internal/assembly/boot, flag: -run, filter: '^TestEffect[D-O]' }
+          - { shard: boot-3, pkg: ./internal/assembly/boot, flag: -run, filter: '^TestEffect([^0-9A-O]|$)' }
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Install and verify Linux sandbox backend
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bubblewrap
+          if sysctl -n kernel.unprivileged_userns_clone >/dev/null 2>&1; then
+            sudo sysctl -w kernel.unprivileged_userns_clone=1
+          fi
+          if sysctl -n kernel.apparmor_restrict_unprivileged_userns >/dev/null 2>&1; then
+            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          fi
+          bwrap --ro-bind / / --dev /dev --proc /proc -- true ||             echo "::warning::bubblewrap is installed but this runner denies user namespaces; unavailable-backend tests will run fail-closed"
+
+      - name: test -race (shard)
+        timeout-minutes: 30
         env:
           REASONIX_RELEASE_CACHE_GUARD: "1"
-        # internal/assembly/boot under -race runs past ten minutes on a shared
-        # runner; the package limit leaves headroom over the default.
-        run: go test -race -timeout=25m ./...
+          SHARD: ${{ matrix.shard }}
+          PKG: ${{ matrix.pkg }}
+          FLAG: ${{ matrix.flag }}
+          FILTER: ${{ matrix.filter }}
+        run: |
+          if [ "$SHARD" = rest ]; then
+            mapfile -t pkgs < <(go list ./... | grep -v -E '/internal/(frontend/serve|assembly/boot)$')
+          else
+            pkgs=("$PKG")
+          fi
+          filter=()
+          if [ -n "$FILTER" ]; then filter=("$FLAG" "$FILTER"); fi
+          go test -race -timeout=25m "${filter[@]}" "${pkgs[@]}"
 
   # sdk/go is a nested stdlib-only module invisible to root `go test ./...`.
   # Its DTOs are generated from internal/ext/extension/protocol, and the
