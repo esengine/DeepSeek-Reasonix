@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -135,24 +136,14 @@ func presentFilesEffect(t *testing.T, proxy bool, mode string) {
 			t.Fatal("disabled presenter leaked into the first provider request")
 		}
 	}
-	count = 0
+	// The presenter is deferred: never a schema of its own, indexed by
+	// use_capability's description exactly when it is enabled.
 	for _, schema := range requests[0].Tools {
-		if schema.Name != want.Name() {
-			continue
-		}
-		count++
-		var gotSchema, wantSchema any
-		if err := json.Unmarshal(schema.Parameters, &gotSchema); err != nil {
-			t.Fatal(err)
-		}
-		if err := json.Unmarshal(provider.CanonicalizeSchema(want.Schema()), &wantSchema); err != nil {
-			t.Fatal(err)
-		}
-		if schema.Description != want.Description() || !reflect.DeepEqual(gotSchema, wantSchema) {
-			t.Fatalf("unexpected provider contribution: %+v", schema)
+		if schema.Name == want.Name() {
+			t.Fatalf("present_files is in the first-round schema: %+v", schema)
 		}
 	}
-	if (count == 1) != enabled || count > 1 {
-		t.Fatalf("provider contribution = %d, enabled = %v", count, enabled)
+	if indexed := strings.Contains(capabilityDescription(requests[0]), "tool:"+want.Name()); indexed != enabled {
+		t.Fatalf("use_capability indexes present_files = %v, enabled = %v", indexed, enabled)
 	}
 }

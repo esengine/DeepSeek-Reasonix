@@ -2500,12 +2500,13 @@ command = "reasonix-missing-mockmcp"
 	}
 	req := reqs[0]
 	assertSegmentedSurface(t, "light first request", toolSchemaNames(req.Tools))
-	for _, want := range []string{"compress", "use_capability", "read_file", "edit_file", "write_file", "bash", "ask"} {
+	for _, want := range []string{"use_capability", "read_file", "edit_file", "write_file", "bash", "ask"} {
 		if !requestHasTool(req, want) {
 			t.Fatalf("light first request missing tool %q; tools=%v", want, toolSchemaNames(req.Tools))
 		}
 	}
 	for _, forbidden := range []string{
+		"compress", "context_budget", "setting", "present_files", "browser_open",
 		"connect_tool_source", "web_fetch", "task", "read_only_task", "read_only_skill", "run_skill", "read_skill", "install_skill", "install_source",
 		"explore", "research", "review", "security_review",
 		"lsp_definition", "lsp_references", "lsp_hover", "lsp_diagnostics",

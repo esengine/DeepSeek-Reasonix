@@ -146,9 +146,12 @@ func TestEffectContextBudgetToolAnswersUnderPressure(t *testing.T) {
 	}
 }
 
-func TestEffectContextBudgetToolIsOffered(t *testing.T) {
+func TestEffectContextBudgetToolIsIndexedNotOffered(t *testing.T) {
 	reqs := effectRun(t, "boot-budget-tool-surface", "", ablation.Set{})
-	if !toolNames(reqs[0])["context_budget"] {
-		t.Fatalf("context_budget absent from the provider tool surface: %v", toolNames(reqs[0]))
+	if toolNames(reqs[0])["context_budget"] {
+		t.Fatalf("context_budget is in the first-round schema: %v", toolNames(reqs[0]))
+	}
+	if !strings.Contains(capabilityDescription(reqs[0]), "tool:context_budget") {
+		t.Fatalf("use_capability does not index context_budget: %s", capabilityDescription(reqs[0]))
 	}
 }

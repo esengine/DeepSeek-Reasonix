@@ -208,49 +208,6 @@
       }
     },
     {
-      "name": "compress",
-      "description": "Compress a selected part of the current model-visible conversation without deleting visible history. Use only when the user explicitly asks for context compression. Choose `before` to summarize everything before the uniquely matched user turn while keeping that turn and later context, or `after` to summarize from that turn through the last completed turn while keeping the active turn. The anchor must be an exact, unique excerpt from a real user message; use a longer excerpt if the tool reports multiple matches.",
-      "parameters": {
-        "additionalProperties": false,
-        "properties": {
-          "anchor": {
-            "description": "An exact, unique excerpt from one real user message in the current model-visible conversation.",
-            "maxLength": 512,
-            "minLength": 1,
-            "type": "string"
-          },
-          "direction": {
-            "description": "Which side of the anchor user turn to compress.",
-            "enum": [
-              "before",
-              "after"
-            ],
-            "type": "string"
-          },
-          "focus": {
-            "description": "Optional guidance about facts or decisions the summary must preserve.",
-            "maxLength": 2000,
-            "type": "string"
-          }
-        },
-        "required": [
-          "anchor",
-          "direction"
-        ],
-        "type": "object"
-      }
-    },
-    {
-      "name": "context_budget",
-      "description": "Report how much context room is left before this conversation is automatically compacted. Nothing reports it unprompted: check it at the start of a long task, before a large change, and before output you may not finish reading (a broad search, a large file, a long build log), so you can narrow the command. `tokens_remaining` counts down to the compaction trigger, not the physical window.",
-      "parameters": {
-        "additionalProperties": false,
-        "properties": {},
-        "required": [],
-        "type": "object"
-      }
-    },
-    {
       "name": "edit_file",
       "description": "Replace an exact string in a file with another. old_string must occur exactly once; add surrounding context to disambiguate. Use for targeted edits instead of rewriting the whole file.",
       "parameters": {
@@ -288,41 +245,6 @@
         },
         "required": [
           "job_id"
-        ],
-        "type": "object"
-      }
-    },
-    {
-      "name": "present_files",
-      "description": "Present existing final files as clickable cards, including shell-created documents. Paths must be in the workspace or authorized folders. Opens current files, not snapshots; does not certify correctness.",
-      "parameters": {
-        "additionalProperties": false,
-        "properties": {
-          "files": {
-            "items": {
-              "additionalProperties": false,
-              "properties": {
-                "description": {
-                  "maxLength": 256,
-                  "type": "string"
-                },
-                "path": {
-                  "maxLength": 4096,
-                  "type": "string"
-                }
-              },
-              "required": [
-                "path"
-              ],
-              "type": "object"
-            },
-            "maxItems": 4,
-            "minItems": 1,
-            "type": "array"
-          }
-        },
-        "required": [
-          "files"
         ],
         "type": "object"
       }
@@ -381,42 +303,6 @@
           }
         },
         "required": [],
-        "type": "object"
-      }
-    },
-    {
-      "name": "setting",
-      "description": "Find and change the user's own settings. op=list finds settings by words of their id (for example \"peers dispatch\"). op=propose asks the user to confirm one change: give the id, the new value and a short reason; nothing changes until the user answers, and the result says what changed or that they declined. op=open points the user at a setting that only they may change. Use it when a refusal ends with (fix: setting ...), or when a tool you need is not offered because a switch is off. Do not change a setting the task did not call for.",
-      "parameters": {
-        "additionalProperties": false,
-        "properties": {
-          "id": {
-            "description": "The setting's id, for propose and open",
-            "type": "string"
-          },
-          "op": {
-            "enum": [
-              "list",
-              "propose",
-              "open"
-            ],
-            "type": "string"
-          },
-          "query": {
-            "description": "Words of the setting's id, for op=list",
-            "type": "string"
-          },
-          "reason": {
-            "description": "Why the change helps the user, shown on the card, for op=propose",
-            "type": "string"
-          },
-          "value": {
-            "description": "The new value as JSON, for op=propose"
-          }
-        },
-        "required": [
-          "op"
-        ],
         "type": "object"
       }
     },
@@ -530,7 +416,7 @@
     },
     {
       "name": "use_capability",
-      "description": "Search and call deferred tools, skills, and MCP through stable IDs such as tool:grep, skill:review, task:subagent, and mcp-tool:server/tool. Before saying a tool, network, or integration is unavailable, search by natural-language goal; results include ranked IDs and available schemas. list enumerates the catalog, inspect loads one definition, call invokes it, and decline records why a preferred capability is skipped. task:subagent delegates 1-8 tasks that run in parallel. Calls retain all permission, sandbox, and execution checks. Deferred tools, called by id: tool:web_fetch (Read HTTP(S) text.); tool:browser_open (Load a page and return its snapshot, one element per line with [eN]…); tool:browser_read (Read a browser page: snapshot); tool:browser_act (Operate a page with real input.); tool:grep (Search for a regular expression in a file, or recursively under a…); tool:glob (Find files matching a glob pattern); tool:ls (List the entries of a directory.). Read JSON or static text with tool:web_fetch; open a browser only for pages that need rendering, clicks or a login.",
+      "description": "Search and call deferred tools, skills, and MCP through stable IDs such as tool:grep, skill:review, task:subagent, and mcp-tool:server/tool. Before saying a tool, network, or integration is unavailable, search by natural-language goal; results include ranked IDs and available schemas. list enumerates the catalog, inspect loads one definition, call invokes it, and decline records why a preferred capability is skipped. task:subagent delegates 1-8 tasks that run in parallel. Calls retain all permission, sandbox, and execution checks. Deferred tools, called by id: tool:web_fetch (Read HTTP(S) text.); tool:browser_open (Load a page and return its snapshot, one element per line with [eN]…); tool:browser_read (Read a browser page: snapshot); tool:browser_act (Operate a page with real input.); tool:grep (Search for a regular expression in a file, or recursively under a…); tool:glob (Find files matching a glob pattern); tool:ls (List the entries of a directory.); tool:present_files (Present existing final files as clickable cards, including…); tool:setting (Find and change the user's own settings.); tool:compress (Compress a selected part of the current model-visible conversation…); tool:context_budget (Report how much context room is left before this conversation is…). Read JSON or static text with tool:web_fetch; open a browser only for pages that need rendering, clicks or a login.",
       "parameters": {
         "properties": {
           "action": {

@@ -36,8 +36,8 @@ func (p *settingProvider) Stream(_ context.Context, req provider.Request) (<-cha
 	p.mu.Unlock()
 	ch := make(chan provider.Chunk, 3)
 	if first {
-		args, _ := json.Marshal(map[string]any{"op": "propose", "id": p.id, "value": json.RawMessage(p.val), "reason": "the task needs it"})
-		ch <- provider.Chunk{Type: provider.ChunkToolCall, ToolCall: &provider.ToolCall{ID: "call-set", Name: "setting", Arguments: string(args)}}
+		args, _ := json.Marshal(map[string]any{"action": "call", "capability_id": "tool:setting", "arguments": map[string]any{"op": "propose", "id": p.id, "value": json.RawMessage(p.val), "reason": "the task needs it"}})
+		ch <- provider.Chunk{Type: provider.ChunkToolCall, ToolCall: &provider.ToolCall{ID: "call-set", Name: "use_capability", Arguments: string(args)}}
 	} else {
 		ch <- provider.Chunk{Type: provider.ChunkText, Text: "done"}
 	}
@@ -53,7 +53,7 @@ func (p *settingProvider) toolResult() string {
 		return ""
 	}
 	for _, m := range p.reqs[1].Messages {
-		if m.Role == provider.RoleTool && m.Name == "setting" {
+		if m.Role == provider.RoleTool && m.Name == "use_capability" {
 			return m.Content
 		}
 	}
@@ -152,8 +152,8 @@ func TestEffectTheModelProposesASettingAndTheUserClickDecidesIt(t *testing.T) {
 			if !reflect.DeepEqual(rec.toolNames(0), rec.toolNames(1)) {
 				t.Fatalf("the tool block moved between requests:\n%v\n%v", rec.toolNames(0), rec.toolNames(1))
 			}
-			if !slices.Contains(rec.toolNames(0), "setting") {
-				t.Fatalf("setting is not offered: %v", rec.toolNames(0))
+			if slices.Contains(rec.toolNames(0), "setting") {
+				t.Fatalf("setting is in the first-round schema: %v", rec.toolNames(0))
 			}
 		})
 	}

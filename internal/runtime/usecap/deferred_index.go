@@ -9,7 +9,7 @@ import (
 // deferredIndexTools are the built-ins a model reaches for by name before it
 // searches: hidden from the provider schema, so without a line here a
 // directly visible browser is the only way it can see to read a URL.
-var deferredIndexTools = []string{"web_fetch", "web_search", "browser_open", "browser_read", "browser_act", "grep", "glob", "ls"}
+var deferredIndexTools = []string{"web_fetch", "web_search", "browser_open", "browser_read", "browser_act", "grep", "glob", "ls", "present_files", "setting", "compress", "context_budget"}
 
 const deferredLeadBytes = 72
 
