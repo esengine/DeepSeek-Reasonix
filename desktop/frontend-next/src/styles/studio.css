@@ -1094,7 +1094,7 @@ body { background: var(--page) !important; }
   top: auto; right: auto; bottom: calc(100% + 8px); left: 0;
   width: min(326px, calc(100vw - 32px)); transform: translateY(4px) scale(.985); transform-origin: bottom left;
 }
-.studio-context-anchor .studio-context-summary::before { content: ""; position: absolute; left: 0; right: 0; top: 100%; height: 10px; }
+.studio-context-anchor:is(:hover, [data-open])::before { content: ""; position: absolute; left: 0; bottom: 100%; width: min(360px, calc(100vw - 32px)); height: 10px; }
 .studio-context-anchor[data-open] .studio-context-summary {
   opacity: 1; visibility: visible; pointer-events: auto; transform: none; transition-delay: 0s;
 }

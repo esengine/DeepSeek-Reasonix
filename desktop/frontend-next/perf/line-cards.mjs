@@ -1,5 +1,5 @@
-// An allowed guardian review at low risk and a remembered fact are Lines, not cards: one row over a hairline with no box.
-// A refusal, or an allow that carried real risk, keeps the card.
+// An allowed guardian review at low risk is a Line, not a card: one row over a hairline with no box.
+// A refusal, or an allow that carried real risk, keeps its note, and a remembered fact is a note that carries its take-back.
 import { chromium } from "playwright";
 
 const BASE = process.env.PERF_URL ?? "http://localhost:4399/perf.html";
@@ -36,15 +36,15 @@ for (const scheme of ["light", "dark"]) {
       lines: rows.length,
       boxes: rows.map(box),
       radius: rows.map((r) => getComputedStyle(r).borderTopLeftRadius),
-      cards: [...document.querySelectorAll('.flow .call[data-k="host"]')].length,
-      forget: !!document.querySelector('.flow .line-row [data-action="memory.forget"]'),
+      cards: [...document.querySelectorAll(".flow .note")].filter((n) => n.textContent.includes("守卫复核")).length,
+      forget: !!document.querySelector('.flow .note [data-action="memory.forget"]'),
       oldMem: document.querySelectorAll('.flow .call[data-k="mem"]').length,
     };
   });
-  check(`${scheme}: the remembered fact and the low-risk allow are rows`, m.lines === 2, `${m.lines} rows`);
+  check(`${scheme}: the low-risk allow is a row`, m.lines === 1, `${m.lines} rows`);
   check(`${scheme}: rows carry no box`, m.lines > 0 && m.boxes.every((b) => b === "0px,0px,0px") && m.radius.every((r) => r === "0px"), JSON.stringify(m));
-  check(`${scheme}: the high-risk allow and the refusal keep their cards`, m.cards === 2, `${m.cards} cards`);
-  check(`${scheme}: the take-back sits in the row, and no memory card remains`, m.forget && m.oldMem === 0);
+  check(`${scheme}: the high-risk allow and the refusal keep their notes`, m.cards === 2, `${m.cards} cards`);
+  check(`${scheme}: the remembered fact keeps its take-back, and no memory card remains`, m.forget && m.oldMem === 0);
   await ctx.close();
 }
 await browser.close();

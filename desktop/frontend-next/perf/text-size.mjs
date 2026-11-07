@@ -37,11 +37,16 @@ for (const scheme of ["light", "dark"]) {
     await page.evaluate(() => document.querySelector('[data-action="chrome.settings"]')?.click());
     await page.waitForSelector(".prefs-nav button");
     await page.locator(".prefs-nav button", { hasText: "外观" }).first().click();
+    await page.locator('[data-action="settings.open-page"][data-target="size"]').click();
     await page.locator('[data-action="appearance.text-size"]', { hasText: new RegExp(`^${name}$`) }).click();
     await page.waitForTimeout(200);
     if (shotDir && scale === 1.3) await page.screenshot({ path: `${shotDir}/${scheme}-settings-1.3.png` });
     await page.keyboard.press("Escape");
     await page.waitForTimeout(300);
+    if (await page.locator(".prefs-nav").count()) {
+      await page.keyboard.press("Escape");
+      await page.waitForTimeout(300);
+    }
     const m = await measure(page);
     const tag = `${scheme} ${name}`;
     check(`${tag}: the control reaches the page`, scale === 1 ? m.scale === "" : Number(m.scale) === scale, `--fs-scale "${m.scale}"`);

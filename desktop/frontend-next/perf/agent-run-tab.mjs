@@ -43,11 +43,11 @@ for (const scheme of ["light", "dark"]) {
   });
   await page.waitForSelector(".studio-deckchip");
   await page.locator('[data-action="deck.agents"]').hover();
-  await page.locator('.studio-deck-pop .ag-open[data-target]').first().waitFor();
+  await page.locator('.studio-deck-pop .ag[data-action="agent.open"][data-target]').first().waitFor();
   const rows = await page.locator(".studio-deck-pop .ag").count();
   check(`${scheme}: the deck lists both delegations`, rows === 2, `rows=${rows}`);
 
-  await page.locator('.studio-deck-pop .ag', { hasText: "security-review" }).locator('[data-action="agent.open"]').click();
+  await page.locator('.studio-deck-pop .ag', { hasText: "security-review" }).click();
   await page.locator('.workbench-tab-pick', { hasText: "security-review" }).waitFor();
   await page.locator(".agentrun .txt", { hasText: "rotated on every refresh" }).waitFor();
   await page.waitForFunction(() => !document.querySelector(".agentrun")?.textContent.includes("## Finding"));
@@ -68,7 +68,7 @@ for (const scheme of ["light", "dark"]) {
   check(`${scheme}: the record stays inside the workbench column`, box.flowRight <= box.wbRight + 1 && box.flowLeft >= box.wbLeft - 1, JSON.stringify(box));
 
   await page.locator('[data-action="deck.agents"]').hover();
-  await page.locator('.studio-deck-pop .ag', { hasText: "other" }).locator('[data-action="agent.open"]').click();
+  await page.locator('.studio-deck-pop .ag', { hasText: "other" }).click();
   await page.locator(".agent-tx").waitFor();
   check(`${scheme}: a call with no run keeps the full-record dialog`, true);
   await page.close();

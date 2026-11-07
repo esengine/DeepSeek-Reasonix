@@ -16,11 +16,11 @@ try {
       const page = await browser.newPage({ viewport: { width, height: 800 }, colorScheme: theme, reducedMotion: "reduce" });
       page.on("pageerror", (e) => fails.push("page error: " + e.message));
       await page.goto(BASE, { waitUntil: "networkidle" });
-      await page.waitForSelector(".projects-heading");
+      await page.waitForSelector(".projects-header");
       await page.mouse.move(width - 2, 790);
       await page.waitForTimeout(300);
       const g = await page.evaluate(() => {
-        const row = document.querySelector(".projects-heading");
+        const row = document.querySelector(".projects-header");
         const add = row?.querySelector('[data-action="workspace.add"]');
         if (!add) return null;
         const r = add.getBoundingClientRect();

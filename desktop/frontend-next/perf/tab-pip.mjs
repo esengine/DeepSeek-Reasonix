@@ -31,7 +31,7 @@ try {
       out.unreadDiffers = unread.backgroundColor !== read.backgroundColor && unread.backgroundColor !== "rgba(0, 0, 0, 0)";
       return out;
     });
-    check(`${label}: a running session's dot ${reduced === "reduce" ? "does not move" : "breathes"}`, reduced === "reduce" ? names.running === "none" : names.running === "breathe", names.running);
+    check(`${label}: a running session's dot ${reduced === "reduce" ? "does not move" : "breathes"}`, reduced === "reduce" ? names.running === "none" : names.running === "m-pulse", names.running);
     check(`${label}: idle, halted and finished dots stay still`, names.idle === "none" && names.halt === "none" && names.done === "none", JSON.stringify(names));
     check(`${label}: an unread finished session is told apart by its own dot, not an extra one`, names.unreadDiffers === true);
     await ctx.close();

@@ -39,6 +39,7 @@ const browser = await chromium.launch();
 for (const sc of SCENES) {
   const page = await browser.newPage({ viewport: { width: sc.w ?? 1400, height: 900 }, locale: "zh-CN", reducedMotion: "reduce" });
   page.on("pageerror", (e) => fails.push("页面异常: " + e.message));
+  await page.addInitScript(() => localStorage.setItem("rx-nav-rail", "on"));
   await page.goto(BASE + sc.q, { waitUntil: "networkidle" });
   await page.waitForSelector(".app");
   await page.evaluate(() => document.fonts.ready);

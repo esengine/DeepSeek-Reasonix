@@ -20,12 +20,15 @@ for (const scheme of ["light", "dark"]) {
     const label = `${scheme} ${width}x${height} zoom ${zoom}${files ? " with the file panel" : ""}`;
     const page = await browser.newPage({ viewport: { width, height }, locale: "zh-CN", colorScheme: scheme });
     page.on("pageerror", (e) => fails.push("页面异常: " + e.message));
+    await page.addInitScript(() => localStorage.setItem("rx-nav-rail", "on"));
     await page.goto(`${PAGE}&zoom=${zoom}`, { waitUntil: "networkidle" });
     await page.waitForSelector(".compose");
     if (files) {
       await page.locator('.navbtn[aria-label="文件"]').first().click();
       await page.waitForSelector(".workbench-filelist button");
     }
+    const more = page.locator(".compose .turn-more");
+    if (await more.isVisible()) await more.click();
     await page.locator('[data-action="side.toggle"]').click();
     await page.waitForSelector(".sidepanel");
     await page.waitForTimeout(250);

@@ -51,7 +51,7 @@ for (const n of COUNTS) {
       const end = prev + 450;
       const before = document.querySelector(".app")?.dataset.rail;
       const mac = /Mac/.test(navigator.platform);
-      window.dispatchEvent(new KeyboardEvent("keydown", { key: "\\", ctrlKey: !mac, metaKey: mac, bubbles: true, cancelable: true }));
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "b", ctrlKey: !mac, metaKey: mac, bubbles: true, cancelable: true }));
       while (performance.now() < end) {
         await new Promise((res) => requestAnimationFrame(res));
         const now = performance.now();
@@ -114,7 +114,7 @@ const inherited = await (async () => {
     const app = () => getComputedStyle(document.querySelector(".app")).getPropertyValue("--rail-w");
     const out = { flow: [read()], app: [app()] };
     const mac = /Mac/.test(navigator.platform);
-    window.dispatchEvent(new KeyboardEvent("keydown", { key: "\\", ctrlKey: !mac, metaKey: mac, bubbles: true, cancelable: true }));
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "b", ctrlKey: !mac, metaKey: mac, bubbles: true, cancelable: true }));
     for (const wait of [90, 400]) {
       await new Promise((r) => setTimeout(r, wait));
       out.flow.push(read());

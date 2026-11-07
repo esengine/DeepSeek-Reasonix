@@ -19,11 +19,11 @@ for (const scheme of ["light", "dark"]) {
   const page = await ctx.newPage();
   page.on("pageerror", (e) => fails.push("page error: " + e.message));
   await page.goto(PAGE, { waitUntil: "domcontentloaded" });
-  await page.waitForSelector('.projects-heading [data-action="workspace.add"]');
+  await page.waitForSelector('.projects-header [data-action="workspace.add"]');
   const current = () => page.evaluate(() => [...document.querySelectorAll(".wsnode[data-current]")].map((el) => el.textContent ?? ""));
   const was = await current();
   if (SHOTS) await page.screenshot({ path: join(SHOTS, `${scheme}-before.png`) });
-  await page.locator('.projects-heading [data-action="workspace.add"]').click();
+  await page.locator('.projects-header [data-action="workspace.add"]').click();
   await page.getByRole("dialog", { name: "打开项目", exact: true }).getByRole("button", { name: "选择本机文件夹", exact: true }).click();
   await page.waitForFunction(() => [...document.querySelectorAll(".wsnode[data-current]")].some((el) => el.textContent?.includes("mock-workspace")), null, { timeout: 5000 }).catch(() => {});
   const now = await current();

@@ -139,6 +139,11 @@ for (const scheme of ["light", "dark"]) {
     await page.waitForSelector(".app");
     await page.evaluate(() => document.fonts.ready);
     await page.waitForTimeout(500);
+    const more = page.locator(".compose .turn-more");
+    if (await more.isVisible()) {
+      await more.click();
+      await page.waitForTimeout(300);
+    }
     const tag = `${scheme} ${width}px zoom ${zoom}`;
     const m = await probe(page);
     check(`${tag}: title bar controls do not overlap`, m.bar.overlaps.length === 0, m.bar.overlaps.join(", "));

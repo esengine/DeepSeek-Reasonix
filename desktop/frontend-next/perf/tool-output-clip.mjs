@@ -97,7 +97,7 @@ try {
       console.log(`ok ${scheme} ${width}: ${call.name} expands, retains content and disclosure state, and collapses`);
     }
     await searchCard.getByRole("button", { name: "Copy", exact: true }).click();
-    assert.equal(await page.evaluate(() => navigator.clipboard.readText()), search, "copy includes every result, not just the visible preview");
+    assert.equal((await page.evaluate(() => navigator.clipboard.readText())).replaceAll("\r\n", "\n"), search, "copy includes every result, not just the visible preview");
     assert.equal(await card("clip-short").locator(".out-more").count(), 0, "short output does not acquire a Show all control");
     assert.equal(await card("clip-short").locator(".term").textContent(), "ok");
     console.log(`ok ${scheme} ${width}: full-result copy and short output`);

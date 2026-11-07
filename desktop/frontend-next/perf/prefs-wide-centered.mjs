@@ -1,4 +1,4 @@
-// An enlarged settings window centres its content column between the nav and
+// A wide settings window centres its content column between the nav and
 // the window edge: the room left over is shared, not piled up on the right.
 import assert from "node:assert/strict";
 import { chromium } from "playwright";
@@ -13,7 +13,7 @@ try {
     await page.goto(PAGE, { waitUntil: "networkidle" });
     await page.evaluate(() => document.querySelector('[data-action="chrome.settings"]')?.click());
     await page.waitForSelector(".prefs-nav button");
-    await page.getByRole("button", { name: "放大设置窗口" }).click();
+    await page.waitForSelector(".prefs-main .prefs-col");
     await page.waitForTimeout(400);
     const room = await page.evaluate(() => {
       const main = document.querySelector(".prefs-main").getBoundingClientRect();

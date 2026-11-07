@@ -36,13 +36,16 @@ for (const scheme of ["light", "dark"]) {
     if (shotDir && width === 1280) await page.locator(".compose").screenshot({ path: `${shotDir}/${scheme}-held.png` });
 
     await page.evaluate(() => document.querySelector('[data-action="chrome.settings"]')?.click());
-    await page.waitForSelector(".prefs-nav button");
-    const navLabels = await page.evaluate(() => [...document.querySelectorAll(".prefs-nav button")].map((b) => b.textContent));
-    check(`${tag}: session messages have a settings entry of their own`, navLabels.some((l) => l.includes("会话间消息")));
-    await page.evaluate(() => [...document.querySelectorAll(".prefs-nav button")].find((b) => b.textContent.includes("工具与权限"))?.click());
+    const section = (value) => page.evaluate((v) => document.querySelector(`[data-action="settings.section"][data-value="${v}"]`)?.click(), value);
+    await page.waitForSelector('[data-action="settings.section"][data-value="tools"]');
+    await section("session");
+    await page.waitForTimeout(300);
+    check(`${tag}: session messages have a settings entry of their own`, (await page.locator('[data-action="settings.open-page"][data-target="peers"]').count()) === 1);
+    await section("tools");
     await page.waitForTimeout(300);
     check(`${tag}: and no longer sit at the foot of tools and permissions`, (await page.locator('[role="switch"][aria-label="启用会话间消息"]').count()) === 0);
-    await page.evaluate(() => [...document.querySelectorAll(".prefs-nav button")].find((b) => b.textContent.includes("会话间消息"))?.click());
+    await section("session");
+    await page.locator('[data-action="settings.open-page"][data-target="peers"]').click();
     await page.waitForSelector('[role="switch"][aria-label="启用会话间消息"]', { timeout: 8000 });
     const s = await page.evaluate(() => {
       const sw = (n) => document.querySelector(`[role="switch"][aria-label="${n}"]`);

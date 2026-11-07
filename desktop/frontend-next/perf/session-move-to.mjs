@@ -23,22 +23,22 @@ for (const scheme of ["light", "dark"]) {
     const first = await page.locator(rows).first().getAttribute("data-target");
     await page.evaluate((sel) => document.querySelector(sel).dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 140, clientY: 300 })), rows);
     await page.getByRole("menuitem", { name: "移动到项目…" }).click();
-    await page.waitForSelector('[role="dialog"] select');
+    await page.waitForSelector('[role="dialog"] input[type="radio"]');
     const dlg = await page.evaluate(() => {
-      const d = document.querySelector('[role="dialog"]:has(select)');
+      const d = document.querySelector('[role="dialog"]:has(input[type="radio"])');
       const card = d.querySelector(".pickcard").getBoundingClientRect();
-      return { options: [...d.querySelectorAll("option")].map((o) => o.textContent), text: d.textContent, fits: card.left >= 0 && card.right <= innerWidth + 1 && card.bottom <= innerHeight + 1, focusIn: d.contains(document.activeElement) };
+      return { options: [...d.querySelectorAll(".movess-row")].map((o) => o.textContent), text: d.textContent, fits: card.left >= 0 && card.right <= innerWidth + 1 && card.bottom <= innerHeight + 1, focusIn: d.contains(document.activeElement) };
     });
     check(`${tag}: it lists the other projects but not the one it is in`, dlg.options.length === 2 && !dlg.options.some((o) => o.startsWith("workspace-0")), dlg.options.join(" | "));
     check(`${tag}: it says what travels and what does not`, dlg.text.includes("原项目的权限与目标设置不会跟着走") && dlg.text.includes("路径保持原样"));
     check(`${tag}: the dialog fits the window and holds focus`, dlg.fits && dlg.focusIn, JSON.stringify({ fits: dlg.fits, focusIn: dlg.focusIn }));
     if (shotDir) await page.mouse.move(width - 3, 895), await page.waitForTimeout(250), await page.screenshot({ path: `${shotDir}/${scheme}-${width}-dialog.png` });
-    await page.locator('[role="dialog"] select').selectOption({ index: 1 });
+    await page.locator('[role="dialog"] .movess-row').nth(1).click();
     await page.getByRole("button", { name: "移动", exact: true }).click();
     await page.waitForFunction(() => (window.__moves ?? []).length === 1);
     const moves = await page.evaluate(() => window.__moves);
     check(`${tag}: the kernel is asked once, for this conversation and the chosen project`, moves.length === 1 && moves[0].path === first && moves[0].target.endsWith("workspace-2"), JSON.stringify(moves));
-    await page.waitForFunction(() => !document.querySelector('[role="dialog"]:has(select)'));
+    await page.waitForFunction(() => !document.querySelector('[role="dialog"]:has(input[type="radio"])'));
     check(`${tag}: the dialog closes when it is done`, true);
     await page.close();
   }

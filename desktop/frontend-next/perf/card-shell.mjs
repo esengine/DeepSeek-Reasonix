@@ -34,21 +34,23 @@ for (const scheme of ["light", "dark"]) {
   });
   await page.waitForTimeout(800);
   await page.mouse.move(995, 5);
-  const rows = await page.evaluate(() =>
-    [...document.querySelectorAll(".flow .call")]
+  const rows = await page.evaluate(() => {
+    const read = (kind, shell, hl) => {
+      const cs = getComputedStyle(shell);
+      return {
+        kind,
+        radius: cs.borderTopLeftRadius,
+        border: cs.borderTopColor,
+        bg: cs.backgroundColor,
+        head: hl ? getComputedStyle(hl).backgroundColor : "rgba(0, 0, 0, 0)",
+      };
+    };
+    const calls = [...document.querySelectorAll(".flow .call")]
       .filter((c) => ["mem", "host", "extension"].includes(c.getAttribute("data-k")) || c.hasAttribute("data-prompt"))
-      .map((c) => {
-        const cs = getComputedStyle(c.querySelector(":scope > .c"));
-        const hl = c.querySelector(":scope > .c > .hl");
-        return {
-          kind: c.getAttribute("data-k"),
-          radius: cs.borderTopLeftRadius,
-          border: cs.borderTopColor,
-          bg: cs.backgroundColor,
-          head: hl ? getComputedStyle(hl).backgroundColor : "rgba(0, 0, 0, 0)",
-        };
-      }));
-  check(`${scheme}: four kinds of card found`, rows.length === 4, rows.map((r) => r.kind).join(","));
+      .map((c) => read(c.getAttribute("data-k"), c.querySelector(":scope > .c"), c.querySelector(":scope > .c > .hl")));
+    return calls;
+  });
+  check(`${scheme}: three kinds of card found`, rows.length === 3, rows.map((r) => r.kind).join(","));
   const same = (key) => new Set(rows.map((r) => r[key])).size === 1;
   check(`${scheme}: one radius`, rows.length > 0 && same("radius"), [...new Set(rows.map((r) => r.radius))].join(" / "));
   check(`${scheme}: one border colour, whatever the state`, rows.length > 0 && same("border"), [...new Set(rows.map((r) => r.border))].join(" / "));

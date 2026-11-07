@@ -18,7 +18,8 @@ try {
     await page.goto(`${BASE}?twoports=1`, { waitUntil: "networkidle" });
     await page.waitForSelector(".app", { timeout: 20000 });
     await page.getByRole("button", { name: "设置", exact: true }).click();
-    await page.getByText("模型服务", { exact: true }).first().click();
+    await page.locator('[role="tab"][title="模型"]').click();
+    await page.locator('[data-action="settings.open-page"][data-target="providers"]').click();
     await page.waitForSelector('[data-action-click="provider.select"]');
     const text = await page.evaluate(() => [...document.querySelectorAll('[data-action-click="provider.select"]')].map((b) => b.textContent ?? ""));
     check(`${scheme}: the server on port 8756 is listed`, text.some((t) => t.includes("127.0.0.1:8756")), text.join(" | "));

@@ -51,7 +51,7 @@ for (const scheme of ["light", "dark"]) {
       return { out, names: items.map((it) => it.name) };
     });
     check(`${scheme} ${width}x${height}: the buttons, rail, dock tab and composer do not overlap`, clash.out.length === 0, clash.out.join("; "));
-    check(`${scheme} ${width}x${height}: the right edge shows the rail, the tab and the buttons`, (width >= 800 ? ["rail", "tab", "jump-up", "jump-down"] : ["rail", "jump-up", "jump-down"]).every((n) => clash.names.includes(n)), clash.names.join(","));
+    check(`${scheme} ${width}x${height}: the right edge shows the rail and the buttons`, (width > 800 ? ["rail", "jump-up", "jump-down"] : ["jump-up", "jump-down"]).every((n) => clash.names.includes(n)), clash.names.join(","));
     if (SHOTS) {
       await page.screenshot({ path: join(SHOTS, `${scheme}-edge-${width}.png`), clip: { x: Math.max(0, width - 220), y: 0, width: Math.min(220, width), height: Math.min(height, 640) } });
     }

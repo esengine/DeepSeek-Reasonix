@@ -90,7 +90,7 @@ for (const scheme of ["light", "dark"]) {
       const r = g.getBoundingClientRect();
       return { value: input?.value, unit: g.querySelector("i")?.textContent, restore: g.querySelector('[data-action="session-ref.reset"]')?.disabled, spill: r.right > innerWidth + 1 || g.scrollWidth > g.clientWidth + 1 };
     });
-    check(`${tag}: the size limit is a number field at its default, with nothing to restore`, s.value === "8000" && s.unit === "token" && s.restore === true, `${s.value} ${s.unit}`);
+    check(`${tag}: the size limit is a number field at its default, with nothing to restore`, s.value === "8000" && ["token", "令牌"].includes(s.unit) && s.restore === true, `${s.value} ${s.unit}`);
     check(`${tag}: the setting does not spill sideways`, !s.spill);
     if (shotDir) await page.locator("#set-session-ref").screenshot({ path: `${shotDir}/${scheme}-${width}-setting.png` });
     await page.close();

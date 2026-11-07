@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { chromium } from "playwright";
 
-const sheets = await Promise.all(["tokens", "app", "studio", "sessionquick", "sessionpin", "treerows"].map(
-  (name) => readFile(new URL(`../src/styles/${name}.css`, import.meta.url), "utf8"),
+const sheets = await Promise.all(["styles/tokens", "styles/app", "styles/studio", "design/rows", "styles/sessionpin", "styles/treerows"].map(
+  (name) => readFile(new URL(`../src/${name}.css`, import.meta.url), "utf8"),
 ));
 const title = "这是什么？ @.reasonix/attachments/clipboard-" + "long-title".repeat(20);
 const browser = await chromium.launch();
@@ -13,31 +13,31 @@ try {
       const page = await browser.newPage({ colorScheme: scheme });
       await page.setContent(`<div class="rail" style="width:${width}px">
         <div class="kids">
-          <div class="sessrow sessrow-context" tabindex="0" aria-selected="true">
+          <div class="sessrow sessrow-context ds-row" tabindex="0" aria-selected="true">
             <button class="sesspin-action" data-action="session.pin">置顶</button>
-            <span class="sesstitle" title="${title}"><span>${title}</span><em class="sessarch">已归档</em></span>
+            <span class="sesstitle ds-title" title="${title}"><span>${title}</span><em class="sessarch">已归档</em></span>
             <span class="sessquick"><button data-action="session.archive">归档</button></span>
           </div>
-          <div class="sessrow sessrow-context" data-unread tabindex="0">
-            <span class="sesstitle" title="短标题"><span>短标题</span></span><span class="unread-dot"></span>
+          <div class="sessrow sessrow-context ds-row" data-unread tabindex="0">
+            <span class="sesstitle ds-title" title="短标题"><span>短标题</span></span><span class="unread-dot"></span>
           </div>
-          <div class="sessrow sessrow-remote">
-            <span class="sesstitle" title="${title}"><span>${title}</span></span><span class="sessmeta">3 轮</span>
+          <div class="sessrow sessrow-remote ds-row">
+            <span class="sesstitle ds-title" title="${title}"><span>${title}</span></span><span class="sessmeta">3 轮</span>
           </div>
-          <div class="sessrow sessrow-context" data-aged>
+          <div class="sessrow sessrow-context ds-row" data-aged>
             <button class="sesspin-action" data-action="session.pin">置顶</button>
-            <span class="sesstitle" title="${title}"><span>${title}</span></span>
+            <span class="sesstitle ds-title" title="${title}"><span>${title}</span></span>
             <time class="sessmeta sessage">9 天前</time><button class="sesscopies">+1</button>
             <span class="sessquick"><button data-action="session.archive">归档</button></span>
           </div>
-          <div class="sessrow sessrow-context" data-aged-only>
+          <div class="sessrow sessrow-context ds-row" data-aged-only>
             <button class="sesspin-action" data-action="session.pin">置顶</button>
-            <span class="sesstitle" title="${title}"><span>${title}</span></span>
+            <span class="sesstitle ds-title" title="${title}"><span>${title}</span></span>
             <time class="sessmeta sessage">9 天前</time>
             <span class="sessquick"><button data-action="session.archive">归档</button></span>
           </div>
-          <div class="sessrow sesscopy" tabindex="0">
-            <span class="sesstitle" title="早先版本 · 4 轮"><span>早先版本 · 4 轮</span></span>
+          <div class="sessrow sesscopy ds-row" tabindex="0">
+            <span class="sesstitle ds-title" title="早先版本 · 4 轮"><span>早先版本 · 4 轮</span></span>
             <button class="wsdel" data-action="session.delete" aria-label="删除该会话"><svg viewBox="0 0 16 16"><path d="M4 4l8 8M12 4l-8 8" /></svg></button>
           </div>
         </div>
@@ -48,10 +48,10 @@ try {
         const box = row.getBoundingClientRect();
         const style = getComputedStyle(text);
         return {
-          height: box.height, top: box.top, bottom: box.bottom,
+          copy: row.classList.contains("sesscopy"), height: box.height, top: box.top, bottom: box.bottom,
           textHeight: text.getBoundingClientRect().height, lineHeight: parseFloat(style.lineHeight),
-          nowrap: style.whiteSpace, ellipsis: style.textOverflow,
-          truncated: text.scrollWidth > text.clientWidth,
+          nowrap: getComputedStyle(text.parentElement).whiteSpace, ellipsis: getComputedStyle(text.parentElement).textOverflow,
+          truncated: text.parentElement.scrollWidth > text.parentElement.clientWidth,
           fullTitle: row.querySelector(".sesstitle").title === text.textContent,
         };
       }));
@@ -60,10 +60,10 @@ try {
         if (state === "focus") await page.locator(".sessrow").first().focus();
         const rows = await measure();
         for (const row of rows) {
-          assert.equal(row.height, 34, `${scheme}/${width}/${state}: row height`);
+          assert.equal(row.height, row.copy ? 28 : 30, `${scheme}/${width}/${state}: row height`);
           assert.equal(row.nowrap, "nowrap");
           assert.equal(row.ellipsis, "ellipsis");
-          assert.ok(row.textHeight <= row.lineHeight + 1);
+          assert.ok(row.textHeight <= row.height - 8, `${scheme}/${width}/${state}: the title stays on one line`);
           assert.ok(row.fullTitle);
         }
         assert.equal(rows[1].top - rows[0].bottom, 1, "only the compact row margin separates sessions");
@@ -116,7 +116,7 @@ try {
         assert.ok(del.shown, `${scheme}/${width}/${how}: an earlier version shows its delete button`);
         assert.ok(del.inside, `${scheme}/${width}/${how}: the delete button sits inside its row`);
       }
-      console.log(`${scheme}/${width}: 34px rows, 1px spacing, single-line ellipsis, hover/focus stable, an earlier version's × shows`);
+      console.log(`${scheme}/${width}: 30px rows, 1px spacing, single-line ellipsis, hover/focus stable, an earlier version's × shows`);
       await page.close();
     }
   }

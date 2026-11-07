@@ -1,4 +1,4 @@
-// Opt-in session actions put Pin before the title and Archive after it.
+// Opt-in session actions put Pin and Archive after the title.
 // Their visibility, geometry and pointer targets need a real browser.
 import { chromium } from "playwright";
 
@@ -42,10 +42,10 @@ try {
               for (let node = button; node && node !== el; node = node.parentElement) opacity *= Number(getComputedStyle(node).opacity);
               return opacity === 1 && r.width > 0 && r.height > 0 && !button.disabled && (at === button || button.contains(at));
             };
-            return { pin: hit(pin), archive: hit(archive), leading: pin.getBoundingClientRect().right <= title.left,
+            return { pin: hit(pin), archive: hit(archive), leading: pin.getBoundingClientRect().left >= title.right - 1,
               trailing: archive.getBoundingClientRect().left >= title.right - 1 };
           });
-          check(`${tag}: leading Pin and trailing Archive are hit-testable`, state.pin && state.archive && state.leading && state.trailing, JSON.stringify(state));
+          check(`${tag}: Pin beside the title and Archive after it are hit-testable`, state.pin && state.archive && state.leading && state.trailing, JSON.stringify(state));
           await page.mouse.move(1398, 798);
           await row.locator('[data-action="session.pin"]').focus();
           await page.waitForTimeout(150);

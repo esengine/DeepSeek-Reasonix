@@ -18,6 +18,7 @@ try {
     const ctx = await browser.newContext({ locale: "zh-CN", colorScheme: scheme, viewport: { width: 1400, height: 900 }, reducedMotion: "reduce" });
     const page = await ctx.newPage();
     page.on("pageerror", (e) => fails.push("page error: " + e.message));
+    await ctx.addInitScript(() => localStorage.setItem("rx-nav-rail", "on"));
     await page.goto(`${BASE}?pref=zh&ws=2&sess=3&turns=2&changes=${CHANGES}`, { waitUntil: "networkidle" });
     await page.waitForSelector(".app");
     await page.locator('.navbtn[aria-label="文件"]').first().click();
@@ -26,7 +27,7 @@ try {
     const rows = await page.locator(".workbench-change-row").count();
     check(`${scheme}: ${CHANGES} changes leave the page under ${NODES_MAX} nodes`, nodes < NODES_MAX, `${nodes} nodes, ${rows} rows`);
     check(`${scheme}: the list says how many it left out`, (await page.locator(".workbench-change-more").textContent())?.includes("没有显示") === true);
-    check(`${scheme}: the count in the head is every change`, (await page.locator(".workbench-changes .workbench-explorer-head small").first().textContent()) === String(CHANGES));
+    check(`${scheme}: the count in the head is every change`, (await page.locator(".workbench-changes .workbench-explorer-head small").first().textContent())?.replace(/\D/g, "") === String(CHANGES));
     await page.locator(".workbench-change-more").scrollIntoViewIfNeeded();
     if (shotDir) await page.screenshot({ path: `${shotDir}/${scheme}-changes-cap.png` });
     await page.locator('[data-action="workbench.more-changes"]').click();

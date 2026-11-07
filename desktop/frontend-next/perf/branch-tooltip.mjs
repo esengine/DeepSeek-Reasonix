@@ -12,6 +12,8 @@ try {
       const page = await browser.newPage({ viewport: { width: 390, height: 844 }, reducedMotion: "reduce" });
       page.on("pageerror", (error) => fails.push(error.message));
       await page.goto(`${base}?pref=${language}&turns=2&git=none&zoom=${zoom}`, { waitUntil: "networkidle" });
+      const more = page.locator(".compose .turn-more");
+      if (await more.isVisible()) await more.click();
       const chip = page.locator(".studio-branch[data-norepo]");
       await chip.waitFor();
       await page.evaluate(() => document.fonts.ready);

@@ -19,6 +19,7 @@ try {
       const open = async (query) => {
         const page = await browser.newPage({ colorScheme: scheme, viewport: { width, height: 1000 }, locale: "zh-CN", reducedMotion: "reduce" });
         page.on("pageerror", (e) => fails.push("页面异常: " + e.message));
+        await page.addInitScript(() => localStorage.setItem("rx-nav-rail", "on"));
         await page.goto(`${BASE}?pref=zh&ws=2&sess=3&turns=2${query}`, { waitUntil: "networkidle" });
         await page.waitForSelector(".app");
         await page.locator('.navbtn[aria-label="文件"]').first().click();
@@ -59,7 +60,7 @@ try {
       await one.waitForSelector('.push-card[data-phase="done"]');
       check(`${tag}: a confirmed push reports it`, (await one.locator(".push-card").textContent()).includes("已把 2 个提交推送到 github.com"));
       await shot(one, "pushed");
-      await one.getByText("提交历史").click();
+      if (!(await one.locator(".workbench-history").evaluate((d) => d.open))) await one.getByText("提交历史", { exact: true }).click();
       await one.getByRole("button", { name: /show the commit graph/ }).click();
       await one.getByRole("button", { name: /retry\.go/ }).last().click();
       await one.waitForSelector(".gh-diff");

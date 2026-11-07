@@ -1,4 +1,4 @@
-// A project row keeps its count and its actions in one grid cell, the count faded out while the row is hovered.
+// A project row swaps its count for its actions while the row is hovered.
 // A faded element still takes the pointer, so a count left clickable sits over the middle of the buttons and only
 // their corners answer. Hit-testing is a layout question, so it is asked of a real browser.
 import { chromium } from "playwright";
@@ -16,8 +16,12 @@ try {
   await page.goto(BASE, { waitUntil: "networkidle" });
   await page.waitForSelector(".app", { timeout: 20000 });
   for (const action of ["session.new", "workspace.menu"]) {
-    const button = page.locator(`.wsrow [data-action="${action}"]`).first();
-    await button.scrollIntoViewIfNeeded();
+    const row = page.locator(".ds-proj").first();
+    const button = row.locator(`[data-action="${action}"]`).first();
+    await row.scrollIntoViewIfNeeded();
+    const rowBox = await row.boundingBox();
+    await page.mouse.move(rowBox.x + rowBox.width / 2, rowBox.y + rowBox.height / 2);
+    await page.waitForTimeout(250);
     const box = await button.boundingBox();
     await page.mouse.move(box.x + 3, box.y + box.height - 3);
     await page.waitForTimeout(250);

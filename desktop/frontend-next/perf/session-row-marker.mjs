@@ -16,7 +16,7 @@ for (const theme of ["light", "dark"]) {
     const seen = await page.evaluate((s) => {
       const row = document.querySelector('.rail .sessrow[aria-selected="true"]');
       row.setAttribute("data-run", s);
-      const pip = row.querySelector(":scope > .pip");
+      const pip = row.querySelector(":scope > .ds-lead > .ds-dot");
       const bar = getComputedStyle(row, "::before");
       return {
         dot: !!pip && getComputedStyle(pip).display !== "none",

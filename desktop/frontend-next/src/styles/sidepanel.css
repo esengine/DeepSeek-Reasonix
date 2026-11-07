@@ -37,10 +37,10 @@
 .sidecollapse svg { width: 16px; height: 16px; }
 .sidecollapse[aria-expanded="false"] svg { transform: rotate(180deg); }
 .sidepanel[data-collapsed] > header { border-bottom: 0; }
-.sidepanel { width: min(400px, 100%); background: var(--float); }
+.sidepanel { width: min(400px, 100%); background: var(--float); container-type: inline-size; }
 .sidepanel > header { align-items: center; justify-content: flex-start; gap: 8px; border-bottom-color: var(--hair); }
 .sidepanel > header > .studio-icon { width: 16px; height: 16px; flex: none; color: var(--muted); }
-.sidepanel > header b { font: var(--w-semi) var(--fs-ui)/1.3 var(--ui); }
+.sidepanel > header b { font: var(--w-semi) var(--fs-ui)/1.3 var(--ui); flex: none; white-space: nowrap; }
 .sidepanel > header .sidebadge { display: inline-grid; place-items: center; height: 20px; padding: 0 7px; border-radius: var(--r-pill); background: var(--overlay); color: var(--muted); font: var(--w-reg) var(--fs-micro) var(--ui); white-space: nowrap; }
 .sidepanel > header .sideactions { margin-left: auto; gap: 2px; }
 .sidepanel > header .sideactions button { display: inline-grid; place-items: center; width: 28px; height: 28px; padding: 0; border-radius: var(--r-sm); }
@@ -67,3 +67,4 @@
 .sidepanel textarea { height: 32px; min-height: 32px; padding: 5px 10px; border-radius: var(--r-sm); font: var(--w-reg) var(--fs-ui)/1.5 var(--ui); }
 .sidesend { height: 32px; padding: 0 14px; border-color: var(--border); border-radius: var(--r-sm); background: var(--raised); color: var(--text); font: var(--w-reg) var(--fs-ui)/1 var(--ui); }
 .sidesend:not(:disabled) { border-color: var(--accent); background: var(--accent); color: var(--accent-fg); }
+@container (max-width: 320px) { .sidepanel > header .sidebadge { display: none; } }

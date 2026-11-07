@@ -4,3 +4,4 @@
 .srv-held li b { font-weight: var(--w-med); overflow-wrap: anywhere }
 .srv-held li i { font-style: normal; color: var(--muted); white-space: nowrap }
 .srv-held .hn { color: var(--muted) }
+.srv-held .acts { display: flex; flex-wrap: wrap; gap: 8px; max-width: 100% }

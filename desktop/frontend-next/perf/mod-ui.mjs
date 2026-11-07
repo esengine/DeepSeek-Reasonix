@@ -94,7 +94,8 @@ for (const scheme of ["light", "dark"]) {
     }
 
     if (width === 1280) {
-      await page.locator('[data-action="extensions.add"]').first().click();
+      await page.locator('.ext-add-btn[data-action="extensions.add"]').first().click();
+      await page.locator('[role="menuitem"][data-value="source"]').click();
       const source = page.locator("textarea, input").filter({ hasNot: page.locator("[aria-label]") }).last();
       await page.locator('textarea[placeholder*="github.com"], input[placeholder*="github.com"]').first().fill("https://github.com/acme/claude-code mod git-guard");
       await page.locator('[data-action="extensions.inspect"]').first().click();

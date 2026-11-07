@@ -4,6 +4,7 @@ import { chromium } from "playwright";
 
 const BASE = process.env.PERF_URL ?? "http://localhost:4399/perf.html";
 const AGENTS = 120;
+const LAST = `a${AGENTS - 1}`;
 const MAX_NODES = Number(process.env.PERF_NODES_MAX ?? 25000);
 const fails = [];
 const check = (name, ok, detail = "") => {
@@ -40,24 +41,24 @@ for (const scheme of ["light", "dark"]) {
   const kids = await page.evaluate(() => document.querySelectorAll(".nest-bd .call").length);
   check(`${scheme}: ${AGENTS} finished sub-agents add ${after - before} nodes, under the ${MAX_NODES} limit`, after < MAX_NODES, `${after} in the page`);
   check(`${scheme}: none of their child calls is in the document while the cards are closed`, kids === 0, `${kids}`);
-  await page.evaluate(() => { const g = [...document.querySelectorAll("details")].filter((d) => d.querySelector('[data-call="a0"]')).pop(); if (g) g.open = true; });
+  await page.evaluate((id) => { const g = [...document.querySelectorAll("details")].filter((d) => d.querySelector(`[data-call="${id}"]`)).pop(); if (g) g.open = true; }, LAST);
   await page.waitForTimeout(400);
   const shoot = async (name) => {
     if (!shotDir) return;
-    await page.evaluate(() => document.querySelector('[data-call="a0"]')?.scrollIntoView({ block: "start" }));
+    await page.evaluate((id) => document.querySelector(`[data-call="${id}"]`)?.scrollIntoView({ block: "start" }), LAST);
     await page.waitForTimeout(300);
     await page.screenshot({ path: `${shotDir}/${scheme}-nest-${name}.png`, clip: { x: 360, y: 40, width: 1000, height: 420 } });
   };
   await shoot("closed");
-  const opened = await page.evaluate(() => {
-    const d = document.querySelector('[data-call="a0"] details.tool-disclosure');
+  const opened = await page.evaluate((id) => {
+    const d = document.querySelector(`[data-call="${id}"] details.tool-disclosure`);
     if (!d) return -1;
     d.open = true;
     d.dispatchEvent(new Event("toggle"));
     return 1;
-  });
+  }, LAST);
   await page.waitForTimeout(300);
-  const nowKids = await page.evaluate(() => document.querySelectorAll('[data-call="a0"] .nest-bd .call').length);
+  const nowKids = await page.evaluate((id) => document.querySelectorAll(`[data-call="${id}"] .nest-bd .call`).length, LAST);
   check(`${scheme}: opening one card mounts exactly its own 15 child calls`, opened === 1 && nowKids === 15, `${nowKids}`);
   await shoot("open");
   await ctx.close();

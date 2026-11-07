@@ -53,7 +53,7 @@
 .ds-row .sessquick > button:hover, .ds-row .sesspin-action:hover { background: var(--raised); color: var(--text); }
 .ds-row .sessquick > button:disabled, .ds-row .sesspin-action:disabled { opacity: .35; cursor: default; }
 .ds-row .sessquick .studio-icon, .ds-row .sesspin-action .studio-icon { width: 14px; height: 14px; }
-.ds-row .wsdel { flex: none; width: 24px; height: 24px; padding: 0; display: grid; place-items: center; border: 0; border-radius: var(--r-xs); background: transparent; color: var(--faint); opacity: 0; cursor: pointer; }
+.ds-row .wsdel { position: static; flex: none; width: 24px; height: 24px; padding: 0; display: grid; place-items: center; border: 0; border-radius: var(--r-xs); background: transparent; color: var(--faint); opacity: 0; cursor: pointer; }
 .ds-row:is(:hover, :focus-within) .wsdel, .ds-row .wsdel:focus-visible { opacity: 1; }
 .ds-row .wsdel:hover { background: var(--overlay); color: var(--err-ink); }
 .ds-row.sesscopy { height: 28px; font-size: var(--fs-meta); font-weight: var(--w-reg); }

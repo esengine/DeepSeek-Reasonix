@@ -40,6 +40,7 @@
 .compose .rtbar.posturenote:not([data-kind="connect"]) button:last-child { color: var(--muted); font-weight: var(--w-med); text-decoration: none; }
 .compose .fmain { padding: 10px 16px 0; }
 .compose .fmain > textarea { min-height: 42px; padding: 0; font: var(--w-reg) var(--fs-lead)/1.6 var(--ui); }
+.compose .fmain > .chipmirror { inset: 10px 16px 0; }
 .compose .fmain > textarea::placeholder { color: var(--faint); }
 
 .compose .row { margin: 0; padding: 6px 8px 8px; gap: 2px; flex-wrap: nowrap; align-items: center; border: 0; border-radius: 0; background: transparent; }

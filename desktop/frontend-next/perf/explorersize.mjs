@@ -13,6 +13,7 @@ const browser = await chromium.launch();
 try {
   for (const scheme of ["light", "dark"]) {
     const page = await browser.newPage({ colorScheme: scheme, viewport: { width: 1400, height: 900 } });
+    await page.addInitScript(() => localStorage.setItem("rx-nav-rail", "on"));
     await page.goto(BASE, { waitUntil: "networkidle" });
     await page.waitForSelector(".app");
     await page.locator('.navbtn[aria-label="文件"]').first().click();

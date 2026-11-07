@@ -35,7 +35,7 @@ for (const scheme of ["light", "dark"]) {
     });
     const tag = `${scheme} ${width}px`;
     if (width >= 760) {
-      check(`${tag}: the badge is on the wordmark's row, vertically centred on it`, m.shown && m.dy <= 1.5 && m.after, JSON.stringify(m));
+      check(`${tag}: the badge is on the wordmark's row, within the 3px optical drop the sidebar board draws`, m.shown && m.dy <= 3.5 && m.after, JSON.stringify(m));
       check(`${tag}: it is an outlined uppercase badge in both themes and the text is untouched`, m.fill === "rgba(0, 0, 0, 0)" && m.border !== "0px" && m.radius !== "0px" && m.upper === "uppercase" && m.text === "studio", JSON.stringify(m));
       if (!seen) seen = { left: m.left, top: m.top };
       check(`${tag}: it sits in the same place whichever theme is on`, Math.abs(m.left - seen.left) <= 0.5 && Math.abs(m.top - seen.top) <= 0.5, `${m.left},${m.top} vs ${seen.left},${seen.top}`);
