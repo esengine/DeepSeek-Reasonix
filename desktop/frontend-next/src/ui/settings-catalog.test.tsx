@@ -32,7 +32,7 @@ const name = (el: Node): string => {
   return n?.type === "JSXIdentifier" ? (n.name as string) : "";
 };
 
-/** Every settings block the tree renders, by the id it names itself with.
+/** Every settings block or row the tree renders, by the id it names itself with.
  *  A hand-drawn frame counts when its direct group header carries an h3 — the
  *  same structure Group renders, unlike nested labels such as Storage's. */
 function rendered(): { ids: string[]; unnamed: string[] } {
@@ -44,6 +44,11 @@ function rendered(): { ids: string[]; unnamed: string[] } {
         const id = literal(attr(n, "id"));
         if (id) ids.push(id);
         else unnamed.push(`${path}:${n.loc?.start.line}  <Group> with no literal id`);
+        return;
+      }
+      if (n.type === "JSXOpeningElement" && (name(n) === "SettingRow" || name(n) === "SettingDeep")) {
+        const id = literal(attr(n, "id"));
+        if (id) ids.push(id);
         return;
       }
       if (n.type !== "JSXElement") return;
@@ -150,11 +155,10 @@ describe("the settings catalogue", () => {
     expect(now).not.toContain("重启");
   });
 
-  // Saved and in force are two facts, and the restart answer is the one where
-  // they come apart. A row that only said "after a restart" would leave the
-  // reader wondering whether closing this sheet loses what they just typed.
-  it("says a restart setting is already kept", () => {
-    expect(renderToStaticMarkup(<Group id="storage" title="X" />)).toContain("已保存");
+  // A block that differs from the page's usual says so once, as a tag beside
+  // its name, instead of repeating it under every row.
+  it("tags a restart setting beside its name", () => {
+    expect(renderToStaticMarkup(<Group id="storage" title="X" />)).toMatch(/class="scope-tag">[^<]*重启后生效/);
   });
 
   // Reporting blocks have nothing to apply, and must not claim otherwise.

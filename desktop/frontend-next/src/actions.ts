@@ -127,7 +127,6 @@ export const ACTIONS: UIAction[] = [
   { id: "workspace.source-open", kind: "view", target: "none", proof: "interaction" },
   { id: "workspace.worktree-toggle", kind: "view", target: "none", proof: "interaction" },
   { id: "workspace.search", kind: "view", target: "none", proof: "interaction" },
-  { id: "session.view", kind: "view", target: "none", proof: "interaction" },
   { id: "session.filter", kind: "view", target: "none", proof: "interaction" },
   { id: "session.recent", kind: "view", target: "none", proof: "interaction" },
   { id: "session.recent-environment", kind: "view", target: "none", proof: "interaction" },
@@ -166,7 +165,6 @@ export const ACTIONS: UIAction[] = [
   { id: "metrics.hide-amounts", kind: "view", target: "none", proof: "interaction" },
   { id: "session.menu", kind: "view", target: "entity", proof: "interaction" },
   { id: "workspace.menu", kind: "view", target: "entity", proof: "interaction" },
-  { id: "machine.menu", kind: "view", target: "none", proof: "interaction" },
   { id: "session.pin", kind: "view", target: "entity", proof: "interaction" },
   { id: "session.mark-read", kind: "kernel-mutation", target: "entity", proof: "interaction" },
   { id: "session.pause", kind: "kernel-mutation", target: "entity", proof: "interaction" },
@@ -244,7 +242,6 @@ export const ACTIONS: UIAction[] = [
   { id: "git.branch", kind: "kernel-mutation", target: "none", proof: "authority-effect" },
 
   // ── What is waiting to be sent ───────────────────────────────────────────
-  { id: "queue.edit", kind: "kernel-mutation", target: "entity", proof: "interaction" },
   // Giving a session a name of your own. The sidebar's tree and the pane tabs
   // rename the same session through the same host call, so it is one id.
   { id: "session.auto-name", kind: "kernel-mutation", target: "entity", proof: "authority-effect" },
@@ -254,8 +251,6 @@ export const ACTIONS: UIAction[] = [
   { id: "queue.cancel", kind: "kernel-mutation", target: "entity", proof: "interaction" },
   { id: "queue.send-now", kind: "kernel-mutation", target: "entity", proof: "interaction" },
   { id: "queue.retry", kind: "repeatable", target: "entity", proof: "interaction" },
-  { id: "queue.refresh", kind: "repeatable", target: "entity", proof: "interaction" },
-  { id: "queue.move", kind: "kernel-mutation", target: "entity", proof: "interaction" },
   { id: "queue.pause", kind: "kernel-mutation", target: "none", proof: "interaction" },
 
   // ── Answers the host is blocked on. One id per port call, with the verdict
@@ -264,6 +259,14 @@ export const ACTIONS: UIAction[] = [
   { id: "decision.tool", kind: "interaction", target: "entity", proof: "authority-effect" },
   { id: "decision.full-access", kind: "kernel-mutation", target: "none", proof: "authority-effect" },
   { id: "decision.plan", kind: "interaction", target: "entity", proof: "authority-effect" },
+  { id: "decision.more", kind: "view", target: "none", proof: "interaction" },
+  { id: "composer.more-tools", kind: "view", target: "none", proof: "interaction" },
+  { id: "ext.scope", kind: "view", target: "none", proof: "interaction" },
+  { id: "ext.scope-back", kind: "navigation", target: "none", proof: "interaction" },
+  { id: "session.import-native-choose", kind: "view", target: "none", proof: "interaction" },
+  { id: "session.filter-clear", kind: "view", target: "none", proof: "interaction" },
+  { id: "queue.to-steer", kind: "kernel-mutation", target: "entity", proof: "interaction" },
+  { id: "steer.withdraw", kind: "kernel-mutation", target: "entity", proof: "interaction" },
 
   // ── Capabilities ─────────────────────────────────────────────────────────
   { id: "skill.enabled", kind: "kernel-mutation", target: "entity", proof: "authority-effect" },
@@ -657,6 +660,8 @@ export const ACTIONS: UIAction[] = [
   { id: "settings.search", kind: "view", target: "none", proof: "interaction" },
   { id: "workspace.isolate", kind: "kernel-mutation", target: "none", proof: "authority-effect" },
   { id: "reasoning.effort", kind: "kernel-mutation", target: "none", proof: "authority-effect" },
+  { id: "reasoning.effort-preview", kind: "view", target: "none", proof: "interaction" },
+  { id: "settings.sections-scroll", kind: "view", target: "none", proof: "interaction" },
   { id: "files.open", kind: "navigation", target: "none", proof: "interaction" },
   { id: "palette.pick", kind: "view", target: "entity", proof: "interaction" },
   { id: "palette.scope", kind: "view", target: "none", proof: "interaction" },

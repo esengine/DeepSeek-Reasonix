@@ -41,6 +41,10 @@ export interface Primitive {
    *  prop absent here is not an input: a primitive forwards what it declares
    *  and nothing else. */
   callbacks: Record<string, string>;
+  /** The prop that names the action at a call site, when the component writes
+   *  it into data-action itself: a call site cannot spell data-action for an
+   *  element it does not render. */
+  actionProp?: string;
 }
 
 export const PRIMITIVES: Primitive[] = [
@@ -48,6 +52,7 @@ export const PRIMITIVES: Primitive[] = [
   { file: "ui/Switch.tsx", callbacks: { onClick: "click" } },
   { file: "ui/Menu.tsx", callbacks: { onPick: "click" } },
   { file: "ui/kit/Button.tsx", callbacks: { onClick: "click" } },
+  { file: "ui/SettingRow.tsx", callbacks: { onPick: "click", onClick: "click" }, actionProp: "action" },
 ];
 
 export const LIBRARY_PRIMITIVES: { module: string; name: string; callbacks: Record<string, string> }[] = [
@@ -555,7 +560,7 @@ export function certifyRoots(sources: Map<string, string | Node>, opts: Options 
         let abstraction: "host" | "primitive" | "wiring" | "unknown" = "host";
         // Set only for a certified primitive: the contract that says which of
         // its props are inputs, so this does not fall back to reading names.
-        let contract: { callbacks: Record<string, string> } | undefined;
+        let contract: { callbacks: Record<string, string>; actionProp?: string } | undefined;
         if (/^[A-Z]/.test(el)) {
           const imp = importsOf.get(path)?.get(el);
           const decl = imp?.file ?? (declaresLocally(trees.get(path)!, imp?.name ?? el) ? path : null);
@@ -587,7 +592,8 @@ export function certifyRoots(sources: Map<string, string | Node>, opts: Options 
           (abstraction === "wiring" ? nonUser : uncertified).push(note);
           return;
         }
-        const generic = "data-action" in a ? allStrings(a["data-action"]) : null;
+        const generic = "data-action" in a ? allStrings(a["data-action"])
+          : contract?.actionProp && contract.actionProp in a ? allStrings(a[contract.actionProp]) : null;
         if (generic && handlers.length > 1) {
           refused.push({ path, line: n.loc!.start.line, why: "AMBIGUOUS_ELEMENT_ACTION", detail: handlers.map((h) => h.name).join("+") });
         }

@@ -22,7 +22,7 @@
 
 .apv-more { display: none; }
 [data-fold~="phone"] .flow .call[data-approval] .apv-ft { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; padding: 10px 12px; }
-[data-fold~="phone"] .flow .call[data-approval] .apv-ft .btn { box-sizing: border-box; width: 100%; justify-self: stretch; height: 44px; min-height: 44px; display: grid; place-items: center; padding: 0 10px; border-radius: 10px; font: var(--w-med) var(--fs-lead)/1 var(--ui); }
+[data-fold~="phone"] .flow .call[data-approval] .apv-ft .btn { box-sizing: border-box; width: 100%; justify-self: stretch; height: 44px; min-height: 44px; display: grid; place-items: center; padding: 0 10px; border-radius: var(--r-md); font: var(--w-med) var(--fs-lead)/1 var(--ui); }
 [data-fold~="phone"] .flow .call[data-approval] .apv-ft .btn[data-deny] { order: 0; border: 1px solid var(--border); background: transparent; color: var(--err-ink); }
 [data-fold~="phone"] .flow .call[data-approval] .apv-ft .btn[data-primary] { order: 1; border: 0; background: var(--accent); color: var(--accent-fg); }
 [data-fold~="phone"] .flow .call[data-approval] .apv-ft .btn:not([data-primary], [data-deny]) { display: none; order: 2; grid-column: 1 / -1; }

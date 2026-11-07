@@ -32,12 +32,12 @@ const CONSENT_LABEL: Record<string, string> = {
 // in the page, in one strip per outcome.
 function RestoreDialog({ title, onClose, footer, wide, children }: { title: string; onClose: () => void; footer: ReactNode; wide?: boolean; children: ReactNode }) {
   return createPortal(
-    <div className="ns-veil" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-      <div className="ns-dlg bk-dlg" data-wide={wide ? "" : undefined} role="dialog" aria-modal="true" aria-label={title}
+    <div className="ns-veil" data-action-mousedown="layer.dismiss" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="ns-dlg bk-dlg" data-wide={wide ? "" : undefined} role="dialog" aria-modal="true" aria-label={title} data-action-keydown="layer.dismiss"
         onKeyDown={(e) => { if (e.key === "Escape") { e.stopPropagation(); onClose(); } }}>
         <header>
           <h3>{title}</h3>
-          <button type="button" className="ns-x" aria-label={t("common.close")} title={t("common.close")} onClick={onClose}><StudioIcon name="close" /></button>
+          <button type="button" className="ns-x" data-action="layer.dismiss" aria-label={t("common.close")} title={t("common.close")} onClick={onClose}><StudioIcon name="close" /></button>
         </header>
         <div className="bk-dlg-body">{children}</div>
         <footer>{footer}</footer>
@@ -162,7 +162,7 @@ export function BackupRestore({ port, source, onClose }: { port: AgentPort; sour
         <div className="bk-fields" data-one="">
           <label className="grow">
             <span>{t("data.passphrase")}</span>
-            <input autoFocus data-action="backup.passphrase" data-target="open" type="password" autoComplete="current-password" disabled={busy} value={pass} onChange={(e) => setPass(e.target.value)}
+            <input autoFocus data-action-change="backup.passphrase" data-action-keydown="backup.restore" data-target="open" type="password" autoComplete="current-password" disabled={busy} value={pass} onChange={(e) => setPass(e.target.value)}
               onKeyDown={(e) => { if (e.key === "Enter" && pass && !busy) void open(); }} />
           </label>
         </div>

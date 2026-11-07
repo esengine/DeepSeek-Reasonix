@@ -19,7 +19,7 @@ describe("the model menu as a sheet on a phone", () => {
     const sheet = rule(S);
     expect(sheet).toMatch(/position:\s*fixed/);
     expect(sheet).toMatch(/inset:\s*auto 0 0 0/);
-    expect(sheet).toMatch(/border-radius:\s*15px 15px 0 0/);
+    expect(sheet).toMatch(/border-radius:\s*var\(--r-lg\) var\(--r-lg\) 0 0/);
     expect(sheet).toMatch(/padding:\s*8px 10px 18px/);
     expect(sheet).toMatch(/background:\s*var\(--surface\)/);
     expect(sheet).toMatch(/overflow:\s*hidden/);
@@ -57,7 +57,7 @@ describe("the model menu as a sheet on a phone", () => {
     const row = rule(S + " button.mi");
     expect(row).toMatch(/min-height:\s*36px/);
     expect(row).toMatch(/padding:\s*0 10px/);
-    expect(row).toMatch(/border-radius:\s*8px/);
+    expect(row).toMatch(/border-radius:\s*var\(--r-sm\)/);
     expect(rule(S + " button.mi .lb")).toMatch(/font:\s*var\(--w-med\) var\(--fs-ui\)\/1\.3 var\(--mono\)/);
     expect(rule(S + " :is(.vendor-mark, .mi-mono)")).toMatch(/width:\s*16px/);
     expect(rule(S + " .menu-rows .mi.head")).toMatch(/min-height:\s*26px/);
@@ -83,7 +83,7 @@ describe("the reasoning depth line", () => {
 
   it("is a card whose header sets the level on the left and the model on the right", () => {
     expect(track("\n.effort-slider")).toMatch(/background:\s*var\(--overlay\)/);
-    expect(track("\n.effort-slider")).toMatch(/border-radius:\s*14px/);
+    expect(track("\n.effort-slider")).toMatch(/border-radius:\s*var\(--r-lg\)/);
     const head = track(".effort-slider .es-head");
     expect(head).toMatch(/display:\s*flex/);
     expect(head).toMatch(/justify-content:\s*space-between/);

@@ -56,7 +56,7 @@ const undeclared = census.roots.filter((r) => !r.actions.length);
 // denominator that grows because the instrument was corrected is not the same
 // event as one that grows because debt was added, and numbers either side of
 // that change do not compare.
-const UNDECLARED_CEILING = 217;
+const UNDECLARED_CEILING = 210;
 
 /** One file, for holding the discovery rules themselves. */
 const only = (src: string) => certifyRoots(new Map([["src/ui/X.tsx", src]]), { resolve });
@@ -215,7 +215,7 @@ describe("what a certified primitive's call site counts as", () => {
   it("rests on that declaration: production loses those roots without it", () => {
     const blind = certifyRoots(sources, {
       resolve,
-      primitives: PRIMITIVES.map((p) => (p.file === "ui/Menu.tsx" ? { ...p, callbacks: {} } : p)),
+      primitives: PRIMITIVES.map((p) => ({ ...p, callbacks: Object.fromEntries(Object.entries(p.callbacks).filter(([prop]) => prop !== "onPick")) })),
     });
     const picks = (c: { roots: { prop?: string; actions: string[] }[] }) => c.roots.filter((r) => r.prop === "onPick");
     expect(picks(census).length).toBeGreaterThan(0);

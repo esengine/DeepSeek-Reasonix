@@ -73,7 +73,7 @@ describe("the approval card on a phone", () => {
     expect(rule(footer)).toMatch(/gap:\s*8px/);
     const button = rule(footer + " .btn");
     expect(button).toMatch(/height:\s*44px/);
-    expect(button).toMatch(/border-radius:\s*10px/);
+    expect(button).toMatch(/border-radius:\s*var\(--r-md\)/);
   });
 
   it("puts refuse on the left in the error colour and allow on the right in the accent", () => {

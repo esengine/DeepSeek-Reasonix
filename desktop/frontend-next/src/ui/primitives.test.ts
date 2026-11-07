@@ -24,15 +24,23 @@ function namesIn(n: Node): Set<string> {
   return out;
 }
 
-/** Functions this file declares, by the name they are reached through. */
+/** Functions this file declares, by the name they are reached through. A
+ *  callback handed to a child as a prop is reached through the prop's name, so
+ *  a row component that calls onTake still leads to the take() it was given. */
 function localsOf(t: Node): Map<string, Node> {
   const out = new Map<string, Node>();
+  const handedDown = new Map<string, Node>();
   walk(t, (n) => {
     if (n.type === "FunctionDeclaration" && (n.id as Node)?.name) out.set((n.id as Node).name as string, n);
     if (n.type === "VariableDeclarator" && (n.id as Node)?.type === "Identifier" && n.init) {
       out.set((n.id as Node).name as string, n.init as Node);
     }
+    if (n.type === "JSXAttribute" && typeof (n.name as Node)?.name === "string") {
+      const v = n.value as Node | undefined;
+      if (v?.type === "JSXExpressionContainer") handedDown.set((n.name as Node).name as string, v.expression as Node);
+    }
   });
+  for (const [name, body] of handedDown) if (!out.has(name)) out.set(name, body);
   return out;
 }
 

@@ -38,6 +38,8 @@ try {
     check(`${context}: one hover ground across the row`, grounds.size === 1, [...grounds].join(" / "));
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto(url.href, { waitUntil: "networkidle" });
+    const more = page.locator(".compose .turn-more");
+    if (await more.isVisible()) await more.click();
     const chip = page.locator(turns ? ".compose .studio-branch" : ".compose .worktree-trigger").first();
     await chip.click();
     check(`${context}: a narrow-pane pointer click opens the workspace menu`, await chip.getAttribute("aria-expanded") === "true");

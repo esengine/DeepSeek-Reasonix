@@ -302,6 +302,7 @@ export const SETTINGS: SettingEntry[] = [
   { section: "appearance", anchor: "contrast", title: "look.text_contrast", scope: "machine", apply: "immediate", keywords: ["柔和", "对比"] },
   { section: "appearance", anchor: "effects", title: "look.visual_effects", scope: "machine", apply: "immediate", keywords: ["磨砂", "模糊", "动画", "显卡", "gpu", "性能", "省电", "blur"] },
   { section: "common", anchor: "mode", title: "settings.light_and_dark", scope: "machine", apply: "immediate", keywords: ["深色", "浅色", "跟随系统", "定时", "时间段", "schedule", "dark", "light"] },
+  { section: "appearance", anchor: "advanced-look", title: "look.advanced_look", scope: "machine", apply: "immediate", keywords: ["高级外观", "导入主题", "自定义颜色", "theme", "colours"] },
   { section: "appearance", anchor: "scheme", page: true, title: "settings.palette", scope: "machine", apply: "immediate", keywords: ["主题", "theme", "色板"] },
 ];
 

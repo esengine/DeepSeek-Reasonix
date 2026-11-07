@@ -3,7 +3,7 @@ import { SETTING_SCREEN, settingScreen, unknownScreens } from "./settingScreens"
 
 describe("where the settings sheet draws a setting the model names", () => {
   it("opens the file delivery switch for its canonical setting id", () => {
-    expect(settingScreen("tools.present_files")).toBe("tools:present-files");
+    expect(settingScreen("tools.present_files")).toBe("display:present-files");
   });
   it("only names rows the sheet really has", () => {
     expect(unknownScreens()).toEqual([]);

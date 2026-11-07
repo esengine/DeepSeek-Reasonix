@@ -60,6 +60,12 @@ export function EffortSlider({ name, model, levels, current, onPick }: {
         <input
           type="range" min={0} max={last} step="any" value={pos}
           aria-label={name} aria-valuetext={levels[near].label}
+          data-action-change="reasoning.effort-preview"
+          data-action-pointerdown="reasoning.effort-preview"
+          data-action-pointerup="reasoning.effort"
+          data-action-pointercancel="reasoning.effort"
+          data-action-keydown="reasoning.effort-preview"
+          data-action-keyup="reasoning.effort"
           onChange={(e) => setValue(Number(e.target.value))}
           onPointerDown={() => setHeld(true)}
           onPointerUp={release} onPointerCancel={release}

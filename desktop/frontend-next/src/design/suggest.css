@@ -5,7 +5,7 @@
 .msug-line > b { min-width: 0; overflow: hidden; color: var(--text); font-weight: var(--w-semi); text-overflow: ellipsis; white-space: nowrap; }
 .msug-meta { flex: none; color: var(--faint); font-size: var(--fs-meta); }
 .msug-acts { display: flex; align-items: center; gap: 6px; margin-inline-start: 22px; }
-.msug-acts > button { height: 28px; padding: 0 14px; border: 1px solid var(--border); border-radius: 7px; background: none; color: var(--text); font: var(--w-med) var(--fs-ui) var(--ui); cursor: pointer; }
+.msug-acts > button { height: 28px; padding: 0 14px; border: 1px solid var(--border); border-radius: var(--r-sm); background: none; color: var(--text); font: var(--w-med) var(--fs-ui) var(--ui); cursor: pointer; }
 .msug-acts > button[data-primary] { border-color: transparent; background: var(--accent); color: var(--on-accent, #fff); }
 .msug-acts > button[data-action="memory.suggest-dismiss"] { border-color: transparent; color: var(--muted); }
 .msug-acts > button:disabled { opacity: .5; cursor: default; }
@@ -17,6 +17,6 @@
 .memproactive b { color: var(--text); font: var(--w-semi) var(--fs-ui) var(--ui); }
 .memproactive span { color: var(--faint); font: var(--w-med) var(--fs-meta)/1.5 var(--ui); }
 .memproactive-err { color: var(--danger, #c0392b) !important; }
-.memproactive-seg { display: inline-flex; flex: none; overflow: hidden; border: 1px solid var(--border); border-radius: 8px; }
+.memproactive-seg { display: inline-flex; flex: none; overflow: hidden; border: 1px solid var(--border); border-radius: var(--r-sm); }
 .memproactive-seg > button { padding: 6px 12px; border: 0; background: none; color: var(--muted); font: var(--w-med) var(--fs-meta) var(--ui); cursor: pointer; }
 .memproactive-seg > button[data-on] { background: var(--overlay); color: var(--text); }

@@ -40,15 +40,15 @@ export function NativeSessionImport({ hub, workspace, onImported }: { hub: HubPo
     {message && <div className="ns-done" role="status"><StudioIcon name="check" />{message}</div>}
     {error && <div className="ns-fail" role="alert"><StudioIcon name="warning" />{error}</div>}
     {asking && createPortal(
-      <div className="ns-veil" onMouseDown={(e) => { if (e.target === e.currentTarget) setAsking(false); }}>
-        <div className="ns-dlg" role="dialog" aria-modal="true" aria-labelledby="ns-title"
+      <div className="ns-veil" data-action-mousedown="layer.dismiss" onMouseDown={(e) => { if (e.target === e.currentTarget) setAsking(false); }}>
+        <div className="ns-dlg" role="dialog" aria-modal="true" aria-labelledby="ns-title" data-action-keydown="layer.dismiss"
           onKeyDown={(e) => { if (e.key === "Escape") { e.stopPropagation(); setAsking(false); } }}>
           <header>
             <h3 id="ns-title">{t("data.import_a_native_session")}</h3>
-            <button type="button" className="ns-x" aria-label={t("common.close")} title={t("common.close")} onClick={() => setAsking(false)}><StudioIcon name="close" /></button>
+            <button type="button" className="ns-x" data-action="layer.dismiss" aria-label={t("common.close")} title={t("common.close")} onClick={() => setAsking(false)}><StudioIcon name="close" /></button>
           </header>
           <p>{t("data.keep_the_composition_version_and")}</p>
-          <div className="ns-drop" data-over={over ? "" : undefined}
+          <div className="ns-drop" data-over={over ? "" : undefined} data-action-dragover="session.import-native-choose" data-action-dragleave="session.import-native-choose" data-action-drop="session.import-native-choose"
             onDragOver={(e) => { e.preventDefault(); setOver(true); }}
             onDragLeave={() => setOver(false)}
             onDrop={(e) => { e.preventDefault(); setOver(false); take(e.dataTransfer.files?.[0]); }}>
@@ -56,7 +56,7 @@ export function NativeSessionImport({ hub, workspace, onImported }: { hub: HubPo
             <span>{t("data.drop_a_session_json_file_here")}</span>
             <button type="button" className="btn" autoFocus data-action="session.import-native-choose" onClick={() => input.current?.click()}>{t("data.choose_a_session_json_file")}</button>
           </div>
-          <footer><button type="button" className="ns-cancel" onClick={() => setAsking(false)}>{t("common.cancel")}</button></footer>
+          <footer><button type="button" className="ns-cancel" data-action="layer.dismiss" onClick={() => setAsking(false)}>{t("common.cancel")}</button></footer>
         </div>
       </div>,
       document.body,

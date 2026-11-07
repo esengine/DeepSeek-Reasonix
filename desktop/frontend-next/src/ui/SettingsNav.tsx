@@ -5,6 +5,7 @@ import { arrowTabs } from "./tablist";
 import { pagesOf } from "./settingPages";
 import { UpdateDot } from "./UpdateDot";
 import { useFolded } from "./usefold";
+import { listenAction } from "./listen";
 
 interface Props {
   at: Section;
@@ -25,13 +26,13 @@ export function SettingsNav({ at, values, shown, danger, disabled, onSelect, pag
   useEffect(() => {
     const nav = strip.current;
     if (!phone || !nav) return;
-    const sideways = (e: WheelEvent) => {
-      if (e.deltaX !== 0 || e.deltaY === 0) return;
-      nav.scrollLeft += e.deltaY;
-      e.preventDefault();
+    const sideways = (e: Event) => {
+      const wheel = e as WheelEvent;
+      if (wheel.deltaX !== 0 || wheel.deltaY === 0) return;
+      nav.scrollLeft += wheel.deltaY;
+      wheel.preventDefault();
     };
-    nav.addEventListener("wheel", sideways, { passive: false });
-    return () => nav.removeEventListener("wheel", sideways);
+    return listenAction(nav, "wheel", { action: "settings.sections-scroll", listener: sideways }, { passive: false });
   }, [phone]);
   useEffect(() => {
     if (!phone) return;

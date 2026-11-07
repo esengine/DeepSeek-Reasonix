@@ -216,7 +216,6 @@ export const EXT: Messages = {
   "ext.not_pinned": { zh: "未固定", en: "Not pinned" },
   "ext.not_previewed": { zh: "未预览", en: "Not previewed" },
   "ext.not_running": { zh: "未运行", en: "Not running" },
-  "ext.not_the_project_this_session": { zh: "不是当前会话所在的项目 —— 只能改开关", en: "Not the project this session is in — only the switches can change" },
   "ext.nothing_is_connected_right_now": { zh: "当前未连接，以下是上次连接时它返回的内容。", en: "Nothing is connected right now; this is what the service itself answered the last time it was." },
   "ext.nothing_new_that_runs": { zh: "没有新增的可执行内容。", en: "Nothing new that runs." },
   "ext.nothing_published_yet": { zh: "还没有发布过。", en: "Nothing published yet." },

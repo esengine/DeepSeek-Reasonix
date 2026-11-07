@@ -16,7 +16,6 @@ export const PLAN: Messages = {
   "plan.goal.last_reason": { zh: "最近一次判断：{reason}", en: "Latest assessment: {reason}" },
   "plan.goal.pause": { zh: "暂停", en: "Pause" },
   "plan.goal.resume": { zh: "继续", en: "Resume" },
-  "plan.goal.stop_cause": { zh: "停下的原因：{cause}", en: "Why it stopped: {cause}" },
   "plan.goal.usage": { zh: "目标用量", en: "Goal usage" },
   "plan.goal.usage_line": { zh: "{requests} 次请求 · {tokens} tokens · 用时 {time}", en: "{requests} requests · {tokens} tokens · {time}" },
   "plan.now": { zh: "正在做：{step}", en: "Working on: {step}" },
