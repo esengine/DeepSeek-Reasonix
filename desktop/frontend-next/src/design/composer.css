@@ -132,6 +132,7 @@
 :root .composer-menu.studio-model-menu .studio-item-line { flex-wrap: nowrap; align-items: center; gap: 8px; }
 :root .composer-menu.studio-model-menu .studio-item-line > .lb { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: var(--w-med) var(--fs-ui)/1.3 var(--ui); }
 :root .composer-menu.studio-model-menu .studio-item-meta { flex: none; color: var(--faint); font: var(--w-reg) var(--fs-micro)/1.3 var(--ui); white-space: nowrap; }
+:root .composer-menu.studio-model-menu .studio-item-badge { flex: none; white-space: nowrap; }
 :root .composer-menu.studio-model-menu .mi[data-on]::after { color: var(--net-ink); }
 :root .composer-menu.studio-effort-menu .mi.head { padding: 12px 14px 8px; }
 :root .composer-menu.studio-effort-menu .mi.head:first-child .lb { color: var(--text); font: var(--w-semi) var(--fs-ui)/1.3 var(--ui); }

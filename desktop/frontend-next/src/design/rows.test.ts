@@ -32,4 +32,10 @@ describe("session and project rows follow the board", () => {
     expect(rule(".ds-row:is(:hover, :focus-within) > :is(.ds-meta, .ds-pin)")).toMatch(/display:\s*none/);
     expect(rule(".ds-row:is(:hover, :focus-within) .ds-more")).toMatch(/display:\s*grid/);
   });
+
+  it("keeps the pin button hidden until the row is hovered or focused", () => {
+    expect(rule(".ds-row .sessquick, .ds-row .sesspin-action")).toMatch(/display:\s*none/);
+    expect(rule(".ds-row .sessquick > button, .ds-row .sesspin-action")).not.toMatch(/display:/);
+    expect(rule(".ds-row:is(:hover, :focus-within) .sesspin-action")).toMatch(/display:\s*grid/);
+  });
 });

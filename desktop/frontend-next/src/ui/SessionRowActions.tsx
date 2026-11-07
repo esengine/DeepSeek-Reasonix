@@ -12,14 +12,18 @@ export function SessionPinAction({ target, title, pinned, enabled, disabled, onP
   enabled: boolean;
   onPin: () => void;
 }) {
-  if (!enabled) return pinned ? <StudioIcon name="pin" className="sesspin-marker ds-pin" aria-label={t("session.pinned")} /> : null;
-  return <button className="sesspin-action" data-action="session.pin" data-target={target}
-    aria-pressed={pinned} disabled={disabled}
-    title={t(pinned ? "common.unpin" : "common.pin_session")}
-    aria-label={t(pinned ? "session.unpin_session_title" : "session.pin_session_title", { title })}
-    onClick={(event) => { event.stopPropagation(); onPin(); }}>
-    <StudioIcon name="pin" aria-label={pinned ? t("session.pinned") : undefined} />
-  </button>;
+  const marker = pinned ? <StudioIcon name="pin" className="sesspin-marker ds-pin" aria-label={enabled ? undefined : t("session.pinned")} aria-hidden={enabled ? true : undefined} /> : null;
+  if (!enabled) return marker;
+  return <>
+    {marker}
+    <button className="sesspin-action" data-action="session.pin" data-target={target}
+      aria-pressed={pinned} disabled={disabled}
+      title={t(pinned ? "common.unpin" : "common.pin_session")}
+      aria-label={t(pinned ? "session.unpin_session_title" : "session.pin_session_title", { title })}
+      onClick={(event) => { event.stopPropagation(); onPin(); }}>
+      <StudioIcon name="pin" aria-label={pinned ? t("session.pinned") : undefined} />
+    </button>
+  </>;
 }
 
 export function SessionArchiveAction({ target, title, archived, disabled, onArchive }: Target & {

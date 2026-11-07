@@ -48,8 +48,10 @@
 @media (hover: none) { .ds-row .ds-more { display: grid; } }
 .ds-row .ds-pin { width: 12px; height: 12px; flex: none; }
 .ds-row .sessquick, .ds-row .sesspin-action { flex: none; display: none; }
-.ds-row:is(:hover, :focus-within) .sessquick, .ds-row:is(:hover, :focus-within) .sesspin-action { display: flex; }
-.ds-row .sessquick > button, .ds-row .sesspin-action { width: 24px; height: 28px; padding: 0; display: grid; place-items: center; border: 0; border-radius: var(--r-xs); background: transparent; color: var(--faint); cursor: pointer; }
+.ds-row:is(:hover, :focus-within) .sessquick { display: flex; }
+.ds-row:is(:hover, :focus-within) .sesspin-action { display: grid; }
+.ds-row .sessquick > button, .ds-row .sesspin-action { width: 24px; height: 28px; padding: 0; place-items: center; border: 0; border-radius: var(--r-xs); background: transparent; color: var(--faint); cursor: pointer; }
+.ds-row .sessquick > button { display: grid; }
 .ds-row .sessquick > button:hover, .ds-row .sesspin-action:hover { background: var(--raised); color: var(--text); }
 .ds-row .sessquick > button:disabled, .ds-row .sesspin-action:disabled { opacity: .35; cursor: default; }
 .ds-row .sessquick .studio-icon, .ds-row .sesspin-action .studio-icon { width: 14px; height: 14px; }
