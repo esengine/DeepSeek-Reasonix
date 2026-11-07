@@ -89,6 +89,9 @@ func Move(ctx context.Context, plan Plan, report func(Progress)) error {
 	if err := writeJournal(journal); err != nil {
 		return err
 	}
+	if err := os.MkdirAll(plan.To, 0o755); err != nil {
+		return err
+	}
 
 	owned := presentEntries(plan.From, movedEntries(plan.Root))
 	copied, err := copyOwned(ctx, owned, plan, notify)
