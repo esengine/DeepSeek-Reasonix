@@ -32,7 +32,7 @@ func TestEffectSettingToolCannotChangeOrDiscloseUserPersona(t *testing.T) {
 			default:
 			}
 			result := rec.toolResult()
-			for _, want := range []string{"setting.guarded", "(fix: setting op=open id=" + tc.id + ")"} {
+			for _, want := range []string{"setting.guarded", "(fix: tool:setting op=open id=" + tc.id + ")"} {
 				if !strings.Contains(result, want) {
 					t.Fatalf("tool result = %q, want %q", result, want)
 				}

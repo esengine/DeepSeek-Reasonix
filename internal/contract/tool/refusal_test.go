@@ -7,7 +7,7 @@ import (
 
 func TestARefusalRendersTheSettingThatWouldLiftIt(t *testing.T) {
 	r := Refusal{Code: "peer.disabled", Message: "Messages between sessions are off.", Remedy: &Remedy{Op: RemedyPropose, Setting: "peers.enabled", Value: json.RawMessage(`true`)}}
-	want := "Messages between sessions are off. (refusal: peer.disabled) (fix: setting op=propose id=peers.enabled value=true)"
+	want := "Messages between sessions are off. (refusal: peer.disabled) (fix: tool:setting op=propose id=peers.enabled value=true)"
 	if got := r.String(); got != want {
 		t.Fatalf("got %q, want %q", got, want)
 	}
@@ -15,7 +15,7 @@ func TestARefusalRendersTheSettingThatWouldLiftIt(t *testing.T) {
 
 func TestARemedyThatOnlyOpensCarriesNoValue(t *testing.T) {
 	r := Refusal{Code: "x.y", Remedy: &Remedy{Op: RemedyOpen, Setting: "permissions.mode", Value: json.RawMessage(`"yolo"`)}}
-	if got, want := r.String(), "(refusal: x.y) (fix: setting op=open id=permissions.mode)"; got != want {
+	if got, want := r.String(), "(refusal: x.y) (fix: tool:setting op=open id=permissions.mode)"; got != want {
 		t.Fatalf("got %q, want %q", got, want)
 	}
 }

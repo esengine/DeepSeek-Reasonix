@@ -25,9 +25,9 @@ const (
 
 func (r Remedy) String() string {
 	if r.Op == RemedyPropose && len(r.Value) > 0 {
-		return fmt.Sprintf("setting op=%s id=%s value=%s", r.Op, r.Setting, r.Value)
+		return fmt.Sprintf("tool:setting op=%s id=%s value=%s", r.Op, r.Setting, r.Value)
 	}
-	return fmt.Sprintf("setting op=%s id=%s", r.Op, r.Setting)
+	return fmt.Sprintf("tool:setting op=%s id=%s", r.Op, r.Setting)
 }
 
 // SettingInfo is one row of what the model may learn about a setting.

@@ -172,7 +172,7 @@ func TestEffectTheModelCannotProposeAGuardedSetting(t *testing.T) {
 	default:
 	}
 	result := rec.toolResult()
-	for _, want := range []string{"setting.guarded", "(fix: setting op=open id=permissions.mode)"} {
+	for _, want := range []string{"setting.guarded", "(fix: tool:setting op=open id=permissions.mode)"} {
 		if !strings.Contains(result, want) {
 			t.Fatalf("tool result = %q, want %q", result, want)
 		}
