@@ -11,6 +11,7 @@
 @import "./plan.css" layer(design);
 @import "./phone.css" layer(design);
 @import "./phone-menu.css" layer(design);
+@import "./phone-settings.css" layer(design);
 @import "./subagent.css" layer(design);
 @import "./jobs.css" layer(design);
 @import "./workbench.css" layer(design);
