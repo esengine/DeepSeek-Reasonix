@@ -98,6 +98,8 @@ it("leaves the rendered Workbench untouched when Markdown polls are unchanged", 
   await user.click(await screen.findByRole("button", { name: "notes.md" }));
   await screen.findByRole("heading", { name: "Saved" });
   await act(async () => {});
+  // Whatever the open itself left pending lands before the baseline, not in it.
+  await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
   commits.mockClear();
   await tick();
   await tick();
