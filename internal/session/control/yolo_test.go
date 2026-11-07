@@ -968,6 +968,23 @@ func TestSetAutoApproveToolsDoesNotDrainPendingAsk(t *testing.T) {
 }
 
 func TestDismissedAskCancelsTurnWithoutModelContinuation(t *testing.T) {
+	dismissAskAndCheckTheTurnStops(t)
+}
+
+// The answer and the cancel that marks it a skip are two steps. The turn must
+// read as skipped whichever of them it meets first, so the scenario is run
+// often enough for the window between them to be hit under the race detector.
+func TestDismissedAskIsASkipWhicheverStepTheTurnMeetsFirst(t *testing.T) {
+	for range 400 {
+		dismissAskAndCheckTheTurnStops(t)
+		if t.Failed() {
+			return
+		}
+	}
+}
+
+func dismissAskAndCheckTheTurnStops(t *testing.T) {
+	t.Helper()
 	askCh := make(chan event.Ask, 1)
 	turnDone := make(chan event.Event, 1)
 	c := New(Options{
