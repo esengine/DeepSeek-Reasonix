@@ -153,3 +153,43 @@ it("draws no list when nothing was skipped", async () => {
   await pickOld();
   expect(screen.queryByText(/个会话没有导入/)).toBeNull();
 });
+
+function movable(plan: (root: string, dir: string) => Promise<{ ok: boolean; root: string; from: string; to: string; bytes: number; files: number; free: number; need: number; refusals: [] }>) {
+  const port = {
+    storage: vi.fn(async () => ({ roots: [root("state", { relocatable: true, bytes: 10, files: 1 })], editable: true })),
+    planStorageMove: vi.fn(plan),
+  } as unknown as AgentPort;
+  render(<Storage port={port} hub={{} as HubPort} workspace="" onRecovered={() => {}} />);
+  return port;
+}
+
+const answered = async (_root: string, dir: string) => ({ ok: true, root: "state", from: "/a", to: dir, bytes: 10, files: 1, free: 1e9, need: 1e6, refusals: [] as [] });
+
+it("asks the kernel to plan a move once the path stops changing, not once per keystroke", async () => {
+  const port = movable(answered);
+  await flush();
+  fireEvent.click(screen.getByText("移动…"));
+  const input = screen.getByRole("textbox") as HTMLInputElement;
+  for (const typed of ["D", "D:", "D:\\", "D:\\t", "D:\\te"]) fireEvent.change(input, { target: { value: typed } });
+  expect(port.planStorageMove).not.toHaveBeenCalled();
+  await act(async () => { await vi.advanceTimersByTimeAsync(600); });
+  expect(port.planStorageMove).toHaveBeenCalledTimes(1);
+  expect(port.planStorageMove).toHaveBeenCalledWith("state", "D:\\te");
+});
+
+it("drops an answer for a path the person has already typed past", async () => {
+  let release: (v: Awaited<ReturnType<typeof answered>>) => void = () => {};
+  movable((r, d) =>
+    d === "/slow" ? new Promise((res) => { release = res; }) : answered(r, d).then((p) => ({ ...p, ok: false })),
+  );
+  await flush();
+  fireEvent.click(screen.getByText("移动…"));
+  const input = screen.getByRole("textbox") as HTMLInputElement;
+  fireEvent.change(input, { target: { value: "/slow" } });
+  await act(async () => { await vi.advanceTimersByTimeAsync(600); });
+  fireEvent.change(input, { target: { value: "/fast" } });
+  await act(async () => { await vi.advanceTimersByTimeAsync(600); });
+  await act(async () => { release(await answered("state", "/slow")); });
+  const start = screen.getByRole("button", { name: /开始迁移/ }) as HTMLButtonElement;
+  expect(start.disabled).toBe(true);
+});

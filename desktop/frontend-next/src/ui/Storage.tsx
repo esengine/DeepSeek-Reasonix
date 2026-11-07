@@ -43,6 +43,8 @@ function within<T>(work: Promise<T>, ms: number): Promise<T> {
   });
 }
 
+const PLAN_DELAY_MS = 400;
+
 export function Storage({ port, hub, workspace, onRecovered }: { port: AgentPort; hub: HubPort; workspace: string; onRecovered: () => void }) {
   const [state, setState] = useState<StorageState | null>(null);
   const [error, setError] = useState("");
@@ -117,11 +119,22 @@ export function Storage({ port, hub, workspace, onRecovered }: { port: AgentPort
     if (picking) input.current?.focus();
   }, [picking]);
 
+  const planTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const planSeq = useRef(0);
+  useEffect(() => () => clearTimeout(planTimer.current), []);
+
   const check = useCallback(
     (root: string, dir: string) => {
+      clearTimeout(planTimer.current);
+      const seq = ++planSeq.current;
       setPlan(null);
       if (!dir.trim()) return;
-      port.planStorageMove(root, dir).then(setPlan).catch(() => setPlan(null));
+      planTimer.current = setTimeout(() => {
+        port
+          .planStorageMove(root, dir)
+          .then((answer) => seq === planSeq.current && setPlan(answer))
+          .catch(() => seq === planSeq.current && setPlan(null));
+      }, PLAN_DELAY_MS);
     },
     [port],
   );
