@@ -636,7 +636,7 @@ function PaneView({ port, hub, rt, title, active, visible, sideHost, side, onFoc
             child of this region may grow without bound. */}
         <PlanFold plan={s.plan} goal={status?.goal} goalStatus={status?.goalStatus} goalRuntime={status?.goalRuntime} shown={tab === "flow"} running={running} paused={blocked}
           cardInView={!!planStarted && planSeen} onJump={planStarted ? () => setLandAt((was) => ({ item: planStarted, n: (was?.n ?? 0) + 1 })) : undefined}
-          onGoal={(command) => void port.submit(`/goal ${command}`).catch(notify)} />
+          onGoal={(command) => void port.submit(`/goal ${command}`).then(refreshStatus, notify)} />
         {tab === "flow" && <RunLine label={worktreePhase ? t(["failed", "cleanup_failed"].includes(worktreePhase) ? "app.creation_failed" : worktreePhase === "cancelled" ? "app.creation_cancelled" : "app.preparing_workspace") : chipLabel(s, running)} running={running} blocked={blocked} since={s.running ? s.runSince : undefined} sent={sent} received={received} estimated={s.outLive > 0}>
           <AgentCompositionPicker port={port} binding={status?.agentComposition} locked={status?.agentCompositionLocked} running={running} onChanged={refreshStatus} onSettings={() => onSettings("persona")} onError={notify} />
         </RunLine>}
