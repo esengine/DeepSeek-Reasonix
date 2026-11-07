@@ -344,12 +344,9 @@ func (c *Controller) AnswerQuestionFrom(id string, answers []event.AskAnswer, vi
 		return err
 	}
 	c.recordAskDecisionReceipt(id, pending, answers, "answered", via)
-	// No selections is the explicit "skip" path: the turn ends as finished
-	// instead of feeding a dismissal back to the model (#6869). An external
-	// party's form is refused to that party, and the turn goes on. The skip is
-	// marked before the answer is delivered: a turn that gets its answer first
-	// can run on, or end, before the gate knows why, and then reads as an
-	// interruption or hands the model a dismissal.
+	// No selections is the explicit "skip" path: the turn ends as finished (#6869).
+	// An external party's form is refused to that party. The skip is marked before
+	// the answer is delivered, or a turn that gets it first reads as interrupted.
 	if !askAnswersHaveSelection(answers) && pending.origin == nil {
 		c.mu.Lock()
 		activeTurn := c.gate.cancel != nil
