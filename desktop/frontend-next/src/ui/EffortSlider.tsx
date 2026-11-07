@@ -1,9 +1,9 @@
-import { useState, type CSSProperties } from "react";
+import { useEffect, useState, type CSSProperties, type KeyboardEvent } from "react";
 import type { MenuItem } from "./Menu";
 
-/** The reasoning levels as one slider. Moving it only previews a level; letting
- *  go chooses it, so dragging across four steps asks the model once, not four
- *  times. */
+/** The reasoning levels as one slider. It moves continuously under the finger
+ *  and settles on the nearest level when let go; moving it only previews, and
+ *  letting go chooses, so dragging across four levels asks the model once. */
 export function EffortSlider({ name, model, levels, current, onPick }: {
   name: string;
   model?: string;
@@ -11,32 +11,63 @@ export function EffortSlider({ name, model, levels, current, onPick }: {
   current: string;
   onPick: (value: string) => void;
 }) {
-  const at = Math.max(0, levels.findIndex((level) => level.value === current));
-  const [preview, setPreview] = useState<number | null>(null);
-  const shown = preview ?? at;
-  const commit = () => {
-    if (preview !== null && preview !== at) onPick(levels[preview].value);
-    setPreview(null);
-  };
   const last = levels.length - 1;
+  const clamp = (n: number) => Math.min(last, Math.max(0, n));
+  const at = Math.max(0, levels.findIndex((level) => level.value === current));
+  const [value, setValue] = useState<number | null>(null);
+  const [held, setHeld] = useState(false);
+  const pos = value ?? at;
+  const near = clamp(Math.round(pos));
+
+  // Once the level it settled on is the current one, the position is the
+  // current one's again, and nothing is left to remember.
+  useEffect(() => {
+    if (!held && value !== null && clamp(Math.round(value)) === at) setValue(null);
+  });
+
+  const release = () => {
+    setHeld(false);
+    if (value === null) return;
+    const to = clamp(Math.round(value));
+    setValue(to);
+    if (to !== at) onPick(levels[to].value);
+  };
+  const step = (e: KeyboardEvent<HTMLInputElement>) => {
+    const to = e.key === "ArrowRight" || e.key === "ArrowUp" ? near + 1
+      : e.key === "ArrowLeft" || e.key === "ArrowDown" ? near - 1
+      : e.key === "Home" ? 0
+      : e.key === "End" ? last
+      : null;
+    if (to === null) return;
+    e.preventDefault();
+    setValue(clamp(to));
+  };
+
   return (
     <div className="effort-slider">
       <div className="es-head">
-        <span className="es-name">{levels[shown].label}</span>
+        <span className="es-name">{levels[near].label}</span>
         {model && <span className="es-model">{model}</span>}
       </div>
-      <div className="es-track" style={{ "--p": shown / last } as CSSProperties}>
+      <div className="es-track" data-drag={held ? "" : undefined} style={{ "--p": pos / last } as CSSProperties}>
         <span className="es-fill" aria-hidden="true"><span className="es-glow" /></span>
+        {levels.map((level, i) => (
+          <i key={level.value} className="es-tick" aria-hidden="true" data-on={i <= near ? "" : undefined} style={{ "--k": i / last } as CSSProperties} />
+        ))}
+        <span className="es-thumb" aria-hidden="true" />
         <input
-          type="range" min={0} max={last} step={1} value={shown}
-          aria-label={name} aria-valuetext={levels[shown].label}
-          onChange={(e) => setPreview(Number(e.target.value))}
-          onPointerUp={commit} onKeyUp={commit} onBlur={commit}
+          type="range" min={0} max={last} step="any" value={pos}
+          aria-label={name} aria-valuetext={levels[near].label}
+          onChange={(e) => setValue(Number(e.target.value))}
+          onPointerDown={() => setHeld(true)}
+          onPointerUp={release} onPointerCancel={release}
+          onKeyDown={step} onKeyUp={release} onBlur={release}
         />
       </div>
-      <div className="es-ends" aria-hidden="true">
-        <span>{levels[0].label}</span>
-        <span>{levels[last].label}</span>
+      <div className="es-marks" aria-hidden="true">
+        {levels.map((level, i) => (
+          <span key={level.value} className="es-mark" data-on={i === near ? "" : undefined} style={{ "--k": i / last } as CSSProperties}>{level.label}</span>
+        ))}
       </div>
     </div>
   );
