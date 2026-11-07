@@ -20,9 +20,6 @@ type summaryProjectionCommit struct {
 	activeTurn                                       int64
 	trigger, summary, inputHash, outputHash          string
 	sourceTokens, projectionTokens                   int
-	// summaryUsage is what the transaction spent producing this projection,
-	// which has nothing to do with sourceTokens above.
-	summaryUsage sessionstore.CompactionUsage
 }
 
 // commitSummaryProjection CAS-installs a checkpoint under compactionMu:
@@ -76,7 +73,6 @@ func (a *contextWindow) summaryProjectionState(commit summaryProjectionCommit) s
 		InputHash: commit.inputHash, OutputHash: commit.outputHash, InputTokens: commit.sourceTokens,
 		ResultTokens: commit.projectionTokens, SavedTokens: max(0, commit.sourceTokens-commit.projectionTokens),
 		SummaryHash: summaryHash, CacheBreak: true, CreatedAt: now,
-		SummaryUsage: commit.summaryUsage,
 	}
 	// LastReceipt is authoritative; do not mirror last_trigger/last_mode/token
 	// counters or top-level blocked_* fields (stripped again on save).

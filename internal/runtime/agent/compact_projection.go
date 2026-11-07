@@ -166,7 +166,6 @@ func (a *contextWindow) compressVisibleRange(
 	preview string,
 	instructions string,
 ) (tool.CompressResult, error) {
-	ctx, spend := withCompactionSpend(ctx)
 	a.sess.win.compactionRunMu.Lock()
 	defer a.sess.win.compactionRunMu.Unlock()
 	if !a.explicitCompressionSnapshotCurrent(snap) {
@@ -197,7 +196,7 @@ func (a *contextWindow) compressVisibleRange(
 
 	res, err := a.foldToArchive(prepared.fold, prepared.instructions)
 	summary := res.Text
-	tele := compactionTelemetryFromSummary(trigger, a.cacheState(), result.SourceTokens, res, spend.read())
+	tele := compactionTelemetryFromSummary(trigger, a.cacheState(), result.SourceTokens, res)
 	if err != nil {
 		tele.Error = err.Error()
 		a.emitCompactionTelemetry(tele)
@@ -237,7 +236,6 @@ func (a *contextWindow) compressVisibleRange(
 		transcriptVersion: snap.transcriptVersion, projectionVersion: snap.projectionVersion, generation: snap.generation,
 		activeTurn: a.activeTurnCreatedAt.Load(), trigger: trigger, summary: summary,
 		inputHash: inputHash, outputHash: outputHash, sourceTokens: result.SourceTokens, projectionTokens: projectionTokens,
-		summaryUsage: tele.SummaryUsage,
 	})
 	if err != nil {
 		if errors.Is(err, errCompressStaleContext) {
@@ -361,20 +359,11 @@ func buildVisibleCompressionProjection(visible []provider.Message, plan visibleC
 // spend is the transaction's bill, not the adopted call's usage: a repair that
 // improved nothing, failed, or was discarded was charged all the same, and the
 // answer that got kept is not the question "what did this cost" is asking.
-func compactionTelemetryFromSummary(trigger, cacheState string, sourceTokens int, res foldSummary, spend sessionstore.CompactionUsage) CompactionTelemetry {
+func compactionTelemetryFromSummary(trigger, cacheState string, sourceTokens int, res foldSummary) CompactionTelemetry {
 	return CompactionTelemetry{
 		Trigger: trigger, CacheState: cacheState, Mode: res.Mode,
-		SourceTokens:      sourceTokens,
-		ProviderRequestID: res.RequestID,
-		FoldTokens:        res.FoldTokens,
-		Spans:             spend.Calls,
-		SummaryUsage:      spend,
-		InputTokens:       spend.InputTokens,
-		OutputTokens:      spend.OutputTokens,
-		CacheHitTokens:    spend.CacheHitTokens,
-		CacheMissTokens:   spend.CacheMissTokens,
-		CacheWriteTokens:  spend.CacheWriteTokens,
-		RequestCount:      spend.RequestAttempts,
+		SourceTokens: sourceTokens,
+		FoldTokens:   res.FoldTokens,
 	}
 }
 
@@ -398,7 +387,6 @@ type compactionScope struct {
 // was foldable; callers at physical overflow must treat that as hard failure.
 // mustFree marks the fold the caller cannot proceed without.
 func (a *contextWindow) compactToProjection(ctx context.Context, trigger, instructions string, scope compactionScope, mustFree bool) (CompactionOutcome, CompactionNoopReason, error) {
-	ctx, _ = withCompactionSpend(ctx)
 	a.sess.win.compactionRunMu.Lock()
 	defer a.sess.win.compactionRunMu.Unlock()
 	activeTurn := a.activeTurnCreatedAt.Load()
@@ -492,7 +480,7 @@ func (a *contextWindow) compactToProjection(ctx context.Context, trigger, instru
 		transcriptVersion: transcriptVersion, projectionVersion: startProjectionVersion,
 		generation: startGeneration, activeTurn: activeTurn, trigger: trigger,
 		summary: summary, inputHash: viewInputHash, outputHash: viewOutputHash,
-		sourceTokens: sourceTokens, projectionTokens: projTokens, summaryUsage: tele.SummaryUsage,
+		sourceTokens: sourceTokens, projectionTokens: projTokens,
 	})
 	if err != nil {
 		a.emitCompactionAborted(trigger, compactionFailureCode(err))

@@ -12,8 +12,6 @@ import (
 type foldSummary struct {
 	Text       string
 	Mode       string
-	RequestID  string
-	Usage      *provider.Usage
 	FoldTokens int
 	Spans      int
 }
@@ -35,9 +33,8 @@ func (a *contextWindow) summaryInputTokens(msgs []provider.Message) int {
 // foldArchived writes the fold to its archive file. A failure to write it is
 // the fold's failure: nothing else stands in for the archive.
 func (a *contextWindow) foldArchived(ctx context.Context, trigger string, fold []provider.Message, instructions string, sourceTokens int) (foldSummary, CompactionTelemetry, error) {
-	spend := compactionSpendFrom(ctx)
 	res, err := a.foldToArchive(fold, instructions)
-	tele := compactionTelemetryFromSummary(trigger, a.cacheState(), sourceTokens, res, spend.read())
+	tele := compactionTelemetryFromSummary(trigger, a.cacheState(), sourceTokens, res)
 	if err != nil {
 		tele.Error = err.Error()
 	}
