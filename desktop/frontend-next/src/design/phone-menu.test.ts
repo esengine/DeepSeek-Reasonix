@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import menu from "./phone-menu.css?raw";
+const css = menu;
 import index from "./design.css?raw";
 
 const S = '[data-fold~="phone"] .composer-menu.studio-model-menu.menu-sheet';
@@ -89,10 +90,28 @@ describe("the reasoning slider", () => {
     expect(input).toMatch(/border-radius:\s*15px/);
   });
 
-  it("fills with a gradient up to the thumb and the level name wears the same gradient", () => {
-    expect(track("\n.effort-slider")).toMatch(/--track:\s*linear-gradient\(90deg, var\(--net\), color-mix/);
-    expect(track('.effort-slider input[type="range"]')).toMatch(/background:\s*var\(--track\) 0 0 \/ calc\(var\(--p\) \* \(100% - 30px\) \+ 15px\) 100% no-repeat, var\(--raised\)/);
+  it("fills with a gradient up to the thumb, in a layer of its own that the input sits over", () => {
+    expect(track("\n.effort-slider")).toMatch(/--track:\s*linear-gradient\(90deg/);
+    const fill = track(".effort-slider .es-fill");
+    expect(fill).toMatch(/width:\s*calc\(var\(--p\) \* \(100% - 30px\) \+ 15px\)/);
+    expect(fill).toMatch(/background:\s*var\(--track\)/);
+    expect(fill).toMatch(/overflow:\s*hidden/);
+    expect(track('.effort-slider input[type="range"]')).toMatch(/background:\s*transparent/);
     expect(track(".effort-slider .es-name")).toMatch(/background-clip:\s*text/);
+  });
+
+  it("is lit from inside: stars that twinkle out of step, and a glow that sweeps across", () => {
+    expect(track(".effort-slider .es-fill::before")).toMatch(/animation:\s*es-twinkle [\d.]+s/);
+    expect(track(".effort-slider .es-fill::after")).toMatch(/animation:\s*es-twinkle [\d.]+s/);
+    expect(track(".effort-slider .es-fill::before")).toMatch(/radial-gradient/);
+    expect(track(".effort-slider .es-glow")).toMatch(/animation:\s*es-sweep [\d.]+s/);
+    expect(css).toMatch(/@keyframes es-twinkle\s*\{[^}]*opacity/);
+    expect(css).toMatch(/@keyframes es-sweep\s*\{[^}]*translateX/);
+  });
+
+  it("holds still, and shows its stars, under reduced motion", () => {
+    expect(css).toMatch(/prefers-reduced-motion: reduce\)[^@]*\.es-fill::before[^{]*\{[^}]*animation:\s*none/);
+    expect(css).toMatch(/:root\[data-effects="reduced"\] \.effort-slider[^{]*\{[^}]*animation:\s*none/);
   });
 
   it("has a white round thumb as wide as the track is tall", () => {
@@ -101,5 +120,6 @@ describe("the reasoning slider", () => {
     expect(thumb).toMatch(/height:\s*30px/);
     expect(thumb).toMatch(/border-radius:\s*50%/);
     expect(thumb).toMatch(/background:\s*#fff/);
+    expect(thumb).toMatch(/box-shadow:[^;]*0 0 \d+px/);
   });
 });

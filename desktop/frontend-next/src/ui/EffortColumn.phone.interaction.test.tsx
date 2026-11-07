@@ -98,3 +98,23 @@ describe("the same levels on a wider screen", () => {
     expect(screen.getAllByRole("menuitem")).toHaveLength(4);
   });
 });
+
+describe("the slider's light", () => {
+  it("is drawn in layers the reader never meets: decoration, hidden from the accessibility tree", () => {
+    document.documentElement.dataset.fold = PHONE;
+    draw([heading, ...levels]);
+    const fill = document.querySelector(".effort-slider .es-fill");
+    expect(fill).not.toBeNull();
+    expect(fill?.getAttribute("aria-hidden")).toBe("true");
+    expect(fill?.querySelector(".es-glow")).not.toBeNull();
+  });
+
+  it("keeps the track's reach in step with the thumb", () => {
+    document.documentElement.dataset.fold = PHONE;
+    draw([heading, ...levels], "high");
+    const track = document.querySelector<HTMLElement>(".effort-slider .es-track")!;
+    expect(track.style.getPropertyValue("--p")).toBe("1");
+    fireEvent.change(screen.getByRole("slider"), { target: { value: "1" } });
+    expect(Number(track.style.getPropertyValue("--p"))).toBeCloseTo(1 / 3, 5);
+  });
+});

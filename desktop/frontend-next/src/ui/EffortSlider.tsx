@@ -20,17 +20,20 @@ export function EffortSlider({ name, model, levels, current, onPick }: {
   };
   const last = levels.length - 1;
   return (
-    <div className="effort-slider" style={{ "--p": shown / last } as CSSProperties}>
+    <div className="effort-slider">
       <div className="es-head">
         <span className="es-name">{levels[shown].label}</span>
         {model && <span className="es-model">{model}</span>}
       </div>
-      <input
-        type="range" min={0} max={last} step={1} value={shown}
-        aria-label={name} aria-valuetext={levels[shown].label}
-        onChange={(e) => setPreview(Number(e.target.value))}
-        onPointerUp={commit} onKeyUp={commit} onBlur={commit}
-      />
+      <div className="es-track" style={{ "--p": shown / last } as CSSProperties}>
+        <span className="es-fill" aria-hidden="true"><span className="es-glow" /></span>
+        <input
+          type="range" min={0} max={last} step={1} value={shown}
+          aria-label={name} aria-valuetext={levels[shown].label}
+          onChange={(e) => setPreview(Number(e.target.value))}
+          onPointerUp={commit} onKeyUp={commit} onBlur={commit}
+        />
+      </div>
       <div className="es-ends" aria-hidden="true">
         <span>{levels[0].label}</span>
         <span>{levels[last].label}</span>
