@@ -727,6 +727,7 @@ export function Composer({ port, status, running, queued = false, quote, restore
             wrapClassName="studio-model-control"
             className="mode model-picker"
             data-action="model.select"
+            sheet
             place="bottom"
             align="end"
             title={modelTooltip(models, status?.modelRef, modelLb, status && declared ? effortReading(status.effort, status.modes) : undefined)}

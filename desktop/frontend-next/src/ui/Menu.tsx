@@ -2,6 +2,7 @@ import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type React
 import { createPortal } from "react-dom";
 import { t } from "../i18n";
 import { placeInViewport, useFollow, zoom } from "./place";
+import { folded } from "./viewport";
 import { hasVendorMark, VendorMark } from "./vendormarks";
 import { CircleAlert, CircleDot, LoaderCircle } from "lucide-react";
 
@@ -82,13 +83,15 @@ interface Props {
   aside?: (close: () => void) => ReactNode;
   asideClassName?: string;
   stayOpen?: (value: string) => boolean;
+  /** On a phone the menu is a sheet along the bottom edge; the stylesheet places it. */
+  sheet?: boolean;
 }
 
 // data-* rides through to the item that raises the pick, the way Switch and Seg
 // carry theirs: the action's identity is written at the call site, and the
 // answer this menu gives is the item's own value.
 export function Picker({
-  label, items, current, onPick, place, align = "start", className, title, pending, triggerAction, ariaPressed, ariaLabel, ariaDescribedBy, wrapClassName, menuClassName, menuTitle, onOpen, searchAlways, searchPlaceholder, head, aside, asideClassName, stayOpen, ...id
+  label, items, current, onPick, place, align = "start", className, title, pending, triggerAction, ariaPressed, ariaLabel, ariaDescribedBy, wrapClassName, menuClassName, menuTitle, onOpen, searchAlways, searchPlaceholder, head, aside, asideClassName, stayOpen, sheet, ...id
 }: Props & { [K in `data-${string}`]?: string | ((value: string) => string) }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -159,6 +162,11 @@ export function Picker({
     const anchor = btn.current?.getBoundingClientRect();
     const el = menu.current;
     if (!anchor || !el || el.hidden) return;
+    if (sheet && folded("phone")) {
+      el.style.left = "";
+      el.style.top = "";
+      return;
+    }
     // The layout box, not the painted one: the entrance transition is running
     // while this measures, and its scaleY would place the menu by a size it is
     // on its way out of. offsetWidth is in CSS pixels where a client rect is on
@@ -177,7 +185,7 @@ export function Picker({
     );
     el.style.left = `${at.left}px`;
     el.style.top = `${at.top}px`;
-  }, [align, place]);
+  }, [align, place, sheet]);
 
   useFollow(open, put, shown.length, { anchor: btn, container: menu });
 
@@ -266,7 +274,7 @@ export function Picker({
       {createPortal(
         <div
           ref={menu}
-          className={[place === "top" ? "menu portmenu pm-down" : "menu portmenu pm-up", aside ? "has-aside" : "", menuClassName].filter(Boolean).join(" ")}
+          className={[place === "top" ? "menu portmenu pm-down" : "menu portmenu pm-up", aside ? "has-aside" : "", sheet ? "menu-sheet" : "", menuClassName].filter(Boolean).join(" ")}
           role="menu"
           hidden={!open}
           onKeyDown={arrows}
