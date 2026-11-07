@@ -162,7 +162,7 @@ export function Market({ port, account, onInstalled, onViewInstalled, onSignIn }
           </div>}
         </div>
       )}
-      {cached && !error && <CacheNotice cache={cached} action="market.retry" onRetry={() => { panel.current?.focus(); load(0, true); }} />}
+      {cached && !error && <CacheNotice cache={cached} onRetry={() => { panel.current?.focus(); load(0, true); }} />}
       {rows === null && !error && <div className="empty" role="status">{t("common.loading")}</div>}
       {rows?.length === 0 && !error && <div className="empty">{t(pinned ? "ext.no_pinned_packages_found_turn" : "ext.no_matching_packages")}</div>}
       <ul className="mkt-list">
@@ -342,7 +342,7 @@ function Entry({ port, account, slug, inspect = false, onBack, onInstalled, onVi
           </button>
         )}
       </div>
-      {d.cache && <CacheNotice cache={d.cache} action="market.detail-retry" onRetry={() => { panel.current?.focus(); setAttempt((n) => n + 1); }} />}
+      {d.cache && <CacheNotice cache={d.cache} detail onRetry={() => { panel.current?.focus(); setAttempt((n) => n + 1); }} />}
       {p.summary && <p className="mkt-sum">{p.summary}</p>}
       {p.description && <p className="mkt-desc">{p.description}</p>}
       {!d.pinned && !current && (

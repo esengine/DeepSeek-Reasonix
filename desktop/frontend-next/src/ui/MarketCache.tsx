@@ -7,7 +7,7 @@ function savedAt(iso: string): string {
   return d.toLocaleString(current() === "zh" ? "zh-CN" : "en", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
 }
 
-export function CacheNotice({ cache, action, onRetry }: { cache: MarketCache; action: string; onRetry: () => void }) {
+export function CacheNotice({ cache, detail, onRetry }: { cache: MarketCache; detail?: boolean; onRetry: () => void }) {
   const when = savedAt(cache.cachedAt);
   return (
     <div className="find" data-cached="" role="status">
@@ -18,7 +18,7 @@ export function CacheNotice({ cache, action, onRetry }: { cache: MarketCache; ac
           : t("ext.the_community_market_is_not", { when })}
       </span>
       <div className="acts">
-        <button className="act" data-action={action} onClick={onRetry}>{t("common.retry")}</button>
+        <button className="act" data-action={detail ? "market.detail-retry" : "market.retry"} onClick={onRetry}>{t("common.retry")}</button>
       </div>
     </div>
   );

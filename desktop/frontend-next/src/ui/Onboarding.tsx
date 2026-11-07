@@ -374,7 +374,7 @@ export function Onboarding({ port, setup, onDone, onSkip, project }: Props) {
               </div>
               {err && <div className="onb-err" role="alert">{err.text}</div>}
               <div className="onb-acts">
-                <button className="btn onb-go" data-primary disabled={busy || !kind || !model} onClick={() => void start()}>
+                <button className="btn onb-go" data-primary data-action="onboarding.start" disabled={busy || !kind || !model} onClick={() => void start()}>
                   {t(busy ? "common.saving_2" : "onboarding.continue")}
                 </button>
                 <button type="button" className="onb-skip" data-action="onboarding.back" disabled={busy} onClick={() => go("connect", true)}>{t("onboarding.previous_step")}</button>

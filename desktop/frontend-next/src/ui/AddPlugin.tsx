@@ -244,6 +244,7 @@ function PluginInput({ port, onClose, onInstalled, updating, source, onApplying,
         className="paste"
         aria-labelledby={sourceLabel}
         data-action-keydown="extensions.inspect"
+        data-action-change="extensions.inspect"
         rows={3}
         autoFocus
         value={text}
