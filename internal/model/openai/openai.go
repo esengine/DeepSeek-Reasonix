@@ -758,7 +758,7 @@ func (c *client) buildRequest(req provider.Request) chatRequest {
 		// is left untouched for backends that also honour it.
 		out.Thinking = &thinkingMode{Type: c.thinkingType}
 	}
-	return out.forSummary(req.Summary)
+	return out
 }
 
 func (c *client) buildPrefixRequest(req provider.Request, content, reasoning string) chatRequest {

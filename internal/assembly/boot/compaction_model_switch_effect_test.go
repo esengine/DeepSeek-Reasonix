@@ -10,12 +10,9 @@ import (
 	"reasonix/internal/contract/provider"
 )
 
-func digestRequests(reqs []provider.Request) (summarizer, carrying int) {
+// carryingProjection counts the requests that already hold a fold.
+func carryingProjection(reqs []provider.Request) (carrying int) {
 	for _, req := range reqs {
-		if req.Summary {
-			summarizer++
-			continue
-		}
 		for _, m := range req.Messages {
 			if strings.Contains(m.Content, "<compaction-summary>") {
 				carrying++
@@ -23,7 +20,7 @@ func digestRequests(reqs []provider.Request) (summarizer, carrying int) {
 			}
 		}
 	}
-	return summarizer, carrying
+	return carrying
 }
 
 // modelSwitchFixtureChars is the first-request size this fixture is padded to:
@@ -91,7 +88,7 @@ context_window = 32500
 			t.Fatalf("Run(%q): %v", prompt, err)
 		}
 	}
-	if _, carrying := digestRequests(rec.requests()); carrying == 0 {
+	if carryingProjection(rec.requests()) == 0 {
 		t.Fatal("fixture never compacted")
 	}
 	if err := from.Snapshot(); err != nil {
@@ -110,16 +107,11 @@ context_window = 32500
 		t.Fatalf("the fixture's first request is %d characters, want %d: the padding did not reach it", got, modelSwitchFixtureChars)
 	}
 	before := len(rec.requests())
-	summBefore, _ := digestRequests(rec.requests())
 	if err := to.Run(context.Background(), "after the switch"); err != nil {
 		t.Fatalf("Run after switch: %v", err)
 	}
 	after := rec.requests()[before:]
-	summ, carrying := digestRequests(after)
-	if summ != 0 {
-		t.Fatalf("switch spent %d summarization call(s) (had %d before)", summ, summBefore)
-	}
-	if carrying == 0 {
+	if carryingProjection(after) == 0 {
 		t.Fatalf("request after the switch dropped the projection; messages=%s", messageDigest(after[len(after)-1].Messages))
 	}
 }

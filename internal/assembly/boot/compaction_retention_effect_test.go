@@ -28,12 +28,8 @@ func (p *compactionEffectProvider) Stream(_ context.Context, req provider.Reques
 	p.mu.Lock()
 	p.reqs = append(p.reqs, req)
 	p.mu.Unlock()
-	text := p.bulk
-	if req.Summary {
-		text = "## Standing facts\n- none recorded"
-	}
 	ch := make(chan provider.Chunk, 2)
-	ch <- provider.Chunk{Type: provider.ChunkText, Text: text}
+	ch <- provider.Chunk{Type: provider.ChunkText, Text: p.bulk}
 	ch <- provider.Chunk{Type: provider.ChunkDone}
 	close(ch)
 	return ch, nil

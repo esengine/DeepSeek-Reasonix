@@ -71,9 +71,6 @@ context_window = 32000
 
 	const contractMark = "Treat the user's goal as a task contract"
 	for i, req := range rec.requests() {
-		if isSummarizerRequest(req) {
-			continue
-		}
 		if n := strings.Count(userTextOf(req), contractMark); n > 2 {
 			t.Fatalf("request %d carried the full contract %d times; copies are piling up", i, n)
 		}

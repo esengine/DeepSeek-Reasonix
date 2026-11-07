@@ -61,7 +61,7 @@ func (s *Server) handleCatalog(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(catalogResponse{Providers: s.resolver.Catalog(), SummaryToolChoiceNone: true})
+	_ = json.NewEncoder(w).Encode(catalogResponse{Providers: s.resolver.Catalog()})
 }
 
 func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {

@@ -35,11 +35,6 @@ func (p *budgetEffectProvider) Stream(_ context.Context, req provider.Request) (
 	p.mu.Unlock()
 	ch := make(chan provider.Chunk, 2)
 	defer close(ch)
-	if req.Summary {
-		ch <- provider.Chunk{Type: provider.ChunkText, Text: "## Standing facts\n- none recorded"}
-		ch <- provider.Chunk{Type: provider.ChunkDone}
-		return ch, nil
-	}
 	asked, answered := "", ""
 	for _, m := range req.Messages {
 		switch {

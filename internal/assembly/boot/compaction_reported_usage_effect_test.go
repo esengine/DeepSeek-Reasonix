@@ -19,7 +19,6 @@ import (
 type promptSizeProvider struct {
 	mu       sync.Mutex
 	reported int
-	digests  int
 	mains    []provider.Request
 }
 
@@ -29,13 +28,6 @@ func (p *promptSizeProvider) Stream(_ context.Context, req provider.Request) (<-
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	ch := make(chan provider.Chunk, 3)
-	if req.Summary {
-		p.digests++
-		ch <- provider.Chunk{Type: provider.ChunkText, Text: "## Summary\nSUMMARY of the earlier work."}
-		ch <- provider.Chunk{Type: provider.ChunkDone}
-		close(ch)
-		return ch, nil
-	}
 	p.mains = append(p.mains, req)
 	ch <- provider.Chunk{Type: provider.ChunkText, Text: "ok"}
 	ch <- provider.Chunk{Type: provider.ChunkUsage, Usage: &provider.Usage{PromptTokens: p.reported, TotalTokens: p.reported + 1}}
@@ -44,10 +36,26 @@ func (p *promptSizeProvider) Stream(_ context.Context, req provider.Request) (<-
 	return ch, nil
 }
 
-func (p *promptSizeProvider) counts() (digests, mains int) {
+func (p *promptSizeProvider) counts() (folded, mains int) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	return p.digests, len(p.mains)
+	for _, req := range p.mains {
+		if carriesArchivePointer(req) {
+			folded++
+		}
+	}
+	return folded, len(p.mains)
+}
+
+// carriesArchivePointer is whether a request already holds a fold: the earlier
+// conversation was moved to a file and a pointer stands in for it.
+func carriesArchivePointer(req provider.Request) bool {
+	for _, m := range req.Messages {
+		if strings.Contains(m.Content, "archived, not summarized") {
+			return true
+		}
+	}
+	return false
 }
 
 // imageSession is about 70k estimated tokens that include one screenshot,
@@ -123,7 +131,15 @@ context_window = 100000
 }
 
 func TestEffectReportedUsageBelowTriggerLeavesContextAlone(t *testing.T) {
-	if digests, _ := foldsAfterTwoTurns(t, 60_000); digests != 0 {
-		t.Fatalf("digest requests = %d with the provider reporting 60k of 100k", digests)
+	if _, second := foldsAfterTwoTurns(t, 60_000); carriesArchivePointer(second) {
+		t.Fatal("a fold reached the request with the provider reporting 60k of 100k")
+	}
+}
+
+// The control arm: the same run with the provider reporting more than the
+// trigger does fold, so the assertion above can fail.
+func TestEffectReportedUsageAboveTriggerFolds(t *testing.T) {
+	if _, second := foldsAfterTwoTurns(t, 95_000); !carriesArchivePointer(second) {
+		t.Fatal("a provider reporting 95k of 100k left the context unfolded")
 	}
 }

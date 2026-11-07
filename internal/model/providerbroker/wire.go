@@ -19,8 +19,7 @@ const (
 )
 
 type catalogResponse struct {
-	Providers             []provider.Descriptor `json:"providers"`
-	SummaryToolChoiceNone bool                  `json:"summary_tool_choice_none"`
+	Providers []provider.Descriptor `json:"providers"`
 }
 
 type streamRequest struct {

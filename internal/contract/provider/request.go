@@ -1,10 +1,5 @@
 package provider
 
-import "errors"
-
-// ErrSummaryToolsUnsupported refuses retained schemas before an unsafe broker POST.
-var ErrSummaryToolsUnsupported = errors.New("provider cannot guarantee disabled summary tools")
-
 // Request is a single completion request.
 type Request struct {
 	Messages    []Message
@@ -19,9 +14,6 @@ type Request struct {
 	// Mode is the session's model mode id. An adapter sends only a mode its
 	// config declared for this endpoint, so an unknown one reaches no wire.
 	Mode string `json:"Mode,omitempty"`
-	// Summary asks for a compaction briefing with tool use disabled. It crosses
-	// the provider broker so remote and local summaries have the same contract.
-	Summary bool `json:"summary,omitempty"`
 }
 
 // ResponseFormat asks a provider to constrain its output shape.

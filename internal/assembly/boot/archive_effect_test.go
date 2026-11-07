@@ -44,16 +44,10 @@ func (p *bulkReplyProvider) lastRequestMessageWith(text string) string {
 	return ""
 }
 
-func (p *bulkReplyProvider) summaryRequests() int {
+func (p *bulkReplyProvider) requestCount() int {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	n := 0
-	for _, req := range p.reqs {
-		if req.Summary {
-			n++
-		}
-	}
-	return n
+	return len(p.reqs)
 }
 
 // TestEffectCompactArchivesInsteadOfSummarizing pins the fold at the boundary a
@@ -92,6 +86,7 @@ model = "x"
 		}
 	}
 
+	before := rec.requestCount()
 	verdict, err := ctrl.Compact(context.Background(), agent.CompactRequest{})
 	if err != nil {
 		t.Fatalf("Compact: %v", err)
@@ -99,8 +94,8 @@ model = "x"
 	if !verdict.Compacted() {
 		t.Fatalf("verdict = %+v, want a fold", verdict)
 	}
-	if n := rec.summaryRequests(); n != 0 {
-		t.Fatalf("a manual compaction made %d summarizer request(s)", n)
+	if n := rec.requestCount() - before; n != 0 {
+		t.Fatalf("a manual compaction made %d model request(s)", n)
 	}
 
 	if err := ctrl.Run(context.Background(), "what is left to do"); err != nil {
@@ -169,6 +164,7 @@ model = "x"
 		t.Fatalf("first fold = %+v, %v", v, err)
 	}
 	say(4)
+	before := rec.requestCount()
 	again, err := ctrl.Compact(context.Background(), agent.CompactRequest{})
 	if err != nil {
 		t.Fatalf("second Compact: %v", err)
@@ -176,8 +172,8 @@ model = "x"
 	if !again.Compacted() {
 		t.Fatalf("a request by hand after a little more was said was declined: %+v (%s)", again, agent.CompactDeclineText(again.Reason))
 	}
-	if n := rec.summaryRequests(); n != 0 {
-		t.Fatalf("folding made %d summarizer request(s)", n)
+	if n := rec.requestCount() - before; n != 0 {
+		t.Fatalf("folding made %d model request(s)", n)
 	}
 	if _, detail := ctrl.ContextReport(); !strings.Contains(detail, "archived") || strings.Contains(detail, "summarized") {
 		t.Fatalf("the report does not name the fold an archive:\n%s", detail)

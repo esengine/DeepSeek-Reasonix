@@ -31,11 +31,8 @@ func (p *failedBatchProvider) Name() string { return "boot-failed-batch" }
 func (p *failedBatchProvider) Stream(_ context.Context, req provider.Request) (<-chan provider.Chunk, error) {
 	p.mu.Lock()
 	p.reqs = append(p.reqs, req)
-	summary := req.Summary
 	round := p.rounds
-	if !summary {
-		p.rounds++
-	}
+	p.rounds++
 	p.mu.Unlock()
 	ch := make(chan provider.Chunk, failedBatchReads+3)
 	call := func(id, name string, args any) {
@@ -43,8 +40,6 @@ func (p *failedBatchProvider) Stream(_ context.Context, req provider.Request) (<
 		ch <- provider.Chunk{Type: provider.ChunkToolCall, ToolCall: &provider.ToolCall{ID: id, Name: name, Arguments: string(raw)}}
 	}
 	switch {
-	case summary:
-		ch <- provider.Chunk{Type: provider.ChunkText, Text: "## Goal\n- read the packages"}
 	case round < 5:
 		for i := range failedBatchReads {
 			call(fmt.Sprintf("r%d-%d", round, i), "read_file", map[string]string{"path": fmt.Sprintf("src%d.txt", i)})

@@ -256,7 +256,7 @@ func (c *client) Stream(ctx context.Context, req provider.Request) (<-chan provi
 	}
 	c.authed.Store(true)
 	out := make(chan provider.Chunk, 64)
-	go c.readStream(requestCtx, resp, out, wireMessages, downgrade, !req.Summary)
+	go c.readStream(requestCtx, resp, out, wireMessages, downgrade, true)
 	return out, nil
 }
 
@@ -375,7 +375,6 @@ func (c *client) buildRequestBodyWithContinuation(req provider.Request, allowPre
 			})
 		}
 		body["tools"] = tools
-		applySummaryToolChoice(body, req.Summary)
 	}
 	instructions, rest := splitInstructions(messages)
 	if instructions != "" {
@@ -386,7 +385,7 @@ func (c *client) buildRequestBodyWithContinuation(req provider.Request, allowPre
 	previousID, expectedDigest := c.lastResponseID, c.expectedPrefixDigest
 	mode := c.effectiveModeLocked()
 	c.mu.Unlock()
-	if allowPrevious && !req.Summary && mode == "stateful" && previousID != "" && len(messages) > 0 &&
+	if allowPrevious && mode == "stateful" && previousID != "" && len(messages) > 0 &&
 		messages[len(messages)-1].Role == provider.RoleUser &&
 		c.conversationDigest(messages[:len(messages)-1]) == expectedDigest {
 		body["input"] = messages[len(messages)-1].Content

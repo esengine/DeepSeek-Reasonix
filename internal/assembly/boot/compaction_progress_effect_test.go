@@ -39,16 +39,11 @@ func (p *progressEffectProvider) Name() string { return "boot-progress-effect" }
 func (p *progressEffectProvider) Stream(_ context.Context, req provider.Request) (<-chan provider.Chunk, error) {
 	p.mu.Lock()
 	p.reqs = append(p.reqs, req)
-	digest := req.Summary
 	round := p.rounds
-	if !digest {
-		p.rounds++
-	}
+	p.rounds++
 	p.mu.Unlock()
 	ch := make(chan provider.Chunk, 2)
 	switch {
-	case digest:
-		ch <- provider.Chunk{Type: provider.ChunkText, Text: "## Files\n- notes.md was written"}
 	case round < len(p.script):
 		ch <- provider.Chunk{Type: provider.ChunkToolCall, ToolCall: p.script[round]}
 	default:

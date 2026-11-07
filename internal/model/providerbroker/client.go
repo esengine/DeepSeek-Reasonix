@@ -165,16 +165,6 @@ func (b *brokered) Stream(ctx context.Context, req provider.Request) (<-chan pro
 	if err != nil {
 		return nil, err
 	}
-	if req.Summary && len(req.Tools) > 0 {
-		// Capability and POST use one authenticated target, never the picker's stale cache.
-		catalog, probeErr := b.client.fetchCatalogAt(ctx, base, token)
-		if ctx.Err() != nil {
-			return nil, ctx.Err()
-		}
-		if probeErr != nil || !catalog.SummaryToolChoiceNone {
-			return nil, provider.ErrSummaryToolsUnsupported
-		}
-	}
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, base+PathStream, bytes.NewReader(body))
 	if err != nil {
 		return nil, err

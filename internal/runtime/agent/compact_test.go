@@ -2,7 +2,6 @@ package agent
 
 import (
 	"context"
-	"reasonix/internal/runtime/agent/testutil"
 	"reasonix/internal/state/sessionstore"
 	"strings"
 	"testing"
@@ -44,7 +43,7 @@ func (f *fakeProvider) answer(req provider.Request) string {
 	if f.verbatim {
 		return f.reply
 	}
-	return testutil.SummaryReply(req, f.reply)
+	return f.reply
 }
 
 func (f *fakeProvider) Stream(_ context.Context, req provider.Request) (<-chan provider.Chunk, error) {

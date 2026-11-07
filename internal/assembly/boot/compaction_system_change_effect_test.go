@@ -47,7 +47,7 @@ func compactedSession(t *testing.T, rec *compactionEffectProvider, home, dir str
 			t.Fatalf("Run(%q): %v", prompt, err)
 		}
 	}
-	if _, carrying := digestRequests(rec.requests()); carrying == 0 {
+	if carryingProjection(rec.requests()) == 0 {
 		t.Fatal("fixture never compacted")
 	}
 	if err := from.Snapshot(); err != nil {

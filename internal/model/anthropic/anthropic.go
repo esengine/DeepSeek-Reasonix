@@ -478,7 +478,7 @@ func (c *client) buildRequest(_ context.Context, req provider.Request) anthReque
 			r.Thinking = &thinkingConfig{Type: t}
 		}
 	}
-	return r.forSummary(req.Summary)
+	return r
 }
 
 // readStream parses the Messages API SSE stream into Chunks. Text deltas emit live;

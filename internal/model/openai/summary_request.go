@@ -14,11 +14,3 @@ type chatRequest struct {
 	Thinking            *thinkingMode  `json:"thinking,omitempty"`
 	ExtraBody           map[string]any `json:"-"`
 }
-
-func (r chatRequest) forSummary(summary bool) chatRequest {
-	if summary && len(r.Tools) > 0 {
-		r.ToolChoice = "none"
-		r.ExtraBody = omitExtraBodyFields(r.ExtraBody, "tool_choice")
-	}
-	return r
-}
