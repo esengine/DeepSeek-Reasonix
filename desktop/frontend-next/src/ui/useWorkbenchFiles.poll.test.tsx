@@ -13,6 +13,20 @@ beforeEach(() => vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] }))
 afterEach(() => { cleanup(); vi.useRealTimers(); });
 const tick = () => act(async () => { await vi.advanceTimersByTimeAsync(3000); });
 
+/** Waits until the panel has stopped committing on its own: what opening a file
+ *  leaves behind (an entering tab's 220ms timer, a lazily loaded chunk, a
+ *  persisted list) lands at a time that depends on the machine, and none of it
+ *  is what a poll does. Two quiet 50ms windows in a row end the wait; a panel
+ *  that never goes quiet leaves the real assertion to fail. */
+async function quiet(commits: ReturnType<typeof vi.fn>) {
+  let still = 0;
+  for (let i = 0; i < 60 && still < 2; i++) {
+    commits.mockClear();
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 50)); });
+    still = commits.mock.calls.length === 0 ? still + 1 : 0;
+  }
+}
+
 async function mount(path = "notes.md") {
   const port = new MockPort();
   const file = { path, content: "# Saved", revision: "r1" };
@@ -98,9 +112,7 @@ it("leaves the rendered Workbench untouched when Markdown polls are unchanged", 
   await user.click(await screen.findByRole("button", { name: "notes.md" }));
   await screen.findByRole("heading", { name: "Saved" });
   await act(async () => {});
-  // A tab that has just opened clears its entering state on a real 220ms timer
-  // (the fake clock covers intervals only), so the baseline waits it out.
-  await act(async () => { await new Promise((resolve) => setTimeout(resolve, 300)); });
+  await quiet(commits);
   commits.mockClear();
   await tick();
   await tick();
