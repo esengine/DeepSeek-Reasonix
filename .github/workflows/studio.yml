@@ -16,7 +16,7 @@ permissions:
 
 concurrency:
   group: studio-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' || github.ref == 'refs/heads/studio' }}
 
 jobs:
   frontend:
