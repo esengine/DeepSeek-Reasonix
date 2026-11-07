@@ -44,15 +44,15 @@
 .studio-overview-card .studio-overview-row > span { color: var(--text); }
 .studio-overview-card > section[aria-label] + section { border-top: 1px solid var(--hair); margin-top: 6px; padding-top: 10px; }
 .chrome-context-card:not(.studio-overview-card) { gap: 0; width: min(360px, calc(100vw - 32px)); padding: 0; overflow: hidden; background: var(--float); box-shadow: var(--shadow-float); }
-.chrome-context-card:not(.studio-overview-card) > header { padding: 12px 14px 8px; border-bottom: 0; align-items: baseline; }
+.chrome-context-card:not(.studio-overview-card) > header { padding: 10px 14px 6px; border-bottom: 0; align-items: baseline; }
 .chrome-context-card:not(.studio-overview-card) > header b { font: var(--w-semi) var(--fs-lead)/1.3 var(--ui); }
 .chrome-context-card:not(.studio-overview-card) > header small { display: none; }
 .chrome-context-card:not(.studio-overview-card) > header strong { font: var(--w-semi) var(--fs-title)/1 var(--ui); }
 .chrome-context-card:not(.studio-overview-card) > .chrome-context-bar { order: 1; height: 8px; gap: 0; margin: 0 14px; border-radius: var(--r-xs); background: var(--overlay); }
 .chrome-context-card:not(.studio-overview-card) > .chrome-context-total { order: 2; margin: 4px 14px 0; color: var(--faint); font: var(--w-reg) var(--fs-micro)/1.4 var(--ui); }
 .chrome-context-card:not(.studio-overview-card) > .chrome-context-total b { color: inherit; font: inherit; }
-.chrome-context-card:not(.studio-overview-card) > .chrome-context-parts { order: 3; grid-template-columns: 1fr; gap: 0; padding: 8px 14px 0; }
-.chrome-context-card:not(.studio-overview-card) > .chrome-context-parts > div { grid-template-columns: 8px minmax(0, 1fr) auto; gap: 8px; height: 28px; color: var(--text); font: var(--w-reg) var(--fs-meta)/1 var(--ui); }
+.chrome-context-card:not(.studio-overview-card) > .chrome-context-parts { order: 3; grid-template-columns: 1fr; gap: 0; padding: 6px 14px 0; }
+.chrome-context-card:not(.studio-overview-card) > .chrome-context-parts > div { grid-template-columns: 8px minmax(0, 1fr) auto; gap: 8px; height: 24px; color: var(--text); font: var(--w-reg) var(--fs-meta)/1 var(--ui); }
 .chrome-context-card:not(.studio-overview-card) > .chrome-context-parts > div > i { width: 8px; height: 8px; border-radius: 2px; }
 .chrome-context-card:not(.studio-overview-card) > .chrome-context-parts b,
 .chrome-context-card:not(.studio-overview-card) > .chrome-context-parts .chrome-context-more { color: var(--muted); font: var(--w-reg) var(--fs-meta)/1 var(--ui); }
@@ -85,7 +85,7 @@
 .studio-overview-foot { display: flex; align-items: center; gap: 8px; margin-top: 6px; padding: 10px 14px; border-top: 1px solid var(--hair); color: var(--muted); font: var(--w-reg) var(--fs-meta)/1.3 var(--ui); }
 .studio-overview-foot > button { margin-left: auto; padding: 0; border: 0; background: none; color: var(--accent-ink); font: inherit; cursor: pointer; }
 .studio-overview-foot > button:hover { text-decoration: underline; text-underline-offset: 2px; }
-.chrome-context-card:not(.studio-overview-card) > .chrome-context-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 8px; padding: 10px 14px; border-top: 1px solid var(--hair); color: var(--muted); font: var(--w-reg) var(--fs-meta)/1.3 var(--ui); }
+.chrome-context-card:not(.studio-overview-card) > .chrome-context-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 6px; padding: 8px 14px; border-top: 1px solid var(--hair); color: var(--muted); font: var(--w-reg) var(--fs-meta)/1.3 var(--ui); }
 .chrome-context-foot > span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .chrome-context-foot > .manage { padding: 0; border: 0; background: none; color: var(--accent-ink); font: inherit; cursor: pointer; }
 .chrome-context-foot > .manage:hover { text-decoration: underline; text-underline-offset: 2px; }
@@ -95,3 +95,4 @@
 .chrome-context-card .chrome-context-more { display: inline-flex; align-items: center; gap: 5px; height: auto; padding: 0; border: 0; background: none; cursor: pointer; }
 .chrome-context-card .chrome-context-more::after { content: ""; width: 5px; height: 5px; border-top: 1.45px solid var(--faint); border-right: 1.45px solid var(--faint); transform: rotate(45deg); }
 .chrome-context-card .chrome-context-more[aria-expanded="true"]::after { transform: rotate(135deg); }
+.chrome-context-card:not(.studio-overview-card) > .chrome-context-items { margin: 2px 14px 4px; padding: 2px 0 2px 10px; gap: 2px; }
