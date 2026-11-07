@@ -37,7 +37,7 @@ func (p *peerToolProvider) Stream(_ context.Context, req provider.Request) (<-ch
 	for _, t := range req.Tools {
 		offered = offered || t.Name == "send_peer_message"
 	}
-	if first && offered {
+	if first && offered && p.to != "" {
 		args, _ := json.Marshal(map[string]string{"to": p.to, "text": p.text})
 		ch <- provider.Chunk{Type: provider.ChunkToolCall, ToolCall: &provider.ToolCall{ID: "call-peer", Name: "send_peer_message", Arguments: string(args)}}
 	} else {
@@ -117,10 +117,8 @@ model = "x"
 func TestEffectPeerToolsExistOnlyWhereMessagesBetweenSessionsAreOn(t *testing.T) {
 	t.Parallel()
 	for _, enabled := range []bool{true, false} {
-		rec, ctrl, _, _ := buildPeerToolSession(t, enabled, "nobody", "hello")
-		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-		_ = ctrl.Run(ctx, "hi")
-		cancel()
+		rec, ctrl, _, _ := buildPeerToolSession(t, enabled, "", "")
+		runPeerSchemaTurn(t, ctrl, rec)
 		has := map[string]bool{}
 		for _, name := range rec.toolNames() {
 			has[name] = true
@@ -128,6 +126,20 @@ func TestEffectPeerToolsExistOnlyWhereMessagesBetweenSessionsAreOn(t *testing.T)
 		if has["list_peers"] != enabled || has["send_peer_message"] != enabled {
 			t.Fatalf("enabled=%v: tools in the first request = %v", enabled, rec.toolNames())
 		}
+	}
+}
+
+func runPeerSchemaTurn(t *testing.T, ctrl *control.Controller, rec *peerToolProvider) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	if err := ctrl.Run(ctx, "hi"); err != nil {
+		t.Fatalf("schema-only turn did not complete normally: %v", err)
+	}
+	rec.mu.Lock()
+	defer rec.mu.Unlock()
+	if len(rec.reqs) != 1 {
+		t.Fatalf("schema-only turn made %d provider requests, want one", len(rec.reqs))
 	}
 }
 
@@ -197,10 +209,8 @@ func TestEffectDispatchToolExistsOnlyWhereTheUserTurnedDispatchOn(t *testing.T) 
 			if dispatch {
 				extra = "dispatch = true\n"
 			}
-			rec, ctrl, _, _ := buildPeerToolSession(t, true, "nobody", "hello", extra)
-			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-			_ = ctrl.Run(ctx, "hi")
-			cancel()
+			rec, ctrl, _, _ := buildPeerToolSession(t, true, "", "", extra)
+			runPeerSchemaTurn(t, ctrl, rec)
 			has := map[string]bool{}
 			for _, name := range rec.toolNames() {
 				has[name] = true

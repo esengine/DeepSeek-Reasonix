@@ -1,0 +1,106 @@
+package mutation
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"slices"
+	"strconv"
+	"sync/atomic"
+	"testing"
+	"time"
+)
+
+var queueDiagnosticScans, queueDiagnosticReads atomic.Uint64
+
+// Compiled only through the benchmark driver's overlay.
+func TestQueueCostDiagnostic(t *testing.T) {
+	param := func(key string) int {
+		n, err := strconv.Atoi(os.Getenv(key))
+		if err != nil || n < 0 {
+			t.Fatalf("%s: %v", key, err)
+		}
+		return n
+	}
+	holders, waiters := param("RX_QUEUE_HOLDERS"), param("RX_QUEUE_WAITERS")
+	root, state := t.TempDir(), t.TempDir()
+	c, err := New(root, state, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := range holders {
+		lease, err := c.Acquire(t.Context(), Intent{Effect: NamedPaths, Paths: []string{filepath.Join(root, fmt.Sprint(i))}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer lease.End(NotExecuted)
+	}
+	notices := make(chan struct{}, waiters)
+	w, err := New(root, state, func(n Notice) {
+		if n.State == "waiting" {
+			notices <- struct{}{}
+		}
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	type result struct {
+		at  time.Time
+		err error
+	}
+	done := make(chan result, waiters)
+	start := time.Now()
+	for range waiters {
+		go func() {
+			lease, err := w.Acquire(ctx, Intent{Effect: NamedPaths, Paths: []string{filepath.Join(root, "0")}})
+			if lease != nil {
+				lease.End(NotExecuted)
+			}
+			done <- result{time.Now(), err}
+		}()
+	}
+	for range waiters {
+		select {
+		case <-notices:
+		case <-t.Context().Done():
+			t.Fatal(t.Context().Err())
+		}
+	}
+	queueReady := time.Since(start)
+	// A fixed observation interval measures the current 20ms poll protocol.
+	startScans, startReads := queueDiagnosticScans.Load(), queueDiagnosticReads.Load()
+	observeStart := time.Now()
+	time.Sleep(300 * time.Millisecond)
+	observeElapsed := time.Since(observeStart)
+	scans, reads := queueDiagnosticScans.Load()-startScans, queueDiagnosticReads.Load()-startReads
+	cancelAt := time.Now()
+	cancel()
+	var cleanup []float64
+	for range waiters {
+		r := <-done
+		if !errors.Is(r.err, context.Canceled) {
+			t.Fatalf("waiting request was not cancelled: %v", r.err)
+		}
+		cleanup = append(cleanup, float64(r.at.Sub(cancelAt))/float64(time.Millisecond))
+	}
+	slices.Sort(cleanup)
+	quantile := func(p int) float64 {
+		if len(cleanup) == 0 {
+			return 0
+		}
+		return cleanup[(len(cleanup)*p+99)/100-1]
+	}
+	metrics := map[string]any{"holders": holders, "waiters": waiters,
+		"queue_ready_ms": float64(queueReady)/float64(time.Millisecond),
+		"observe_ms": 300, "actual_observe_ms": float64(observeElapsed)/float64(time.Millisecond), "registry_scans": scans, "record_reads": reads, "cancel_p50_ms": quantile(50), "cancel_p95_ms": quantile(95)}
+	raw, err := json.Marshal(metrics)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fmt.Printf("RX_QUEUE_METRICS %s\n", raw)
+}
