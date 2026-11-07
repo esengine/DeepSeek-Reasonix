@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { useThinkingPreview, useStartsOpen } from "../../state/foldpref";
+import { useThinkingPreview, useStartsOpen, useFoldModes } from "../../state/foldpref";
 import { StudioIcon } from "../StudioIcon";
 import { t } from "../../i18n";
 import { count, decimals } from "../../i18n/format";
@@ -109,6 +109,7 @@ export function SayCard({ item, afterAnswer, settled = true, reply, quiet }: { i
   const [branching, setBranching] = useState(false);
   const thinking = !item.done && item.thoughtMs === undefined;
   const start = useStartsOpen("thinking", thinking && !item.text);
+  const alwaysOpen = useFoldModes().thinking === "open";
   // The title changes once, when a thought this card watched finishes; a
   // thought drawn already finished is not that change happening.
   const watchedThinking = useRef(thinking);
@@ -171,7 +172,7 @@ export function SayCard({ item, afterAnswer, settled = true, reply, quiet }: { i
         </div>
         <div className="out">
           {item.reasoning?.trim() && (
-            <details className="think" open={open} data-live={thinking ? "" : undefined} data-cut={item.cut}
+            <details className="think" open={open} data-live={thinking ? "" : undefined} data-full={alwaysOpen ? "" : undefined} data-cut={item.cut}
               data-settled={settledHere ? "" : undefined} onToggle={(e) => {
                 const next = e.currentTarget.open;
                 if (next === open) return;

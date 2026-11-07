@@ -4,6 +4,7 @@ import { act, cleanup, render } from "@testing-library/react";
 import "../testkit";
 import { SayCard } from "./SayCard";
 import { appendText } from "../../state/say";
+import { setFoldModes } from "../../state/prefs";
 import type { Item } from "../../state/session";
 
 afterEach(() => { cleanup(); vi.useRealTimers(); });
@@ -21,6 +22,18 @@ describe("the thinking block, as the Think-Exec board draws it", () => {
     expect(think().hasAttribute("data-live")).toBe(false);
     expect(label().classList.contains("think-sweep")).toBe(false);
     expect(label().textContent).toBe("思考 1.2 秒 · 1 字");
+  });
+
+  it("tells the stylesheet when the reader asked for every thought open, so the live window does not cap it", () => {
+    act(() => setFoldModes({ thinking: "open" }));
+    const view = render(<SayCard item={appendText([], "想", "reasoning")[0] as Say} />);
+    expect(think().hasAttribute("data-live")).toBe(true);
+    expect(think().hasAttribute("data-full")).toBe(true);
+    view.unmount();
+    act(() => setFoldModes({ thinking: "live" }));
+    render(<SayCard item={appendText([], "想", "reasoning")[0] as Say} />);
+    expect(think().hasAttribute("data-full")).toBe(false);
+    act(() => setFoldModes({ thinking: "folded" }));
   });
 
   it("keeps a caret only on reasoning still arriving", () => {

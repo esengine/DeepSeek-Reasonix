@@ -68,8 +68,8 @@
 .think-swap > .think-label { grid-area: 1 / 1; }
 .think[data-settled] .think-label:not(.think-out) { animation: m-fade var(--t-card) var(--ease-out) both; }
 .think-out { animation: m-exit var(--t-card) var(--ease-out) both; pointer-events: none; }
-.think[data-live] .tk { max-height: calc(1.75em * 6); overflow: hidden; display: flex; flex-direction: column; justify-content: flex-end; }
-.think[data-live] .tk-in { flex: none; }
+.think[data-live]:not([data-full]) .tk { max-height: calc(1.75em * 6); overflow: hidden; display: flex; flex-direction: column; justify-content: flex-end; }
+.think[data-live]:not([data-full]) .tk-in { flex: none; }
 .think[data-cut] > summary .fold, .think[data-cut] > summary:hover .fold { color: var(--warn-ink); }
 .think-note { margin: 4px 0 0 16px; color: var(--faint); font: var(--w-reg) var(--fs-meta)/1.5 var(--ui); }
 @media (prefers-reduced-motion: reduce) {
