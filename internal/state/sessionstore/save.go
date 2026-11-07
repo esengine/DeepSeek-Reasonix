@@ -99,6 +99,7 @@ type sessionPersistState struct {
 	// and heal a stale ledger.
 	saveVerified bool
 	ok           bool
+	disk         persistedDisk
 }
 
 type sessionSaveMode int
@@ -272,7 +273,7 @@ func (s *Session) saveLocked(path string, mode sessionSaveMode) error {
 	// stalest capture written last would then read the newer transcript it
 	// lost the race to as a bogus stale-prefix conflict.
 	msgs, version, rewriteVersion := s.SnapshotWithVersion()
-	digest, contentBytes, err := digestAndSizeSessionMessages(msgs)
+	digest, contentBytes, prefixDigest, err := digestSizeAndPrefix(context.Background(), msgs, s.diskPrefixLen(path))
 	if err != nil {
 		return err
 	}
@@ -292,7 +293,7 @@ func (s *Session) saveLocked(path string, mode sessionSaveMode) error {
 	}
 	repairLog := false
 	ownedRewrite := mode == sessionSaveRewrite || mode == sessionSaveRewriteCompact
-	decision, err := s.checkSnapshotWrite(path, msgs, digest, version, ownedRewrite)
+	decision, err := s.snapshotDecision(path, msgs, digest, prefixDigest, version, ownedRewrite)
 	if err != nil {
 		return err
 	}
@@ -1119,28 +1120,8 @@ func digestAndSizeSessionMessages(msgs []provider.Message) ([sha256.Size]byte, i
 }
 
 func digestAndSizeSessionMessagesContext(ctx context.Context, msgs []provider.Message) ([sha256.Size]byte, int64, error) {
-	h := sha256.New()
-	size := int64(0)
-	for _, m := range msgs {
-		if err := ctx.Err(); err != nil {
-			return [sha256.Size]byte{}, 0, err
-		}
-		m = messageForSessionIdentity(m)
-		b, err := json.Marshal(m)
-		if err != nil {
-			return [sha256.Size]byte{}, 0, err
-		}
-		if _, err := h.Write(b); err != nil {
-			return [sha256.Size]byte{}, 0, err
-		}
-		if _, err := h.Write([]byte{'\n'}); err != nil {
-			return [sha256.Size]byte{}, 0, err
-		}
-		size += int64(len(b)) + 1
-	}
-	var out [sha256.Size]byte
-	copy(out[:], h.Sum(nil))
-	return out, size, nil
+	digest, size, _, err := digestSizeAndPrefix(ctx, msgs, -1)
+	return digest, size, err
 }
 
 func messagesHavePrefix(full, prefix []provider.Message) bool {

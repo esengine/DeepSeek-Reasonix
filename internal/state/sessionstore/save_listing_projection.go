@@ -10,6 +10,7 @@ import (
 func (s *Session) markPersistedWithListing(path string, digest [sha256.Size]byte, version uint64, revision int64, rewriteVersion int, msgs []provider.Message) {
 	s.markPersisted(path, digest, version, revision, rewriteVersion)
 	persistSessionListingProjection(path, msgs)
+	s.armDiskBaseline(path, digest, len(msgs))
 }
 
 func persistSessionListingProjection(path string, msgs []provider.Message) {
