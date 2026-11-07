@@ -171,7 +171,6 @@ export function App({ hub }: { hub: HubPort }) {
   // on every usage round, and handing the sidebar that would rebuild a tree of
   // a few hundred sessions each frame — which is what its memo is there for.
   const liveIds = useCallback((ids: string[]) => ids.filter((id) => runsRef.current[id]?.live), []);
-
   const { listedIds, noteReport } = useLiveGrace(runsRef, runs);
 
   const onReport = useCallback((id: string, next: PaneReport) => {
@@ -195,7 +194,6 @@ export function App({ hub }: { hub: HubPort }) {
   useEffect(() => {
     setReport(reportsRef.current[active] ?? NO_REPORT);
   }, [active]);
-
   const paging = useMemo<TreePaging>(
     () => ({
       more: (root) => treeWindow.grow(root, readTree),

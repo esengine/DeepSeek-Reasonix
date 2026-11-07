@@ -107,14 +107,6 @@ func horizonSession(c retrievalCarrier, turns int) (*sessionstore.Session, int) 
 	return &sessionstore.Session{Messages: msgs}, at
 }
 
-// growSession adds another generation's worth of foldable work.
-func growSession(a *Agent, gen int) {
-	for i := range 6 {
-		a.sess.conversation.Add(provider.Message{Role: provider.RoleAssistant, Content: strings.Repeat("word ", 400)})
-		a.sess.conversation.Add(provider.Message{Role: provider.RoleUser, Content: fmt.Sprintf("gen %d step %d", gen, i)})
-	}
-}
-
 func hitRank(res tool.RecallResult, want int) int {
 	for i, h := range res.Hits {
 		if h.Position == want {

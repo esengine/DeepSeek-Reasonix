@@ -36,11 +36,3 @@ func TestLargeFixedPrefixDoesNotRefuseCompaction(t *testing.T) {
 		t.Fatalf("compaction refused a prefix that fits: %v", err)
 	}
 }
-
-func shortText(chars int) string {
-	b := make([]byte, chars)
-	for i := range b {
-		b[i] = 'x'
-	}
-	return string(b)
-}

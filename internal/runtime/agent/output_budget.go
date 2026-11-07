@@ -176,16 +176,6 @@ func (s requestCalibrationShape) plus(o requestCalibrationShape) requestCalibrat
 	}
 }
 
-func (s requestCalibrationShape) minus(o requestCalibrationShape) requestCalibrationShape {
-	return requestCalibrationShape{
-		requestChars: s.requestChars - o.requestChars,
-		compactChars: s.compactChars - o.compactChars,
-		cjkRunes:     s.cjkRunes - o.cjkRunes,
-		cjkBytes:     s.cjkBytes - o.cjkBytes,
-		imageTokens:  s.imageTokens - o.imageTokens,
-	}
-}
-
 // messageCalibrationShape counts one message's shared-window text plus only the
 // replay fields the active provider declares, keeping omitted bytes out of the
 // ratio. It is additive: requestCalibrationShapeWithPolicy is this sum over a

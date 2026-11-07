@@ -193,23 +193,6 @@ func TestCompactToProjectionLeavesCanonicalIntact(t *testing.T) {
 	}
 }
 
-func earlyUserPrefix(msgs []provider.Message) string {
-	var b strings.Builder
-	for _, m := range msgs {
-		if m.Role == provider.RoleSystem {
-			continue
-		}
-		if isCompactionSummary(m) {
-			break
-		}
-		if m.Role == provider.RoleUser {
-			b.WriteString(m.Content)
-			b.WriteByte('\n')
-		}
-	}
-	return b.String()
-}
-
 // Checkpoint installation no longer writes archive copies — the canonical
 // transcript is the lossless store. ArchiveDir misconfiguration must not block
 // a successful summary install.

@@ -8,8 +8,6 @@ import (
 	"reasonix/internal/contract/provider"
 )
 
-const testGoalBlock = "<active-goal>\nship the parser\n\nGoal mode: pursue this goal autonomously.\n</active-goal>"
-
 // The newest block of each variant survives; older ones of that same variant go.
 // A short reminder and the full statement it points at are different variants,
 // so the reminder must never displace the contract.
