@@ -212,15 +212,18 @@ func TestToolApprovalModeAutoForcesMemoryAskRules(t *testing.T) {
 	}
 }
 
-func TestToolApprovalModeYoloForcesMemoryAskRules(t *testing.T) {
+func TestToolApprovalModeYoloAsksBeforeRememberButNotForget(t *testing.T) {
 	c := New(Options{})
 	c.SetToolApprovalMode(ToolApprovalYolo)
 
 	gate := c.newInteractiveGate()
-	for _, toolName := range []string{"remember", "forget"} {
-		if got := gate.Policy.Decide(toolName, false, json.RawMessage(`{}`)); got != permission.Ask {
-			t.Fatalf("%s under yolo mode = %v, want ask", toolName, got)
-		}
+	if got := gate.Policy.Decide("remember", false, json.RawMessage(`{}`)); got != permission.Ask {
+		t.Fatalf("remember under yolo mode = %v, want ask", got)
+	}
+	// Forget archives a memory rather than destroying it, so the mode that
+	// skips every other prompt skips this one too.
+	if got := gate.Policy.Decide("forget", false, json.RawMessage(`{}`)); got != permission.Allow {
+		t.Fatalf("forget under yolo mode = %v, want allow", got)
 	}
 	// Verify that regular tools ARE auto-allowed in YOLO (sanity check).
 	if got := gate.Policy.Decide("bash", false, json.RawMessage(`{"command":"go test ./..."}`)); got != permission.Allow {

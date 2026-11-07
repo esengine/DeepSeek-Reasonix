@@ -211,10 +211,10 @@ func (c *Controller) newInteractiveGate() *permission.Gate {
 	// `--allowed-tools remember` write memory with no prompt. Strip them so the
 	// forced Ask rules below stay authoritative.
 	policy.SessionAllow = rulesWithoutFreshHumanApproval(policy.SessionAllow)
-	policy.Ask = append(policy.Ask,
-		permission.Rule{Tool: memoryRememberTool},
-		permission.Rule{Tool: memoryForgetTool},
-	)
+	policy.Ask = append(policy.Ask, permission.Rule{Tool: memoryRememberTool})
+	if mode != ToolApprovalYolo {
+		policy.Ask = append(policy.Ask, permission.Rule{Tool: memoryForgetTool})
+	}
 	var approver permission.Approver = gateApprover{c}
 	if mode == ToolApprovalDontAsk {
 		approver = denyPermissionApprover{}
