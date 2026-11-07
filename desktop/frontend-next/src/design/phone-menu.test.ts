@@ -52,32 +52,21 @@ describe("the model menu as a sheet on a phone", () => {
     expect(list).toMatch(/overflow-y:\s*auto/);
   });
 
-  it("draws model rows 48px tall with the name in the monospace face", () => {
-    expect(rule(S + " button.mi")).toMatch(/min-height:\s*48px/);
-    expect(rule(S + " button.mi")).toMatch(/border-radius:\s*10px/);
-    expect(rule(S + " button.mi .lb")).toMatch(/font:\s*var\(--w-med\) var\(--fs-lead\)\/1\.3 var\(--mono\)/);
+  it("keeps model rows compact: 36px tall, tight padding, a 13px monospace name", () => {
+    const row = rule(S + " button.mi");
+    expect(row).toMatch(/min-height:\s*36px/);
+    expect(row).toMatch(/padding:\s*0 10px/);
+    expect(row).toMatch(/border-radius:\s*8px/);
+    expect(rule(S + " button.mi .lb")).toMatch(/font:\s*var\(--w-med\) var\(--fs-ui\)\/1\.3 var\(--mono\)/);
+    expect(rule(S + " :is(.vendor-mark, .mi-mono)")).toMatch(/width:\s*16px/);
+    expect(rule(S + " .menu-rows .mi.head")).toMatch(/min-height:\s*26px/);
   });
 
-  it("lays the effort levels out as one row of 36px chips, selected one raised", () => {
+  it("keeps the effort column a full-width block holding the slider", () => {
     const column = rule(S + " .menu-aside");
-    expect(column).toMatch(/display:\s*flex/);
     expect(column).toMatch(/flex-direction:\s*row/);
     expect(column).toMatch(/flex-wrap:\s*wrap/);
-    const chip = rule(S + " .menu-aside > button.mi[data-strength]");
-    expect(chip).toMatch(/flex:\s*1 1 0/);
-    expect(chip).toMatch(/display:\s*flex/);
-    expect(rule(S + " .menu-aside > button.mi[data-strength] .tx")).toMatch(/text-align:\s*center/);
-    expect(chip).toMatch(/height:\s*36px/);
-    expect(chip).toMatch(/border-radius:\s*7px/);
-    expect(chip).toMatch(/background:\s*var\(--overlay\)/);
-    expect(rule(S + " .menu-aside > button.mi[data-strength][data-on]")).toMatch(/background:\s*var\(--raised\)/);
-    expect(rule(S + " .menu-aside > button.mi[data-strength][data-on]")).toMatch(/box-shadow:\s*0 1px 2px rgb\(0 0 0 \/ \.1\)/);
-  });
-
-  it("keeps only the level's name in each chip, and drops the explanations the board leaves out", () => {
-    const hidden = rule(S + " .menu-aside > button.mi[data-strength] :is(.ds, .studio-item-meta, .studio-item-badge, .studio-effort-strength, .dot, .rt)");
-    expect(hidden).toMatch(/display:\s*none/);
-    expect(rule(S + " .menu-aside > .mi.head:last-child")).toMatch(/display:\s*none/);
+    expect(rule(S + " .menu-aside > .effort-slider")).toMatch(/flex:\s*0 0 100%/);
   });
 
   it("slides up from the bottom, and not at all under reduced motion", () => {
@@ -85,5 +74,32 @@ describe("the model menu as a sheet on a phone", () => {
     expect(menu).toMatch(/@keyframes sheet-up\s*\{\s*from\s*\{\s*transform:\s*translateY\(100%\)/);
     expect(menu).toMatch(/prefers-reduced-motion: reduce\)[^}]*menu-sheet[^{]*\{[^}]*animation:\s*none/);
     expect(menu).toMatch(/:root\[data-effects="reduced"\][^{]*menu-sheet[^{]*\{[^}]*animation:\s*none/);
+  });
+});
+
+describe("the reasoning slider", () => {
+  const track = (selector: string): string => rule(selector);
+
+  it("is a card with the level named large above a thick rounded track", () => {
+    expect(track("\n.effort-slider")).toMatch(/background:\s*var\(--overlay\)/);
+    expect(track("\n.effort-slider")).toMatch(/border-radius:\s*14px/);
+    expect(track(".effort-slider .es-name")).toMatch(/font:\s*var\(--w-semi\) 18px/);
+    const input = track('.effort-slider input[type="range"]');
+    expect(input).toMatch(/height:\s*30px/);
+    expect(input).toMatch(/border-radius:\s*15px/);
+  });
+
+  it("fills with a gradient up to the thumb and the level name wears the same gradient", () => {
+    expect(track("\n.effort-slider")).toMatch(/--track:\s*linear-gradient\(90deg, var\(--net\), color-mix/);
+    expect(track('.effort-slider input[type="range"]')).toMatch(/background:\s*var\(--track\) 0 0 \/ calc\(var\(--p\) \* \(100% - 30px\) \+ 15px\) 100% no-repeat, var\(--raised\)/);
+    expect(track(".effort-slider .es-name")).toMatch(/background-clip:\s*text/);
+  });
+
+  it("has a white round thumb as wide as the track is tall", () => {
+    const thumb = track('.effort-slider input[type="range"]::-webkit-slider-thumb');
+    expect(thumb).toMatch(/width:\s*30px/);
+    expect(thumb).toMatch(/height:\s*30px/);
+    expect(thumb).toMatch(/border-radius:\s*50%/);
+    expect(thumb).toMatch(/background:\s*#fff/);
   });
 });
