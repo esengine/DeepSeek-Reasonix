@@ -35,6 +35,9 @@ export function PlanFold({ plan, goal, goalStatus, goalRuntime, shown, running, 
   const bar = useRef<HTMLButtonElement>(null);
   const root = useRef<HTMLDivElement>(null);
   const refocus = useRef(false);
+  const list = useRef<HTMLDivElement>(null);
+  const [asked, setAsked] = useState(false);
+  const [leaving, setLeaving] = useState(false);
   const put = () => { refocus.current = true; setOpen(false); };
   useDismiss(open, root, put);
   const yields = plan.length > 0 && (!!cardInView || !!paused);
@@ -42,12 +45,28 @@ export function PlanFold({ plan, goal, goalStatus, goalRuntime, shown, running, 
   useEffect(() => {
     if (hidden) setOpen(false);
   }, [hidden]);
+  // Closing is a state change the list answers before it goes: it stays, marked
+  // as leaving, for as long as the stylesheet gives it an exit to play. Where
+  // none plays (reduced motion, no animation support) it goes at once.
+  if (asked !== open) {
+    setAsked(open);
+    setLeaving(!open);
+  }
+  const mounted = open || leaving;
+  useLayoutEffect(() => {
+    if (!leaving) return;
+    const playing = list.current?.getAnimations?.() ?? [];
+    if (playing.length === 0) { setLeaving(false); return; }
+    let live = true;
+    void Promise.allSettled(playing.map((a) => a.finished)).then(() => { if (live) setLeaving(false); });
+    return () => { live = false; };
+  }, [leaving]);
   // The open list floats above the composer, so the transcript has to be told
   // how much of its bottom edge it covers.
   useLayoutEffect(() => {
     const strip = root.current;
     const composer = strip?.closest<HTMLElement>(".compose");
-    if (!open || hidden || !strip || !composer) return;
+    if (!mounted || hidden || !strip || !composer) return;
     const fit = () => composer.style.setProperty("--todo-h", `${Math.ceil(strip.getBoundingClientRect().height)}px`);
     fit();
     const watch = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(fit);
@@ -56,13 +75,13 @@ export function PlanFold({ plan, goal, goalStatus, goalRuntime, shown, running, 
       watch?.disconnect();
       composer.style.removeProperty("--todo-h");
     };
-  }, [open, hidden]);
+  }, [mounted, hidden]);
   // The bar is not drawn while the list is open, so focus returns once it is.
   useEffect(() => {
-    if (open || !refocus.current) return;
+    if (mounted || !refocus.current) return;
     refocus.current = false;
     bar.current?.focus();
-  }, [open]);
+  }, [mounted]);
   if (hidden) return null;
   const done = plan.filter(stepDone).length;
   const now = currentStep(plan);
@@ -73,7 +92,7 @@ export function PlanFold({ plan, goal, goalStatus, goalRuntime, shown, running, 
     <span className="goal-st" data-tone={goalTone(goalStatus)}><i aria-hidden="true" />{goalStatusText(goalStatus)}{goalRuntime && goalRuntime.workDurationMs > 0 ? ` · ${workTime(goalRuntime.workDurationMs)}` : ""}</span>
   ) : null;
   return (
-    <div className="studio-todo" data-open={open ? "" : undefined} data-goal={goalOnly ? "" : undefined} ref={root}>
+    <div className="studio-todo" data-open={mounted ? "" : undefined} data-goal={goalOnly ? "" : undefined} ref={root}>
       <button
         type="button"
         ref={bar}
@@ -93,14 +112,14 @@ export function PlanFold({ plan, goal, goalStatus, goalRuntime, shown, running, 
         )}
         <StudioIcon name="down" className="studio-todo-fold" />
       </button>
-      {!open && progress && plan.length > 0 && (
+      {!mounted && progress && plan.length > 0 && (
         <div className="prog2 studio-todo-progress sr-only" role="progressbar" aria-label={t("plan.strip.progress")}
           aria-valuemin={0} aria-valuemax={plan.length} aria-valuenow={done}>
           <span className="track"><i style={{ width: `${Math.round((done / plan.length) * 100)}%` }} /></span>
         </div>
       )}
-      {open && (
-        <div className="studio-todo-body">
+      {mounted && (
+        <div className="studio-todo-body" ref={list} data-closing={leaving ? "" : undefined}>
           <div className="studio-todo-head">
             {moving && plan.length > 0 ? <RMark className="plan-spin" /> : goalOnly && <StudioIcon name="target" />}
             <b>{title}</b>

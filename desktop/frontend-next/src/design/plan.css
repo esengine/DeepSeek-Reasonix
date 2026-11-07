@@ -84,6 +84,12 @@
   position: static; inset: auto; max-height: min(46vh, 380px); padding: 0;
   border: 0; border-radius: inherit; background: transparent; box-shadow: none;
 }
+.compose > .studio-todo > .studio-todo-body { animation: plan-open var(--m-panel) backwards; }
+.compose > .studio-todo > .studio-todo-body[data-closing] { pointer-events: none; animation: plan-close var(--m-exit) both; }
+@keyframes plan-open { 0% { height: 34px; opacity: .4; overflow-y: hidden; } 99% { overflow-y: hidden; } }
+@keyframes plan-close { from { overflow-y: hidden; } to { height: 34px; opacity: 0; overflow-y: hidden; } }
+@media (prefers-reduced-motion: reduce) { .compose > .studio-todo > .studio-todo-body, .compose > .studio-todo > .studio-todo-body[data-closing] { animation: none; } }
+:root[data-effects="reduced"] .compose > .studio-todo > .studio-todo-body, :root[data-effects="reduced"] .compose > .studio-todo > .studio-todo-body[data-closing] { animation: none; }
 .compose .studio-todo-head {
   position: sticky; top: 0; z-index: 1; display: flex; align-items: center; gap: 8px; height: 34px; margin: 0; padding: 0 8px 0 12px;
   box-sizing: border-box; border-bottom: 1px solid var(--hair); background: var(--raised);
