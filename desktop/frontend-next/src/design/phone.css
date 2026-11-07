@@ -36,12 +36,14 @@
 [data-fold~="phone"] .compose .turntools > .studio-attach:first-child { box-sizing: border-box; width: 32px; height: 32px; padding: 0; border: 1px solid var(--border); border-radius: 50%; background: transparent; color: var(--muted); }
 [data-fold~="phone"] .compose .turntools > .studio-attach:first-child .studio-icon { width: 14px; height: 14px; }
 [data-fold~="phone"] .compose .turntools > .studio-model-group { order: 1; flex: 0 1 auto; min-width: 0; margin-left: 0; }
-[data-fold~="phone"] .compose .turntools .model-picker { box-sizing: border-box; height: 28px; gap: 5px; padding: 0 10px; border-radius: 999px; color: var(--muted); font: var(--w-reg) var(--fs-meta)/1 var(--ui); }
+[data-fold~="phone"] .compose .turntools .studio-model-control { max-width: none; }
+[data-fold~="phone"] .compose .turntools .model-picker .studio-effort-reading { display: inline-flex; }
+[data-fold~="phone"] .compose .turntools .model-picker { box-sizing: border-box; max-width: none; height: 28px; gap: 5px; padding: 0 10px; border-radius: 999px; color: var(--muted); font: var(--w-reg) var(--fs-meta)/1 var(--ui); }
 [data-fold~="phone"] .compose .turntools .model-picker :is(.studio-icon, .vmark, svg) { display: none; }
 [data-fold~="phone"] .compose .turntools .model-picker .studio-model-sep { display: inline; width: auto; height: auto; margin: 0; background: none; }
 [data-fold~="phone"] .compose .turntools .model-picker .studio-model-sep::before { content: "·"; }
-[data-fold~="phone"] .compose .turntools > .turn-more { order: 2; display: inline-grid; place-items: center; width: 32px; height: 32px; padding: 0; border: 0; border-radius: 50%; background: transparent; color: var(--muted); }
-[data-fold~="phone"] .compose .turntools > .turn-more svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.45; stroke-linecap: round; }
+[data-fold~="phone"] .compose .turntools > .turn-more { order: 2; display: inline-grid; place-items: center; width: 32px; height: 32px; padding: 0; border: 1px solid var(--border); border-radius: 50%; background: transparent; color: var(--muted); }
+[data-fold~="phone"] .compose .turntools > .turn-more svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2.6; stroke-linecap: round; }
 [data-fold~="phone"] .compose .turntools > :not(:first-child, .studio-model-group, .turn-more) { display: none; order: 4; }
 [data-fold~="phone"] .compose .turntools[data-more] > :not(:first-child, .studio-model-group, .turn-more) { display: flex; }
 [data-fold~="phone"] .compose .go { align-self: flex-start; gap: 6px; }

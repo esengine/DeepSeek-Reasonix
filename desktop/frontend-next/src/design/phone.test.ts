@@ -166,3 +166,32 @@ describe("the phone stylesheets", () => {
     expect(rule('[data-fold~="phone"] .compose .turntools .model-picker .studio-model-sep::before')).toContain('content: "·"');
   });
 });
+
+describe("the composer's more-tools button", () => {
+  const more = '[data-fold~="phone"] .compose .turntools > .turn-more svg';
+
+  it("draws its three dots heavy enough to be seen, as the title bar's does", () => {
+    const rule_ = rule(more);
+    expect(rule_).toMatch(/stroke-width:\s*2\.6/);
+    expect(rule_).toMatch(/width:\s*16px/);
+  });
+
+  it("is a ring like the add button beside it, so it reads as something to press", () => {
+    const button = rule('[data-fold~="phone"] .compose .turntools > .turn-more');
+    expect(button).toMatch(/border:\s*1px solid var\(--border\)/);
+    expect(button).toMatch(/width:\s*32px/);
+  });
+});
+
+describe("the model pill on a phone", () => {
+  const row = '[data-fold~="phone"] .compose .turntools';
+
+  it("takes the room its text needs instead of the narrow cap a small container gives it", () => {
+    expect(rule(row + " .studio-model-control")).toMatch(/max-width:\s*none/);
+    expect(rule(row + " .model-picker")).toMatch(/max-width:\s*none/);
+  });
+
+  it("shows the reasoning level after the dot, so the dot has something to separate", () => {
+    expect(rule(row + " .model-picker .studio-effort-reading")).toMatch(/display:\s*inline-flex/);
+  });
+});
