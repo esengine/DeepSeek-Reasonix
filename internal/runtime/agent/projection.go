@@ -29,11 +29,9 @@ const (
 
 // Compaction mode labels.
 const (
-	CompactionModeNative     = "native"
 	CompactionModeSummarized = "summarized"
 	CompactionModeDegraded   = "degraded"
 	CompactionModeArchived   = "archived"
-	CompactionModeSnip       = "snip"
 )
 
 // CompactRequest is a maintenance the user asked for. Asking is what makes it
@@ -93,7 +91,7 @@ func CompactDeclineText(reason CompactionNoopReason) string {
 	case NoopNoNewClosedPrefix:
 		return "nothing has closed since the last checkpoint"
 	case NoopFoldBelowEconomics:
-		return "too little has been added to pay for another summary"
+		return "too little has been added since the last fold to be worth another one"
 	case NoopActiveTurnBoundary:
 		return "the turn in flight has to finish first"
 	case NoopFoldEmptyAfterHooks:

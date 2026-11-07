@@ -40,9 +40,9 @@ describe("what the card says sent a fold", () => {
 
 describe("what the card says when a fold installed nothing", () => {
   it("names the cause the host settled", () => {
-    const html = draw({ trigger: "auto", code: "digest_lost_every_change" });
+    const html = draw({ trigger: "auto", code: "fixed_prefix_above_trigger" });
     expect(html).toContain("压缩未完成");
-    expect(html).toContain("摘要没有记下");
+    expect(html).toContain("无法折叠的固定部分");
     expect(html).not.toContain("压缩完成");
   });
 

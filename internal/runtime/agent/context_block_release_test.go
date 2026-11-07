@@ -47,7 +47,7 @@ func prepare(t *testing.T, a *Agent, trigger string) error {
 func TestDeterministicFailureStaysBlockedDespiteGrowth(t *testing.T) {
 	p := &failingSummaryProvider{}
 	a := newPressureAgent(t, p)
-	a.window().recordContextMaintenanceOutcome("", CompactionTriggerPressure, "summary", "blocked", FailSummaryInputTooLarge, "too large")
+	a.window().recordContextMaintenanceOutcome("", CompactionTriggerPressure, "summary", "blocked", NoopFixedPrefixAboveTrigger, "too large")
 	growBy(a, 8000)
 	_ = prepare(t, a, CompactionTriggerPressure)
 	if p.calls != 0 {

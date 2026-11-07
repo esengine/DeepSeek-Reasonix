@@ -172,6 +172,15 @@ func TestACompactionNoticeFollowsTheUILanguage(t *testing.T) {
 	}
 }
 
+func TestAnArchivedFoldIsNamedForWhatItIs(t *testing.T) {
+	inChinese(t)
+	detail := event.CompactionNotice{Mode: "archived", SourceTokens: 122525, ProjectionTokens: 61192}.Encode()
+	got := renderNotice(&Item{Code: event.NoticeCodeCompactionTelemetry, Text: "Context compacted (archived): about 122525 -> 61192 tokens.", Detail: detail})
+	if !strings.Contains(got, "上下文已压缩（归档到文件）：约 122525 → 61192 tokens") {
+		t.Fatalf("compaction = %q", got)
+	}
+}
+
 func TestJobNoticesFollowTheUILanguage(t *testing.T) {
 	inChinese(t)
 	detail := event.JobNotice{Kind: "bash", ID: "bash-126", Label: "make build"}.Encode()

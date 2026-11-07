@@ -21,7 +21,7 @@ func TestRefusedCandidateHoldLiftsOnGrowthAndOverflow(t *testing.T) {
 			t.Errorf("%s: the hold survived the growth step", code)
 		}
 	}
-	for _, code := range []CompactionNoopReason{FailPersistFailed, FailHookRefused, NoopFixedPrefixAboveTrigger, NoopCandidateAboveTrigger, NoopDigestLostEveryChange} {
+	for _, code := range []CompactionNoopReason{FailPersistFailed, FailHookRefused, NoopFixedPrefixAboveTrigger, NoopCandidateAboveTrigger} {
 		r := &sessionstore.ContextMaintenanceReceipt{Status: "blocked", Action: "summary", Code: string(code), InputTokens: failedAt}
 		if !a.blockedReceiptHolds(r, failedAt+a.retryGrowthStep(failedAt)*4) {
 			t.Errorf("%s: a class growth cannot change must keep holding", code)

@@ -486,10 +486,8 @@ func compactionNoticeText(detail string) (string, bool) {
 		how = i18n.M.CompactionHowSummarized
 	case "degraded":
 		how = i18n.M.CompactionHowDegraded
-	case "native":
-		how = i18n.M.CompactionHowNative
-	case "snip":
-		how = i18n.M.CompactionHowSnip
+	case "archived":
+		how = i18n.M.CompactionHowArchived
 	}
 	return fmt.Sprintf(i18n.M.NoticeCompactionFmt, how, p.SourceTokens, p.ProjectionTokens), true
 }

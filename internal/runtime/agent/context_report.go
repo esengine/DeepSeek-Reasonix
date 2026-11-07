@@ -70,7 +70,10 @@ func (a *contextWindow) contextReport() ContextReport {
 	if r := st.LastReceipt; r != nil && r.Status == "applied" {
 		rep.LastTrigger = r.Trigger
 		if r.Action == "summary" {
-			rep.LastMode = CompactionModeSummarized
+			rep.LastMode = CompactionModeArchived
+			if r.SummaryUsage.Calls > 0 || r.SummaryUsage.RequestAttempts > 0 {
+				rep.LastMode = CompactionModeSummarized
+			}
 		} else if r.Action != "" {
 			rep.LastMode = r.Action
 		}

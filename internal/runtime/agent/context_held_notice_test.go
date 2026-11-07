@@ -38,7 +38,7 @@ func TestHoldBelowTheTriggerIsNotAnnounced(t *testing.T) {
 		{Role: provider.RoleUser, Content: "task"},
 	}}, Options{ContextWindow: 20_000, CompactRatio: 0.5, WorkspaceID: "workspace", ModelRef: "model"}, rec)
 	a.BindSessionPath(testenv.TempDir(t)+"/session.jsonl", true)
-	a.window().recordContextMaintenanceOutcome("", CompactionTriggerPressure, "summary", "blocked", FailSummaryInputTooLarge, "too large")
+	a.window().recordContextMaintenanceOutcome("", CompactionTriggerPressure, "summary", "blocked", NoopFixedPrefixAboveTrigger, "too large")
 	_ = prepare(t, a, CompactionTriggerPressure)
 	if got := rec.held(); len(got) != 0 {
 		t.Fatalf("a hold with nothing due was announced: %+v", got)

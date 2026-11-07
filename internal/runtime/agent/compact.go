@@ -125,7 +125,7 @@ func (a *contextWindow) refoldMinTokens() int {
 
 // checkpointCeiling is the auto-checkpoint acceptance upper bound: candidates
 // below it are accepted without padding. The default is half the window; a
-// user who would rather accept a looser fold than pay for another summary
+// user who would rather accept a looser fold than fold again sooner
 // raises it.
 func (a *contextWindow) checkpointCeiling() int {
 	window := a.effectiveContextWindow()

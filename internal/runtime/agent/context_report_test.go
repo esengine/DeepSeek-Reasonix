@@ -52,3 +52,28 @@ func TestContextReportLeavesThresholdsZeroWhenDisabled(t *testing.T) {
 		t.Errorf("disabled maintenance reported thresholds: %+v", rep)
 	}
 }
+
+// A fold that wrote no summary is not reported as summarized; only a receipt
+// that recorded a summarizer call, from a session saved before folds were
+// archived, is.
+func TestContextReportNamesHowTheLastFoldWasMade(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		usage sessionstore.CompactionUsage
+		want  string
+	}{
+		{"archived", sessionstore.CompactionUsage{}, CompactionModeArchived},
+		{"summarized earlier", sessionstore.CompactionUsage{Calls: 1, RequestAttempts: 1}, CompactionModeSummarized},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			a := New(&fakeProvider{reply: "unused"}, tool.NewRegistry(), sessionstore.NewSession("sys"), Options{
+				ContextWindow: 200_000, CompactRatio: 0.85}, event.Discard)
+			a.sess.win.compactionMu.Lock()
+			a.sess.win.compactionState.LastReceipt = &sessionstore.ContextMaintenanceReceipt{Status: "applied", Action: "summary", SummaryUsage: tc.usage}
+			a.sess.win.compactionMu.Unlock()
+			if got := a.ContextReport().LastMode; got != tc.want {
+				t.Fatalf("LastMode = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}

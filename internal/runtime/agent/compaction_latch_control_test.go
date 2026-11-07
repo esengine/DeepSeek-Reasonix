@@ -14,7 +14,7 @@ func TestPlanRefusalReceiptStillHoldsAfterGrowth(t *testing.T) {
 	a := newPressureAgent(t, p)
 	w := a.window()
 	w.recordContextMaintenanceOutcome("", CompactionTriggerPressure, "summary", "blocked", FailHookRefused, "compaction extension refused the fold")
-	for _, code := range []CompactionNoopReason{FailHookRefused, FailPersistFailed, NoopCandidateAboveTrigger, NoopDigestLostEveryChange} {
+	for _, code := range []CompactionNoopReason{FailHookRefused, FailPersistFailed, NoopCandidateAboveTrigger} {
 		r := &sessionstore.ContextMaintenanceReceipt{Status: "blocked", Action: "summary", Code: string(code), InputTokens: 1000}
 		if !w.blockedReceiptHolds(r, 1000+w.retryGrowthStep(1000)*4) {
 			t.Errorf("%s: a refusal growth cannot change was released", code)
