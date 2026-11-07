@@ -110,7 +110,11 @@
   .compose .studio-effort-reading, .compose .studio-model-sep { display: none; }
 }
 .compose .studio-model-group { flex: none; margin-left: auto; }
-.compose .model-picker .nm { flex: none; max-width: none; }
+.compose .model-picker .nm { flex: 0 1 auto; min-width: 0; max-width: none; overflow: hidden; text-overflow: ellipsis; }
+.compose .model-picker > :not(.nm) { flex: none; }
+@container conversation (max-width: 720px) {
+  .compose .studio-model-control { max-width: clamp(84px, 40cqw, 220px); }
+}
 .compose .studio-model-control { flex: none; min-width: 0; }
 .composer-menu.mode-menu { width: 300px; padding: 0 0 6px; border-color: var(--border); }
 .mode-menu .mi.head { height: auto; padding: 12px 14px 8px; color: var(--faint); font: var(--w-reg) var(--fs-meta)/1.3 var(--ui); }
