@@ -22,3 +22,4 @@
 [data-fold~="phone"] .prefs-sheet .prefs-main .srv .srv-sub { flex-wrap: wrap; white-space: normal; overflow: visible; }
 [data-fold~="phone"] .prefs-sheet .prefs-main .skrow { flex-wrap: wrap; row-gap: 6px; }
 [data-fold~="phone"] .prefs-sheet .prefs-main .skrow .sk-main { flex: 1 1 12em; min-width: min(12em, 100%); }
+[data-fold~="phone"] .prefs-sheet::before, [data-fold~="phone"] .prefs-sheet::after { display: none; }

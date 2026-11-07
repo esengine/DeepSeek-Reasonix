@@ -135,3 +135,9 @@ describe("the settings sheet fills a phone's screen", () => {
     expect(full).toMatch(/border-radius:\s*0/);
   });
 });
+
+describe("the desktop's nav-column decorations on a phone", () => {
+  it("draws neither the divider nor the darker strip behind a column that is no longer there", () => {
+    expect(rule(S + "::before, " + S + "::after")).toMatch(/display:\s*none/);
+  });
+});
