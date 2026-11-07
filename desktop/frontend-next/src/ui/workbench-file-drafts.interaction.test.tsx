@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import { EditorView } from "@codemirror/view";
 import userEvent from "@testing-library/user-event";
 import { afterEach, expect, it, vi } from "vitest";
@@ -10,7 +10,7 @@ import "./testkit";
 
 Range.prototype.getClientRects = () => [] as unknown as DOMRectList;
 Range.prototype.getBoundingClientRect = () => new DOMRect(0, 0, 0, 0);
-afterEach(cleanup);
+afterEach(() => { cleanup(); localStorage.clear(); });
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -45,7 +45,11 @@ function fixture() {
   const view = render(<WorkbenchPanel {...props} />);
   const open = async (path: string) => {
     await user.click(button("files"));
-    await user.click(await screen.findByRole("button", { name: path }));
+    await user.click(await waitFor(() => {
+      const row = document.querySelector<HTMLElement>(`[data-action-click="workbench.file"][data-target="${path}"]`);
+      if (!row) throw new Error("no explorer row");
+      return row;
+    }));
   };
   return { ...view, user, port, read, save, props, open };
 }
@@ -77,6 +81,7 @@ it("keeps a draft through launcher cancellation, hiding and closing then reopeni
   f.rerender(<WorkbenchPanel {...f.props} />);
   await editor("saved a.txt draft");
   await f.user.click(button("close", "file:a.txt"));
+  await f.user.click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "取消" }));
   await f.open("b.txt");
   await editor("saved b.txt");
   await f.open("a.txt");
@@ -238,13 +243,13 @@ it("evicts clean closed files but retains a closed draft until its pending save 
   await append(" draft");
   const pending = deferred<WorkspaceFile>();
   f.save.mockReturnValueOnce(pending.promise);
-  await f.user.click(button("save"));
   await f.user.click(button("close", "file:a.txt"));
-  await f.open("a.txt");
+  await f.user.click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "保存" }));
+  expect(button("tab", "file:a.txt")).toBeTruthy();
   await editor("saved a.txt draft");
   expect(button("save").disabled).toBe(true);
-  await f.user.click(button("close", "file:a.txt"));
   await act(async () => pending.resolve(file("a.txt", "saved a.txt draft", "r2")));
+  await waitFor(() => expect(button("tab", "file:a.txt")).toBeNull());
   const savedRead = deferred<WorkspaceFile>();
   f.read.mockReturnValueOnce(savedRead.promise);
   await f.open("a.txt");

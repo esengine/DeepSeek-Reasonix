@@ -101,6 +101,7 @@ function WorkspacesView({ hub, tree, treeRead, answered = null, runtimes, active
     if (e instanceof HttpError && e.reason?.code === "workspace.folder_missing") { setGone(ws.root); setConfirm(ws.root); } else onError(e);
   };
   const [selection, setSelection] = useState<Set<string> | null>(null);
+  const selectFrom = useRef("");
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   // The row a Delete key asked about. The question replaces that row, so focus
   // goes back to it once the question is gone, or a keyboard is left nowhere.
@@ -369,7 +370,7 @@ function WorkspacesView({ hub, tree, treeRead, answered = null, runtimes, active
     <>
       {moveTo.dialog}
       <SessionBatch hub={hub} selection={selection} selected={selected} displayed={displayed} onSelect={setSelection}
-        onExit={() => treeKeys.ref.current?.parentElement?.previousElementSibling?.querySelector<HTMLElement>('[data-action="machine.menu"]')?.focus()}
+        onExit={() => document.querySelector<HTMLElement>(`[data-action="workspace.menu"][data-target="${CSS.escape(selectFrom.current)}"]`)?.focus()}
         onBusy={(pending) => { setBusy(pending ? "batch" : ""); if (pending) { setSessionMenu(""); setEditing(""); setConfirm(""); } }}
         onClose={onClose} onArchive={onArchive} liveIds={liveIds} reload={reload} onError={onError} />
       <ProjectsHeader adder={adder} onRecent={onRecent} onToggleAll={onToggleAll} allFolded={needle ? false : allFolded} canFold={canFold} searching={!!needle} />
@@ -491,7 +492,7 @@ function WorkspacesView({ hub, tree, treeRead, answered = null, runtimes, active
                         <WorkspaceReveal ws={ws} hub={hub} dismiss={dismissMenu} onError={onError} />
                         {ws.remembered && <WorkspaceOrder root={ws.root} position={tree.filter((w) => w.remembered).findIndex((w) => w.root === ws.root)} total={tree.filter((w) => w.remembered).length}
                           hub={hub} reload={reload} dismiss={dismissMenu} onError={onError} />}
-                        <ProjectMenuExtras canSelect={displayed.length > 0} selecting={selection !== null} onSelect={() => setSelection(new Set())} dismiss={dismissMenu} />
+                        <ProjectMenuExtras canSelect={displayed.length > 0} selecting={selection !== null} onSelect={() => { selectFrom.current = ws.root; setSelection(new Set()); }} dismiss={dismissMenu} />
                         <div className="session-pop-group">
                           <button className="danger" role="menuitem" data-action="workspace.remove" onClick={() => { setConfirm(ws.root); dismissMenu(); }}>
                             <StudioIcon name="close" /><span>{t("common.remove_from_the_list")}</span><small>{t("common.keeps_files")}</small>

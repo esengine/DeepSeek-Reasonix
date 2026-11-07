@@ -87,7 +87,8 @@ it("filters by the word on the kernel and never asks for every row", async () =>
   await userEvent.type(screen.getByRole("searchbox", { name: "搜索会话 / 项目" }), "release plan");
   await waitFor(() => expect(asked.at(-1)).toMatchObject({ scope: "", q: "release plan" }));
   expect(asked.every((window) => window?.limit !== 0)).toBe(true);
-  expect(await screen.findByText("release plan 109")).toBeTruthy();
+  // The query is marked inside the title, so the title is no longer one text node.
+  await waitFor(() => expect(document.querySelector(".rail")!.textContent).toContain("release plan 109"));
 
   await userEvent.clear(screen.getByRole("searchbox", { name: "搜索会话 / 项目" }));
   await waitFor(() => expect(asked.at(-1)).toMatchObject({ scope: "active", q: "" }));

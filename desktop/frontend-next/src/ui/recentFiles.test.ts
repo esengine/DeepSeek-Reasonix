@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import { beforeEach, expect, it } from "vitest";
 import { readRecentFiles, rememberFile } from "./recentFiles";
 

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, expect, it } from "vitest";
-import { act, cleanup, render, screen, within } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import "./testkit";
 import { App } from "./App";
@@ -8,6 +8,11 @@ import { MockHub } from "../port/mock_hub";
 import type { TreeSession, TreeWindow, TreeWorkspace } from "../port/hub";
 
 afterEach(cleanup);
+
+async function chooseScope(name: RegExp) {
+  await userEvent.click(await screen.findByRole("button", { name: "会话范围" }));
+  await userEvent.click(within(document.querySelector<HTMLElement>(".session-filter-menu:not([hidden])")!).getByRole("menuitem", { name }));
+}
 
 const row = (n: number, archived: boolean): TreeSession => ({ path: `/s/${archived ? "old" : "new"}-${n}.jsonl`, name: `${archived ? "old" : "new"}-${n}`, title: `${archived ? "归档的" : "活跃的"}会话 ${n}`, turns: 2, archived });
 const folder = (sessions: TreeSession[]): TreeWorkspace => ({
@@ -40,9 +45,9 @@ function slowArchive() {
 it("while the archived rows are being read the list says it is reading, not that nothing matches", async () => {
   const { hub, release } = slowArchive();
   render(<App hub={hub} />);
-  const group = await screen.findByRole("group", { name: "会话范围" });
+  await screen.findByRole("button", { name: "会话范围" });
   await screen.findByText("活跃的会话 1");
-  await userEvent.click(within(group).getByRole("button", { name: /归档/ }));
+  await chooseScope(/归档/);
   expect(await screen.findByText("正在读取文件夹…")).toBeTruthy();
   expect(screen.queryByText("没有匹配的会话")).toBeNull();
   await act(async () => release());
@@ -61,9 +66,9 @@ it("an archive that really holds nothing still says so once the kernel has answe
   };
   h.tree = async () => [{ ...folder([row(1, false)]), total: 1, archived: 0 }];
   render(<App hub={h} />);
-  const group = await screen.findByRole("group", { name: "会话范围" });
+  await screen.findByRole("button", { name: "会话范围" });
   await screen.findByText("活跃的会话 1");
-  await userEvent.click(within(group).getByRole("button", { name: /归档/ }));
+  await chooseScope(/归档/);
   expect(await screen.findByText("没有匹配的会话")).toBeTruthy();
 });
 
@@ -87,15 +92,16 @@ it("a long archive loads further pages in the archived view, and a search still 
     return [folder([row(1, false)])];
   };
   render(<App hub={h} />);
-  const group = await screen.findByRole("group", { name: "会话范围" });
+  await screen.findByRole("button", { name: "会话范围" });
   await screen.findByText("活跃的会话 1");
-  await userEvent.click(within(group).getByRole("button", { name: /归档/ }));
+  await chooseScope(/归档/);
   await screen.findByText("归档的会话 50");
   await userEvent.click(await screen.findByRole("button", { name: /显示更多/ }));
   await screen.findByText("归档的会话 100");
   expect(asked.at(-1)).toMatchObject({ scope: "archived", limits: { "/w": 100 } });
-  await userEvent.click(within(group).getByRole("button", { name: /全部/ }));
+  await chooseScope(/全部/);
   await userEvent.type(screen.getByRole("searchbox", { name: "搜索会话 / 项目" }), "7");
-  expect(await screen.findByText("归档的会话 7")).toBeTruthy();
+  // The query is marked inside the title, so the title is no longer one text node.
+  await waitFor(() => expect(document.querySelector(".rail")!.textContent).toContain("归档的会话 7"));
   expect(asked.at(-1)?.q).toBe("7");
 });

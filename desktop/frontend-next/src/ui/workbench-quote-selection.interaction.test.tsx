@@ -11,7 +11,7 @@ import "./testkit";
 
 Range.prototype.getClientRects = () => [] as unknown as DOMRectList;
 Range.prototype.getBoundingClientRect = () => new DOMRect(0, 0, 0, 0);
-afterEach(() => { cleanup(); vi.restoreAllMocks(); });
+afterEach(() => { cleanup(); vi.restoreAllMocks(); localStorage.clear(); });
 
 const props = (port: MockPort) => ({
   port, workspaceRoot: "/work/project", tabs: [], manual: false, shown: true, scheme: "light" as const,

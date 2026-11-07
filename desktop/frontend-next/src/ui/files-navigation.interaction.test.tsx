@@ -39,10 +39,16 @@ async function mount(empty = false) {
 }
 const focused = () => document.querySelector<HTMLElement>(".pane[data-active]")!;
 const filesShown = (pane = focused()) => pane.querySelector(".workbench-body")!.hasAttribute("data-files");
-async function palette(query: string) {
+// A typed query ranks a settings match above an action, so Enter would take
+// whichever setting mentions the word; the action is picked by its identity.
+async function palette(query: string, action = "files") {
   fireEvent.keyDown(window, { key: "k", ctrlKey: true });
   await userEvent.type(await screen.findByRole("textbox", { name: "搜索会话或操作" }), query);
-  await userEvent.keyboard("{Enter}");
+  await userEvent.click(await waitFor(() => {
+    const hit = document.querySelector<HTMLElement>(`.palette-hit[data-target="c:${action}"]`);
+    expect(hit).toBeTruthy();
+    return hit!;
+  }));
 }
 
 it.each(["rail", "sidebar", "palette"])("opens only the focused pane's files from %s and handles repeated navigation", async (entry) => {
@@ -71,7 +77,7 @@ it.each(["rail", "sidebar", "palette"])("opens only the focused pane's files fro
 
 it("leaves Storage in settings and dismisses settings when Files is chosen", async () => {
   await mount();
-  await palette("storage");
+  await palette("storage", "storage");
   await waitFor(() => expect(document.querySelector(".app")!.hasAttribute("data-prefs")).toBe(true));
   await waitFor(() => expect(document.querySelector("#set-storage")).toBeTruthy());
   await palette("文件");

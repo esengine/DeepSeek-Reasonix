@@ -13,7 +13,7 @@ export function captureSessionFocus(row: HTMLElement | null): () => void {
     if (document.activeElement !== from && document.activeElement !== document.body) return;
     const replacement = target ? [...document.querySelectorAll<HTMLElement>('[role="treeitem"]')].find((node) => node.dataset.target === target) : null;
     const candidates = [from, row, replacement, ...neighbors,
-      document.querySelector<HTMLElement>('[data-action="machine.menu"]')];
+      document.querySelector<HTMLElement>('[data-action="workspace.menu"]')];
     candidates.find((node) => node?.isConnected && !node.matches(":disabled"))?.focus({ preventScroll: true });
   };
 }

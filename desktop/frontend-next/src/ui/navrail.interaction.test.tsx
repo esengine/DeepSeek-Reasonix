@@ -91,14 +91,15 @@ it("draws the rail when it is chosen, with every entry in it", async () => {
 });
 
 it.each([
-  [null, "on"],
+  [null, "off"],
   ["on", "on"],
   ["off", "off"],
   ["collapsed", "collapsed"],
-  ["true", "on"],
-  ["", "on"],
+  ["true", "off"],
+  ["", "off"],
 ])("reads a stored %j as %s", async (stored, mode) => {
-  if (stored !== null) localStorage.setItem(KEY, stored);
+  if (stored === null) localStorage.removeItem(KEY);
+  else localStorage.setItem(KEY, stored);
   await open();
   await openAppearance();
   const label = { on: "始终显示", collapsed: "仅侧栏收起时显示", off: "不显示" }[mode as "on"];
@@ -171,7 +172,7 @@ it.each(["on", "off"])("reaches usage, account, and settings with the rail %s", 
   const entries = mode === "on" ? navEl()! : document.querySelector<HTMLElement>(".railfoot")!;
   const account = mode === "on" ? [["账号", "account", "chrome.account"]] : [];
   if (mode === "off") expect(entries.querySelector('[data-action="chrome.account"]')).toBeNull();
-  for (const [label, section, action] of [["用量", "usage"], ...account, ["设置", "session", "chrome.settings"]]) {
+  for (const [label, section, action] of [["用量", "storage"], ...account, ["设置", "session", "chrome.settings"]]) {
     const button = within(entries).getByRole("button", { name: new RegExp(`^${label}`) });
     if (action) expect(entries.querySelector(`[data-action="${action}"]`)).toBe(button);
     await userEvent.click(button);
@@ -281,16 +282,16 @@ it("remembers divider width through collapse, reopen, and reload with the icon r
   const divider = screen.getByRole("separator", { name: "调整工作区栏宽度" });
   divider.focus();
   await userEvent.keyboard("{ArrowRight}");
-  expect(divider.getAttribute("aria-valuenow")).toBe("328");
-  expect(localStorage.getItem("rx-rail-w")).toBe("328");
+  expect(divider.getAttribute("aria-valuenow")).toBe("276");
+  expect(localStorage.getItem("rx-rail-w")).toBe("276");
   await userEvent.keyboard("{Enter}");
   expect(app().dataset.rail).toBe("off");
   await userEvent.keyboard(" ");
   expect(app().dataset.rail).toBe("on");
-  expect(divider.getAttribute("aria-valuenow")).toBe("328");
+  expect(divider.getAttribute("aria-valuenow")).toBe("276");
   first.view.unmount();
   await open();
-  expect(screen.getByRole("separator", { name: "调整工作区栏宽度" }).getAttribute("aria-valuenow")).toBe("328");
+  expect(screen.getByRole("separator", { name: "调整工作区栏宽度" }).getAttribute("aria-valuenow")).toBe("276");
 });
 
 it.each(["on", "off"])("keeps one drawer entry at the scene boundary with the icon rail %s", async (mode) => {
@@ -307,7 +308,7 @@ it.each(["on", "off"])("keeps one drawer entry at the scene boundary with the ic
   await userEvent.click(toggle);
   expect(app().dataset.rail).toBe("off");
   act(() => room(390));
-  await userEvent.click(screen.getByRole("button", { name: "展开工作区栏" }));
+  await userEvent.click(screen.getByRole("button", { name: "会话列表" }));
   expect(app().dataset.rail).toBe("on");
   act(() => room(1440));
   expect(document.querySelector(".studio-menu") !== null).toBe(app().dataset.rail === "off");

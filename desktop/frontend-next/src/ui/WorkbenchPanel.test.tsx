@@ -10,7 +10,7 @@ import { SsePort } from "../port/sse";
 import { WorkbenchPanel } from "./WorkbenchPanel";
 import { unseenPageOpenings } from "./browser_open";
 
-afterEach(cleanup);
+afterEach(() => { cleanup(); localStorage.clear(); });
 
 describe("WorkbenchPanel", () => {
   it("opens workspace files as tabs and saves what was typed in the editor", async () => {
@@ -614,7 +614,10 @@ describe("WorkbenchPanel", () => {
 
     // From the keyboard: the menu key reports no pointer, and the item takes focus.
     fireEvent.contextMenu(screen.getByRole("button", { name: "README.md" }), { clientX: 0, clientY: 0 });
-    expect(document.activeElement).toBe(screen.getByRole("menuitem", { name: "在系统文件管理器中显示" }));
+    expect(document.activeElement).toBe(screen.getByRole("menuitem", { name: "复制引用" }));
+    const target = screen.getByRole("menuitem", { name: "在系统文件管理器中显示" });
+    for (let i = 0; i < screen.getAllByRole("menuitem").length && document.activeElement !== target; i++) await user.keyboard("{ArrowDown}");
+    expect(document.activeElement).toBe(target);
     await user.keyboard("{Enter}");
     expect(reveal).toHaveBeenLastCalledWith("README.md");
   });

@@ -48,13 +48,19 @@ describe("quoting a selection from an assistant reply", () => {
     expect(screen.queryByRole("menu")).toBeNull();
   });
 
-  it("quotes a multiline code selection without the surrounding answer", async () => {
+  it("quotes a code selection without the surrounding answer or the line numbers", async () => {
     const { answer, onQuote } = await card({ text: "First paragraph.\n\n```text\nalpha\n  beta\ngamma\n```" });
-    const code = await screen.findByText("alpha beta gamma", { selector: "code.hljs" });
-    select(code.firstChild!, 0, code.firstChild!, 12);
-    fireEvent.contextMenu(code);
+    const lines = await waitFor(() => {
+      const found = answer.querySelectorAll<HTMLElement>(".code-tx code.hljs");
+      expect(found).toHaveLength(3);
+      return found;
+    });
+    // Each source line is its own row; jsdom ignores the number's user-select: none, so a range
+    // across rows would carry the digits a browser leaves out, and the selection stays in one row.
+    select(lines[1]!.firstChild!, 0);
+    fireEvent.contextMenu(lines[1]!);
     await userEvent.click(screen.getByRole("menuitem", { name: QUOTE }));
-    expect(onQuote).toHaveBeenCalledWith("alpha\n  beta", item.id);
+    expect(onQuote).toHaveBeenCalledWith("beta", item.id);
     expect(answer.textContent).toContain("First paragraph.");
   });
 
