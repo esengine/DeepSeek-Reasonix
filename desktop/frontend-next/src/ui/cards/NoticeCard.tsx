@@ -1,3 +1,4 @@
+import { useContext } from "react";
 import type { Item } from "../../state/session";
 import { t } from "../../i18n";
 import { leftoverDetail, noticeWording } from "../../i18n/notice_wording";
@@ -5,6 +6,7 @@ import { workspaceLeaseDetail } from "../../i18n/workspace_lease";
 import { StudioIcon } from "../StudioIcon";
 import { LazyMarkdown } from "../LazyMarkdown";
 import { settingScreen } from "../settingScreens";
+import { ColdResumeOffer, CompactNow } from "../CompactNow";
 
 // A host notice is a bar, not a card: one sentence with a glyph, and under it
 // the diagnostic the kernel wrote beside the headline it wrote for a person.
@@ -20,6 +22,7 @@ export function NoticeCard({ item, onSettings }: { item: Extract<Item, { t: "not
   // same notice in the reader's language, that is the one to show.
   const wording = noticeWording(item.code, item.detail);
   const vars = wording?.vars;
+  const offer = useContext(ColdResumeOffer);
   const claim = item.workspaceLease;
   const detail = claim
     ? workspaceLeaseDetail(claim, item.code !== "workspace_lease_resumed") || item.detail
@@ -39,6 +42,7 @@ export function NoticeCard({ item, onSettings }: { item: Extract<Item, { t: "not
         {item.code === "setting_open" && onSettings && (
           <button className="nbtn" data-action="settings.section" data-value={item.detail ?? ""} onClick={() => onSettings(settingScreen(item.detail ?? ""))}>{t("chat.open_settings")}</button>
         )}
+        {offer?.id === item.id && <CompactNow action={offer.action} />}
         {detail && (PERMISSION.has(item.code ?? "")
           ? <code className="nrule" title={item.text}>{item.detail}</code>
           : AUTHORED.has(item.code ?? "")

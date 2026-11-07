@@ -7,7 +7,7 @@ import "encoding/json"
 func DetailIsPayload(code string) bool {
 	return code == NoticeCodeUnappliedSteer || code == NoticeCodeExtensionSkipped || code == NoticeCodeInboxRecovered ||
 		code == NoticeCodeInboxUnrecovered ||
-		code == NoticeCodePermissionRulesDormant || code == NoticeCodeSubagentWaiting || code == NoticeCodeContextComposition || code == NoticeCodeCompactionTelemetry || code == NoticeCodeUserTurnsDropped || code == NoticeCodeKeptTurnsFolded || code == NoticeCodeJobStarted || code == NoticeCodeJobFinished || code == NoticeCodeJobKilled || code == NoticeCodeJobFailed || code == NoticeCodeJobStalled
+		code == NoticeCodePermissionRulesDormant || code == NoticeCodeSubagentWaiting || code == NoticeCodeContextComposition || code == NoticeCodeCompactionTelemetry || code == NoticeCodeUserTurnsDropped || code == NoticeCodeKeptTurnsFolded || code == NoticeCodeJobStarted || code == NoticeCodeJobFinished || code == NoticeCodeJobKilled || code == NoticeCodeJobFailed || code == NoticeCodeJobStalled || code == NoticeCodeColdResume
 }
 
 // ExtensionSkipReasonNoLiveSidecar: the extension's companion process is not running.
@@ -266,6 +266,35 @@ func DecodeCompactionNotice(detail string) (CompactionNotice, bool) {
 	var p CompactionNotice
 	if err := json.Unmarshal([]byte(detail), &p); err != nil || p.Mode == "" {
 		return CompactionNotice{}, false
+	}
+	return p, true
+}
+
+// ColdResume is the Detail payload of NoticeCodeColdResume: how long the session
+// sat idle, the prompt its next request resends uncached, and whether the host
+// offers a fold because that prompt is large enough for one to be worth asking.
+type ColdResume struct {
+	IdleSeconds int  `json:"idle_seconds"`
+	Tokens      int  `json:"tokens"`
+	Window      int  `json:"window,omitempty"`
+	Compact     bool `json:"compact,omitempty"`
+}
+
+// Encode renders the payload as the notice's Detail.
+func (p ColdResume) Encode() string {
+	raw, err := json.Marshal(p)
+	if err != nil {
+		return ""
+	}
+	return string(raw)
+}
+
+// DecodeColdResume reads the payload back; ok is false for a Detail that is not
+// one, so a caller keeps the kernel's English.
+func DecodeColdResume(detail string) (ColdResume, bool) {
+	var p ColdResume
+	if err := json.Unmarshal([]byte(detail), &p); err != nil || p.IdleSeconds <= 0 {
+		return ColdResume{}, false
 	}
 	return p, true
 }

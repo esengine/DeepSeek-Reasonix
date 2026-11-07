@@ -142,6 +142,8 @@ const (
 	NoticeCodeWebFetchBackendUnusable     = "web_fetch_backend_unusable"
 	// A conversation bound to an Agent composition was opened after a built-in tool's schema changed; it continues with the tools it recorded.
 	NoticeCodeCompositionToolsChanged = "composition_tools_changed"
+	// A session was resumed after its provider cache likely expired; Detail is the ColdResume payload, its text the English fallback.
+	NoticeCodeColdResume = "cold_resume"
 )
 
 // A saved fold was not reused when its session was bound: the whole history is

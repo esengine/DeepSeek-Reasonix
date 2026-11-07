@@ -49,7 +49,7 @@ import type { PaneProps, PaneReport } from "./panetypes";
 import { TerminalHostContext } from "./terminal_host";
 import { isRising } from "./firstRise";
 import { useRate, useTrail } from "./num";
-import { useCompactNow } from "./CompactNow";
+import { ColdResumeOffer, liveColdResumeOffer, useCompactNow } from "./CompactNow";
 import { DOCK, Gutter } from "./Gutter";
 import { Find } from "./Find";
 import { useFind } from "./usefind";
@@ -157,6 +157,8 @@ function PaneView({ port, hub, rt, title, active, visible, sideHost, side, onFoc
   // follows the deltas themselves, and expires rather than being re-derived.
   const tps = useRate(s.outWindow, running);
   const live = useLiveWork(s.items, running);
+  const coldOfferId = useMemo(() => liveColdResumeOffer(s.items), [s.items]);
+  const coldOffer = useMemo(() => (coldOfferId ? { id: coldOfferId, action: compact } : null), [coldOfferId, compact]);
   const thoughtFolds = useThoughtFolds(s.items, rt.sessionPath ?? "");
   // The shape of the last minute, kept while a turn runs. A number alone says
   // how fast it is now; the line says whether it is climbing, stalling or
@@ -530,6 +532,7 @@ function PaneView({ port, hub, rt, title, active, visible, sideHost, side, onFoc
 
       <PaneShown.Provider value={shown}>
       <LiveWork.Provider value={live}>
+      <ColdResumeOffer.Provider value={coldOffer}>
       <NewAnswerAnchor.Provider value={marker ? newAnswerAt : null}>
       <PlanLiveContext.Provider value={planLive}><AgentRunOpener.Provider value={openRun}><JobsLiveContext.Provider value={jobsLive}><ThoughtFolds.Provider value={thoughtFolds}>
       <Transcript port={port} historyPaging={historyPaging}
@@ -571,6 +574,7 @@ function PaneView({ port, hub, rt, title, active, visible, sideHost, side, onFoc
       />
       </ThoughtFolds.Provider></JobsLiveContext.Provider></AgentRunOpener.Provider></PlanLiveContext.Provider>
       </NewAnswerAnchor.Provider>
+      </ColdResumeOffer.Provider>
       </LiveWork.Provider>
       </PaneShown.Provider>
       {conversationFiles.menuView}

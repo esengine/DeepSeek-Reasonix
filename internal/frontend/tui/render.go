@@ -387,6 +387,14 @@ func codedNoticeText(it *Item) string {
 			}
 			return fmt.Sprintf(i18n.M.NoticeJobFailedFmt, name) + jobFailure(p)
 		}
+	case event.NoticeCodeColdResume:
+		if p, ok := event.DecodeColdResume(it.Detail); ok {
+			idle := i18n.Elapsed(time.Duration(p.IdleSeconds) * time.Second)
+			if p.Compact {
+				return fmt.Sprintf(i18n.M.NoticeColdResumeCompactFmt, idle, shortTokens(p.Tokens))
+			}
+			return fmt.Sprintf(i18n.M.NoticeColdResumeFmt, idle)
+		}
 	case event.NoticeCodeExtensionSkipped:
 		if p, ok := event.DecodeExtensionSkipped(it.Detail); ok && p.Reason == event.ExtensionSkipReasonNoLiveSidecar {
 			return fmt.Sprintf(i18n.M.NoticeExtSkippedFmt, p.Extension, p.Point)

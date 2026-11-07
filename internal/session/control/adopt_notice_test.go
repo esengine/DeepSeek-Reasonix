@@ -2,7 +2,6 @@ package control
 
 import (
 	"reasonix/internal/state/sessionstore"
-	"strings"
 	"testing"
 
 	"reasonix/internal/base/testenv"
@@ -33,7 +32,7 @@ func coldNoticeController(t *testing.T, sink event.Sink) (*Controller, string) {
 func coldNotices(events []event.Event) int {
 	n := 0
 	for _, e := range events {
-		if strings.Contains(e.Text, "provider cache likely expired") {
+		if e.Kind == event.Notice && e.Code == event.NoticeCodeColdResume {
 			n++
 		}
 	}

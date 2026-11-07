@@ -6,6 +6,7 @@ const (
 	tsAdjudicationFile       = "desktop/frontend-next/src/port/adjudication.ts"
 	tsAttachmentFile         = "desktop/frontend-next/src/port/attachment.ts"
 	tsBackupFile             = "desktop/frontend-next/src/port/backup.ts"
+	tsColdResumeFile         = "desktop/frontend-next/src/port/cold_resume.ts"
 	tsCompositionFile        = "desktop/frontend-next/src/port/composition.ts"
 	tsContextCompositionFile = "desktop/frontend-next/src/port/context_composition.ts"
 	tsHookFile               = "desktop/frontend-next/src/port/hook.ts"
@@ -57,6 +58,8 @@ var mirroredWireTypesTail = []wireMirror{
 	// composition
 	{"internal/contract/agentcomposition/composition.go", "Definition", tsCompositionFile, "AgentComposition"},
 	{"internal/state/agentpreset/catalog.go", "Catalog", tsCompositionFile, "AgentPresetCatalog"},
+	// cold_resume
+	{"internal/contract/event/notice_payload.go", "ColdResume", tsColdResumeFile, "ColdResume"},
 	// context_composition
 	{"internal/contract/event/notice_payload.go", "ContextComposition", tsContextCompositionFile, "ContextComposition"},
 	// feedback

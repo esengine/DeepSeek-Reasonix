@@ -204,6 +204,7 @@ var English = Messages{
 	QueueMessages:                   queueEN,
 	ResumePickerMessages:            resumePickerEN,
 	GoalMessages:                    goalEN,
+	ColdResumeMessages:              coldResumeEN,
 	SettingMessages:                 settingEN,
 	ApprovalNeededFmt:               "approval needed: %s",
 	ApprovalNeededWithSubjectFmt:    "approval needed: %s %s",

@@ -210,3 +210,25 @@ func TestJobNoticesFollowTheUILanguage(t *testing.T) {
 		t.Fatalf("unreadable payload must keep the kernel's text, got %q", got)
 	}
 }
+
+// A cold resume names /compact only when the host offered a fold; the payload
+// never leaks into the sentence.
+func TestColdResumeNoticeFollowsTheUILanguage(t *testing.T) {
+	inChinese(t)
+	offered := renderNotice(&Item{Code: event.NoticeCodeColdResume, Text: "english", Detail: event.ColdResume{IdleSeconds: 26 * 3600, Tokens: 240_000, Window: 1_000_000, Compact: true}.Encode()})
+	if !strings.Contains(offered, "闲置 26h 后续聊") || !strings.Contains(offered, "/compact") || !strings.Contains(offered, shortTokens(240_000)) {
+		t.Fatalf("offered notice = %q", offered)
+	}
+	plain := renderNotice(&Item{Code: event.NoticeCodeColdResume, Text: "english", Detail: event.ColdResume{IdleSeconds: 26 * 3600, Tokens: 9_000}.Encode()})
+	if strings.Contains(plain, "/compact") || !strings.Contains(plain, "完整历史已保留") {
+		t.Fatalf("unoffered notice = %q", plain)
+	}
+	for _, got := range []string{offered, plain} {
+		if strings.Contains(got, "{") || strings.Contains(got, "english") {
+			t.Fatalf("payload or fallback leaked into %q", got)
+		}
+	}
+	if got := renderNotice(&Item{Code: event.NoticeCodeColdResume, Text: "kernel english", Detail: "not json"}); !strings.Contains(got, "kernel english") {
+		t.Fatalf("unreadable payload must keep the kernel's text, got %q", got)
+	}
+}

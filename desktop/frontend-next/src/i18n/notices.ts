@@ -51,6 +51,7 @@ export const NOTICE_TEXT: Record<string, string> = {
   compact_declined: "kernel.nothing_to_compact_why",
   compact_failed: "kernel.compaction_failed_why",
   context_composition: "kernel.the_context_holds_about_total",
+  cold_resume: "chat.resumed_after_idle_idle_the",
   user_turns_dropped: "kernel.n_earlier_message_s_of",
   kept_turns_folded: "kernel.n_message_s_you_marked",
   subagent_waiting: "kernel.sub_agent_task_is_waiting",

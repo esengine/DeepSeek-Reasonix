@@ -3,6 +3,7 @@ import { t } from "./index";
 import { FOLD_WHY, NO_CODE_WHY } from "./compaction_why";
 import { COMPACTION_TELEMETRY, compactionNoticeVars } from "./compaction_notice";
 import { CONTEXT_COMPOSITION, contextCompositionVars } from "./context_composition";
+import { COLD_RESUME, coldResumeVars } from "./cold_resume";
 import { SUBAGENT_WAITING, subagentWaitingVars } from "./subagent_waiting";
 import { EXTENSION_SKIPPED, extensionSkippedVars } from "./extension_skipped";
 import { INBOX_RECOVERED, inboxRecoveredVars } from "./inbox_recovered";
@@ -31,6 +32,7 @@ const VARS: Record<string, (detail: string | undefined) => NoticeVars | undefine
   [JOB_STALLED]: jobStalledVars,
   [COMPACTION_TELEMETRY]: compactionNoticeVars,
   [CONTEXT_COMPOSITION]: contextCompositionVars,
+  [COLD_RESUME]: coldResumeVars,
   [SUBAGENT_WAITING]: subagentWaitingVars,
   [USER_TURNS_DROPPED]: turnsDroppedVars,
   [KEPT_TURNS_FOLDED]: turnsDroppedVars,

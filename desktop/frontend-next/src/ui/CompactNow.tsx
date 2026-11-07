@@ -1,5 +1,7 @@
-import { useCallback, useMemo, useRef, useState } from "react";
+import { createContext, useCallback, useMemo, useRef, useState } from "react";
 import { t } from "../i18n";
+import { COLD_RESUME, coldResumeOffersCompact } from "../i18n/cold_resume";
+import type { Item } from "../state/session";
 import type { AgentPort } from "../port/port";
 import type { WireEvent } from "../port/wire";
 import { useDismiss } from "./dismiss";
@@ -55,6 +57,19 @@ export function useCompactNow(
     [blocked, pending, run, onEvent, release],
   );
 }
+
+// The cold-resume notice whose fold offer still holds: nothing was sent and
+// nothing folded after it, so what it measured is what the next request carries.
+export function liveColdResumeOffer(items: readonly Item[]): string | undefined {
+  for (let i = items.length - 1; i >= 0; i--) {
+    const it = items[i];
+    if (it.t === "user" || it.t === "compaction") return undefined;
+    if (it.t === "notice" && it.code === COLD_RESUME) return coldResumeOffersCompact(it.detail) ? it.id : undefined;
+  }
+  return undefined;
+}
+
+export const ColdResumeOffer = createContext<{ id: string; action: CompactAction } | null>(null);
 
 export function CompactNow({
   action,

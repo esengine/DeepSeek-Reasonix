@@ -17,6 +17,7 @@ const PAYLOAD: Record<string, string | undefined> = {
   job_stalled: JSON.stringify({ id: "j", label: "build", quietSeconds: 900 }),
   compaction_telemetry: JSON.stringify({ mode: "summarized", source_tokens: 122525, projection_tokens: 61192, input_tokens: 40710, output_tokens: 8186, cache_hit_tokens: 256, request_count: 1 }),
   context_composition: JSON.stringify({ total: 561061, at: 419430, active: 400000, parts: [{ name: "tool_output", tokens: 500000 }] }),
+  cold_resume: JSON.stringify({ idle_seconds: 93600, tokens: 240045, window: 1000000, compact: true }),
   subagent_waiting: JSON.stringify({ task: "fix the typo", by: "rewrite the docs", whole: true }),
   user_turns_dropped: JSON.stringify({ count: 5, tokens: 1578, budget: 8000 }),
   kept_turns_folded: JSON.stringify({ count: 2, tokens: 900, budget: 4000 }),
@@ -78,6 +79,8 @@ describe("notice wording", () => {
     ["compaction_telemetry", '{"mode":"","source_tokens":1,"projection_tokens":1}'],
     ["compaction_telemetry", '{"mode":"summarized","source_tokens":"122525","projection_tokens":1}'],
     ["compact_failed", "no_such_reason"],
+    ["cold_resume", '{"tokens":240045}'],
+    ["cold_resume", '{"idle_seconds":"93600","tokens":1}'],
   ])("%s reads valid JSON of the wrong shape (%s) as no payload", (code, detail) => {
     expect(noticeWording(code, detail)).toBeUndefined();
   });

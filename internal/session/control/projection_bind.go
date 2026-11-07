@@ -34,6 +34,11 @@ func (c *Controller) announceUnusedFold() {
 	}
 }
 
+// coldResumeCompactFloor is the resent prompt below which a cold resume offers no
+// fold: the summary a fold writes is a fixed cost a shorter prompt cannot repay.
+// It is a product threshold, not a measured break-even.
+const coldResumeCompactFloor = 60_000
+
 // maybeColdResumePrune records warm/cold/unknown only; it never rewrites
 // history. announce=false keeps the state and drops the notice, for a rebuild
 // that re-binds the session in place.
@@ -48,17 +53,27 @@ func (c *Controller) maybeColdResumePrune(path string, announce bool) {
 		slog.Debug("controller: resume cache state", "path", path, "cache_state", agent.CacheStateUnknown)
 		return
 	}
-	last := m.UpdatedAt
+	idle := time.Since(m.UpdatedAt).Round(time.Minute)
 	state := agent.CacheStateWarm
-	if time.Since(last) >= c.cacheColdAfter() {
+	if time.Since(m.UpdatedAt) >= c.cacheColdAfter() {
 		state = agent.CacheStateCold
 	}
 	c.executor.SetCacheState(state)
-	slog.Debug("controller: resume cache state", "path", path, "cache_state", state, "idle", time.Since(last).Round(time.Minute).String())
+	slog.Debug("controller: resume cache state", "path", path, "cache_state", state, "idle", idle.String())
 	if !announce || state != agent.CacheStateCold {
 		return
 	}
-	c.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: fmt.Sprintf(
-		"resumed after %s idle (provider cache likely expired) — full history kept; compaction deferred until context pressure",
-		time.Since(last).Round(time.Minute))})
+	c.sink.Emit(coldResumeNotice(idle, c.executor.ContextUsedTokens(), c.executor.ContextWindow()))
+}
+
+// coldResumeNotice offers a fold only past coldResumeCompactFloor. tokens is what
+// the next request sends, so a reused fold already shrank it; nothing is folded
+// unless the person asks.
+func coldResumeNotice(idle time.Duration, tokens, window int) event.Event {
+	p := event.ColdResume{IdleSeconds: max(int(idle/time.Second), 60), Tokens: tokens, Window: window, Compact: tokens >= coldResumeCompactFloor}
+	text := fmt.Sprintf("resumed after %s idle (provider cache likely expired) — full history kept; compaction deferred until context pressure", idle)
+	if p.Compact {
+		text = fmt.Sprintf("resumed after %s idle (provider cache likely expired) — the next request resends ~%d tokens uncached; /compact folds them first, at no cache cost", idle, tokens)
+	}
+	return event.Event{Kind: event.Notice, Level: event.LevelInfo, Code: event.NoticeCodeColdResume, Text: text, Detail: p.Encode()}
 }

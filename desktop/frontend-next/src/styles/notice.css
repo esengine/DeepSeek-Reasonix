@@ -10,3 +10,7 @@
 .notice-bar .nmd { margin-top: 2px; color: var(--text); overflow-wrap: anywhere; }
 .notice-bar .nbtn { margin-top: 4px; padding: 0; border: 0; background: transparent; cursor: pointer; color: var(--text); font: var(--w-med) var(--fs-meta) var(--ui); text-decoration: underline; text-underline-offset: 3px; }
 .notice-bar .nbtn:hover { color: var(--accent); }
+.notice-bar .compact-now { margin-top: 4px; }
+.notice-bar .compact-now > .btn { padding: 0; border: 0; background: transparent; cursor: pointer; color: var(--text); font: var(--w-med) var(--fs-meta) var(--ui); text-decoration: underline; text-underline-offset: 3px; }
+.notice-bar .compact-now > .btn:hover:not(:disabled) { color: var(--accent); }
+.notice-bar .compact-now > .btn:disabled { color: var(--faint); cursor: default; text-decoration: none; }

@@ -176,6 +176,7 @@ type Messages struct {
 	QueueMessages
 	ResumePickerMessages
 	GoalMessages
+	ColdResumeMessages
 	SettingMessages
 	ApprovalNeededFmt              string // notification text for a pending approval, tool only
 	ApprovalNeededWithSubjectFmt   string // notification text for a pending approval with subject
