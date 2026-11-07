@@ -16,6 +16,10 @@ const capabilityLeadBytes = 160
 // capabilityLead is the first sentence of a description, bounded. A row has to
 // say enough to pick from; it does not have to say enough to call.
 func capabilityLead(description string) string {
+	return boundedLead(description, capabilityLeadBytes)
+}
+
+func boundedLead(description string, limit int) string {
 	lead := strings.TrimSpace(description)
 	if lead == "" {
 		return ""
@@ -23,14 +27,14 @@ func capabilityLead(description string) string {
 	if head, _, cut := strings.Cut(lead, ". "); cut {
 		lead = head + "."
 	}
-	if len(lead) <= capabilityLeadBytes {
+	if len(lead) <= limit {
 		return lead
 	}
-	bounded := lead[:capabilityLeadBytes]
+	bounded := lead[:limit]
 	// Cut on a word so the row does not end mid-token. A description with no
 	// spaces to cut on — a CJK one — falls back to the character boundary,
 	// which is the same cut TrimPartialRune makes for a truncated read.
-	if i := strings.LastIndexAny(bounded, " \t"); i > capabilityLeadBytes/2 {
+	if i := strings.LastIndexAny(bounded, " \t"); i > limit/2 {
 		bounded = bounded[:i]
 	} else {
 		bounded = string(fileenc.TrimPartialRune([]byte(bounded)))

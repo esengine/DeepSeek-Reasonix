@@ -16,6 +16,7 @@ import (
 	"reasonix/internal/contract/provider"
 	"reasonix/internal/safety/evidence"
 	"reasonix/internal/safety/permission"
+	"reasonix/internal/tools/builtin"
 )
 
 // browserScriptProvider plays a fixed browsing session: each round's call is
@@ -100,27 +101,20 @@ model = "x"
 	return agentRequests(rec.requests())
 }
 
-// A machine without a browser still shows the tools, and the model hears why a
-// call did nothing rather than a bare failure.
+// The browser is reached through use_capability, not shown in the schema, and a
+// machine without one still tells the model why a call did nothing rather than
+// failing bare.
 func TestEffectMissingBrowserReachesTheModelAsItsCode(t *testing.T) {
 	reqs := buildBrowserEffect(t, `[browser]
 executable = "/nonexistent/chrome"`, []func(string) *provider.ToolCall{
 		func(string) *provider.ToolCall {
-			return browserCall("open-1", "browser_open", map[string]any{"url": "https://example.com/"})
+			return browserCall("open-1", "use_capability", map[string]any{"action": "call", "capability_id": "tool:browser_open", "arguments": map[string]any{"url": "https://example.com/"}})
 		},
 	})
-	if !toolNames(reqs[0])["browser_open"] {
-		t.Fatalf("browser tools missing from the schema: %v", toolSchemaNames(reqs[0].Tools))
-	}
-	var actSchema string
-	for _, schema := range reqs[0].Tools {
-		if schema.Name == "browser_act" {
-			actSchema = string(schema.Parameters)
-			break
+	for _, name := range BrowserToolNames() {
+		if toolNames(reqs[0])[name] {
+			t.Fatalf("%s is in the first-round schema; it belongs behind use_capability", name)
 		}
-	}
-	if !strings.Contains(actSchema, `"eval"`) || !strings.Contains(actSchema, `"script"`) {
-		t.Fatalf("browser_act at the provider boundary cannot execute JavaScript: %s", actSchema)
 	}
 	results := effectToolResults(reqs[len(reqs)-1])
 	if len(results) == 0 || !strings.Contains(results[0], "browser.engine_missing") {
@@ -134,6 +128,33 @@ func TestEffectDisabledBrowserLeavesTheSchema(t *testing.T) {
 		if toolNames(reqs[0])[name] {
 			t.Fatalf("%s is in the schema with the browser disabled", name)
 		}
+		if strings.Contains(capabilityDescription(reqs[0]), "tool:"+name) {
+			t.Fatalf("use_capability indexes %s with the browser disabled", name)
+		}
+	}
+}
+
+func capabilityDescription(req provider.Request) string {
+	for _, schema := range req.Tools {
+		if schema.Name == "use_capability" {
+			return schema.Description
+		}
+	}
+	return ""
+}
+
+// web_fetch is deferred too, and the model has to be told it exists: a browser
+// it could see beside a fetch it could not is what sent it to open a page for
+// a JSON endpoint.
+func TestEffectDeferredIndexPointsAtFetchBeforeTheBrowser(t *testing.T) {
+	reqs := buildBrowserEffect(t, "[browser]\nenabled = false", nil)
+	desc := capabilityDescription(reqs[0])
+	fetch := strings.Index(desc, "tool:web_fetch")
+	if fetch < 0 || !strings.Contains(desc, "Read JSON or static text with tool:web_fetch") {
+		t.Fatalf("use_capability does not point at web_fetch:\n%s", desc)
+	}
+	if browser := strings.Index(desc, "tool:browser_open"); browser < 0 || browser < fetch {
+		t.Fatalf("the index lists the browser before fetch or not at all:\n%s", desc)
 	}
 }
 
@@ -141,9 +162,10 @@ func TestEffectDisabledBrowserLeavesTheSchema(t *testing.T) {
 // every save of the shared file; it must not take the tools away here.
 func TestEffectSharedBrowserKeyLeavesTheToolsBound(t *testing.T) {
 	reqs := buildBrowserEffect(t, "[browser]\nenabled = false", nil)
+	desc := capabilityDescription(reqs[0])
 	for _, name := range BrowserToolNames() {
-		if !toolNames(reqs[0])[name] {
-			t.Fatalf("%s is missing from the schema: %v", name, toolSchemaNames(reqs[0].Tools))
+		if !strings.Contains(desc, "tool:"+name) {
+			t.Fatalf("%s is not indexed by use_capability:\n%s", name, desc)
 		}
 	}
 }
@@ -212,4 +234,14 @@ func TestBrowserToolIdentityAgreesAcrossTheKernel(t *testing.T) {
 			t.Errorf("%s is classified as a workspace mutation", name)
 		}
 	}
+}
+
+// BrowserToolNames are the browser tools the assembly registers, which
+// use_capability indexes.
+func BrowserToolNames() []string {
+	var names []string
+	for _, t := range builtin.BrowserTools(nil) {
+		names = append(names, t.Name())
+	}
+	return names
 }

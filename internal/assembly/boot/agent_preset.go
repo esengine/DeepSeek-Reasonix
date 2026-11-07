@@ -91,15 +91,6 @@ func EvidenceToolNames() []string {
 	return []string{"complete_step"}
 }
 
-// BrowserToolNames are shown when the assembly has a browser to drive.
-func BrowserToolNames() []string {
-	var names []string
-	for _, t := range builtin.BrowserTools(nil) {
-		names = append(names, t.Name())
-	}
-	return names
-}
-
 // ComputerToolNames are shown when the host can operate this machine's
 // applications.
 func ComputerToolNames() []string {
@@ -157,13 +148,9 @@ func applyUnifiedProviderToolSurface(reg *tool.Registry, goalTurnsUnreachable bo
 			allow = append(allow, name)
 		}
 	}
-	// A browser tool is shown only with a browser session behind it, which the
-	// config decides at boot, so the schema stays the same for the whole session.
-	for _, name := range BrowserToolNames() {
-		if t, ok := reg.Get(name); ok && builtin.BrowserBound(t) {
-			allow = append(allow, name)
-		}
-	}
+	// The browser tools stay out of the schema: use_capability's description
+	// indexes them, and a model that sees a browser but not web_fetch opens a
+	// page to read a JSON endpoint.
 	for _, name := range ComputerToolNames() {
 		if t, ok := reg.Get(name); ok && builtin.ComputerBound(t) {
 			allow = append(allow, name)

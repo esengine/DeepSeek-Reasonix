@@ -48,19 +48,6 @@ func BrowserTools(session *browser.Session) []tool.Tool {
 	return []tool.Tool{browserOpen{session: session}, browserRead{session: session}, browserAct{session: session}}
 }
 
-// BrowserBound reports whether t is a browser tool with a browser session behind it.
-func BrowserBound(t tool.Tool) bool {
-	switch b := t.(type) {
-	case browserOpen:
-		return b.session != nil
-	case browserRead:
-		return b.session != nil
-	case browserAct:
-		return b.session != nil
-	}
-	return false
-}
-
 func tabArg(args json.RawMessage) string {
 	var p struct {
 		Tab string `json:"tab"`

@@ -460,10 +460,6 @@ func (*UseCapabilityTool) Name() string { return "use_capability" }
 // refuses.
 var CapabilityIDExamples = []string{"tool:grep", "skill:review", "task:subagent"}
 
-func (*UseCapabilityTool) Description() string {
-	return "Search and call deferred tools, skills, and MCP through stable IDs such as tool:grep, skill:review, task:subagent, and mcp-tool:server/tool. Before saying a tool, network, or integration is unavailable, search by natural-language goal; results include ranked IDs and available schemas. list enumerates the catalog, inspect loads one definition, call invokes it, and decline records why a preferred capability is skipped. task:subagent delegates 1-8 tasks that run in parallel. Calls retain all permission, sandbox, and execution checks."
-}
-
 func (*UseCapabilityTool) ReadOnly() bool { return true }
 
 func (*UseCapabilityTool) Schema() json.RawMessage {

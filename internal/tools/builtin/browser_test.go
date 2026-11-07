@@ -49,9 +49,6 @@ func TestUnboundBrowserToolsSayThereIsNoBrowser(t *testing.T) {
 			t.Fatalf("%T without a browser = %v", tl, err)
 		}
 	}
-	if BrowserBound(browserOpen{}) || !BrowserBound(browserAct{session: browser.NewSession(browser.Config{})}) {
-		t.Fatal("BrowserBound misreports")
-	}
 }
 
 func TestTheNetworkListReadsNewestFirstAndNarrowsByURL(t *testing.T) {
