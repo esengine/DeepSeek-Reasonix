@@ -7,16 +7,16 @@ import (
 	"testing"
 )
 
-func TestUpdateModeDefaultsToManualAndOnlyTheTwoNamedModesTurnAnythingOn(t *testing.T) {
-	for value, want := range map[string]string{"": "manual", "manual": "manual", "notify": "notify", " notify ": "notify", "download": "download", " download ": "download", "Download": "manual", "NOTIFY": "manual", "on": "manual", "auto": "manual", "install": "manual"} {
+func TestUpdateModeDefaultsToNotifyAndOnlyTheThreeNamedModesAreChosen(t *testing.T) {
+	for value, want := range map[string]string{"": "notify", "manual": "manual", " manual ": "manual", "notify": "notify", " notify ": "notify", "download": "download", " download ": "download", "Download": "notify", "NOTIFY": "notify", "on": "notify", "auto": "notify", "install": "notify"} {
 		cfg := &Config{}
 		cfg.Desktop.UpdateMode = value
 		if got := cfg.DesktopUpdateMode(); got != want {
 			t.Errorf("update_mode %q reads as %q, want %q", value, got, want)
 		}
 	}
-	if (*Config)(nil).DesktopUpdateMode() != "manual" {
-		t.Fatal("a missing config must read as manual")
+	if (*Config)(nil).DesktopUpdateMode() != "notify" {
+		t.Fatal("a missing config must read as the default, notify")
 	}
 }
 
@@ -35,12 +35,12 @@ func TestSetUpdateModeRefusesWhatItDoesNotOffer(t *testing.T) {
 	}
 }
 
-func TestUpdateModeSurvivesARenderAndManualWritesNothing(t *testing.T) {
+func TestUpdateModeSurvivesARenderAndAnUnchosenModeWritesNothing(t *testing.T) {
 	cfg := Default()
 	if strings.Contains(RenderTOMLForScope(cfg, RenderScopeUser), "update_mode") {
-		t.Fatal("manual is the default and is not written")
+		t.Fatal("a mode nobody chose is the default and is not written")
 	}
-	for _, mode := range []string{"notify", "download"} {
+	for _, mode := range []string{"manual", "notify", "download"} {
 		_ = cfg.SetDesktopUpdateMode(mode)
 		if !strings.Contains(RenderTOMLForScope(cfg, RenderScopeUser), `update_mode = "`+mode+`"`) {
 			t.Fatalf("%s must be written", mode)
@@ -48,17 +48,15 @@ func TestUpdateModeSurvivesARenderAndManualWritesNothing(t *testing.T) {
 	}
 }
 
-func TestAProjectFileCannotTurnBackgroundUpdateChecksOn(t *testing.T) {
-	cfg, _ := loadScoped(t, "", "[desktop]\nupdate_mode = \"notify\"\n")
-	if cfg.DesktopUpdateMode() != "manual" || !slices.Contains(ignoredKeys(cfg), "desktop.update_mode") {
-		t.Fatalf("mode %q, ignored %v; a project file must not choose it", cfg.DesktopUpdateMode(), ignoredKeys(cfg))
+func TestAProjectFileCannotChooseTheUpdateMode(t *testing.T) {
+	for _, mode := range []string{"manual", "download"} {
+		cfg, _ := loadScoped(t, "", "[desktop]\nupdate_mode = \""+mode+"\"\n")
+		if cfg.DesktopUpdateMode() != "notify" || !slices.Contains(ignoredKeys(cfg), "desktop.update_mode") {
+			t.Fatalf("project %s: mode %q, ignored %v; a project file must not choose it", mode, cfg.DesktopUpdateMode(), ignoredKeys(cfg))
+		}
 	}
-	cfg, _ = loadScoped(t, "", "[desktop]\nupdate_mode = \"download\"\n")
-	if cfg.DesktopUpdateMode() != "manual" || !slices.Contains(ignoredKeys(cfg), "desktop.update_mode") {
-		t.Fatalf("mode %q, ignored %v; a project file must not choose download either", cfg.DesktopUpdateMode(), ignoredKeys(cfg))
-	}
-	cfg, _ = loadScoped(t, "[desktop]\nupdate_mode = \"notify\"\n", "[desktop]\nupdate_mode = \"manual\"\n")
-	if cfg.DesktopUpdateMode() != "notify" {
+	cfg, _ := loadScoped(t, "[desktop]\nupdate_mode = \"manual\"\n", "[desktop]\nupdate_mode = \"download\"\n")
+	if cfg.DesktopUpdateMode() != "manual" {
 		t.Fatalf("a project file overrode the user's choice: %q", cfg.DesktopUpdateMode())
 	}
 }

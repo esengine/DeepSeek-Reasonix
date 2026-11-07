@@ -20,17 +20,27 @@ const (
 var ErrUpdateModeInvalid = errors.New("config: unknown update mode")
 
 // DesktopUpdateMode is how the desktop behaves about new releases: manual does
-// nothing on its own, notify reads the version catalog in the background and
-// says so when something newer is published, download also leaves that release
-// downloaded and verified. None of them installs or restarts.
+// nothing on its own, notify (the default) reads the version catalog in the
+// background and says so when something newer is published, download also
+// leaves that release downloaded and verified. None of them installs or restarts.
 func (c *Config) DesktopUpdateMode() string {
-	if c != nil {
-		switch m := strings.TrimSpace(c.Desktop.UpdateMode); m {
-		case UpdateModeNotify, UpdateModeDownload:
-			return m
-		}
+	if m := c.chosenUpdateMode(); m != "" {
+		return m
 	}
-	return UpdateModeManual
+	return UpdateModeNotify
+}
+
+// chosenUpdateMode is the mode the user picked, or "" while none is on file, so
+// that a choice of manual outlives a default that is not manual.
+func (c *Config) chosenUpdateMode() string {
+	if c == nil {
+		return ""
+	}
+	switch m := strings.TrimSpace(c.Desktop.UpdateMode); m {
+	case UpdateModeManual, UpdateModeNotify, UpdateModeDownload:
+		return m
+	}
+	return ""
 }
 
 // SetDesktopUpdateMode records the user's choice. An unknown mode is refused

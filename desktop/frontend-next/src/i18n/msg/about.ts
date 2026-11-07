@@ -90,6 +90,8 @@ export const ABOUT: Messages = {
   "about.v_was_withdrawn": { zh: "当前版本 {v} 已被撤回", en: "{v} was withdrawn" },
   "about.verifying_the_signature": { zh: "校验签名…", en: "Verifying the signature…" },
   "about.version_information_could_not_be": { zh: "无法读取版本信息", en: "Version information could not be read" },
+  "about.version_v_is_available_short": { zh: "新版本 {v} 可用", en: "Version {v} available" },
+  "about.version_v_is_downloaded_short": { zh: "{v} 已下载，待重启", en: "{v} downloaded, restart to use" },
   "about.version_v_is_available_see": { zh: "有新版本 {v}，在设置的「版本」里查看", en: "Version {v} is available; see Settings, Version" },
   "about.version_v_is_downloaded": { zh: "新版本 {v} 已下载。", en: "Version {v} is downloaded." },
   "about.restart_to_use_it_never_automatic": { zh: "重启后使用，不会自动重启。", en: "Restart to use it; Studio never restarts by itself." },

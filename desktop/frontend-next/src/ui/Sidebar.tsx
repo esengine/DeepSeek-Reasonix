@@ -18,6 +18,7 @@ import { RemoteHosts, remoteProjectKey, remoteWorkspaces } from "./RemoteHosts";
 import { remoteProjects } from "./remoteProjects";
 import { StudioIcon } from "./StudioIcon";
 import { UpdateDot } from "./UpdateDot";
+import { UpdateNotice } from "./UpdateNotice";
 import { useHiddenHosts } from "../state/remotehide";
 import { useSidebarFolds } from "../state/sidebarFolds";
 import { chord } from "./keys";
@@ -396,6 +397,7 @@ export function Sidebar({
       </RailFilterContext.Provider>
       </div>
       {!navShown && <div className="railfoot">
+        <UpdateNotice onOpen={() => onSettings("versions")} />
         <div className="studio-quicknav" role="toolbar" aria-label={t("session.sidebar_shortcuts")} onKeyDown={moveAlongToolbar}>
           {destinations.map(([mark, label, section]) => {
             const reading = mark === "usage" ? (wallet ? (hideAmounts ? MASK : wallet) : "")

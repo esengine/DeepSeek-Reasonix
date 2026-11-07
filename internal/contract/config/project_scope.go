@@ -82,7 +82,7 @@ func holdUserScope(c *Config) heldScope {
 		sandbox:         s,
 		permissions:     p,
 		approvalMode:    c.Desktop.DefaultToolApprovalMode,
-		updateMode:      c.DesktopUpdateMode(),
+		updateMode:      c.chosenUpdateMode(),
 		autoSubmit:      c.AutoSubmit,
 		writeLease:      c.Agent.WriteLease,
 		planApproval:    c.Agent.PlanApproval,
@@ -281,7 +281,7 @@ func (h heldScope) narrow(c *Config, r Roots, root string, projectMeta toml.Meta
 		c.ignoreProject("desktop.default_tool_approval_mode", c.Desktop.DefaultToolApprovalMode, ProjectUserOnly)
 	}
 	c.Desktop.DefaultToolApprovalMode = h.approvalMode
-	if c.DesktopUpdateMode() != h.updateMode {
+	if c.chosenUpdateMode() != h.updateMode {
 		c.ignoreProject("desktop.update_mode", c.Desktop.UpdateMode, ProjectUserOnly)
 	}
 	c.Desktop.UpdateMode = h.updateMode

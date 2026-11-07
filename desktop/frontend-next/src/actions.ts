@@ -709,6 +709,7 @@ export const ACTIONS: UIAction[] = [
   { id: "size.restore", kind: "kernel-mutation", target: "none", proof: "interaction" },
   { id: "tree.retry", kind: "kernel-mutation", target: "none", proof: "interaction" },
   { id: "history.more", kind: "view", target: "none", proof: "interaction" },
+  { id: "update.open", kind: "navigation", target: "none", proof: "interaction" },
   { id: "update.mode", kind: "kernel-mutation", target: "none", proof: "interaction" },
   { id: "update.restart", kind: "kernel-mutation", target: "none", proof: "interaction" },
   { id: "update.later", kind: "view", target: "none", proof: "interaction" },

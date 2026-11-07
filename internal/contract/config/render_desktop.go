@@ -71,11 +71,9 @@ func renderDesktopSection(b *strings.Builder, c *Config) {
 		b.WriteString("# default_tool_approval_mode = \"ask\"   # desktop: unset opens in Auto only where the OS sandbox confines writes and the folder is trusted\n")
 	}
 	fmt.Fprintf(b, "check_updates = %v   # desktop: check for new versions on startup\n", c.DesktopCheckUpdates())
-	// Only written while held; an absent key follows the catalog. It has to
-	// outlive the install that set it, or the next launch updates the user
-	// back off the build they chose.
-	if mode := c.DesktopUpdateMode(); mode != UpdateModeManual {
-		fmt.Fprintf(b, "update_mode = %q   # desktop: manual (default) | notify tells you when a release is newer | download also leaves it downloaded and verified; never installs or restarts; user file only\n", mode)
+	// Only written once the user has chosen; an absent key reads as the default.
+	if mode := c.chosenUpdateMode(); mode != "" {
+		fmt.Fprintf(b, "update_mode = %q   # desktop: manual does nothing on its own | notify (default) tells you when a release is newer | download also leaves it downloaded and verified; never installs or restarts; user file only\n", mode)
 	}
 	if pinned := c.DesktopPinnedVersion(); pinned != "" {
 		fmt.Fprintf(b, "pinned_version = %q   # desktop: hold this machine on a release; empty follows the catalog\n", pinned)

@@ -40,22 +40,22 @@ func postUpdateMode(t *testing.T, base, body string) (int, string) {
 	return resp.StatusCode, out.Code
 }
 
-func TestUpdateModeRoutesDefaultToManualAndWriteTheUsersFile(t *testing.T) {
+func TestUpdateModeRoutesDefaultToNotifyAndWriteTheUsersFile(t *testing.T) {
 	srv := studioServer(t, &update.Install{Version: "2.10.0"})
-	if got := updateMode(t, srv.URL); got != "manual" {
-		t.Fatalf("a fresh install reads %q, want manual", got)
-	}
-	if status, _ := postUpdateMode(t, srv.URL, `{"mode":"notify"}`); status != http.StatusOK {
-		t.Fatalf("POST notify = %d", status)
-	}
-	if got := config.LoadForEdit(config.UserConfigPath()).DesktopUpdateMode(); got != "notify" {
-		t.Fatalf("on disk %q, want notify", got)
-	}
 	if got := updateMode(t, srv.URL); got != "notify" {
-		t.Fatalf("read back %q, want notify", got)
+		t.Fatalf("a fresh install reads %q, want notify", got)
 	}
-	if status, _ := postUpdateMode(t, srv.URL, `{"mode":"manual"}`); status != http.StatusOK || updateMode(t, srv.URL) != "manual" {
-		t.Fatal("going back to manual did not stick")
+	if status, _ := postUpdateMode(t, srv.URL, `{"mode":"manual"}`); status != http.StatusOK {
+		t.Fatalf("POST manual = %d", status)
+	}
+	if got := config.LoadForEdit(config.UserConfigPath()).DesktopUpdateMode(); got != "manual" {
+		t.Fatalf("on disk %q, want manual", got)
+	}
+	if got := updateMode(t, srv.URL); got != "manual" {
+		t.Fatalf("read back %q, want manual", got)
+	}
+	if status, _ := postUpdateMode(t, srv.URL, `{"mode":"download"}`); status != http.StatusOK || updateMode(t, srv.URL) != "download" {
+		t.Fatal("download did not stick")
 	}
 }
 
@@ -65,7 +65,7 @@ func TestUpdateModeRouteRefusesAModeItDoesNotOfferByCode(t *testing.T) {
 	if status != http.StatusBadRequest || code != codeUpdateModeInvalid {
 		t.Fatalf("POST download = %d %q, want 400 %q", status, code, codeUpdateModeInvalid)
 	}
-	if got := updateMode(t, srv.URL); got != "manual" {
+	if got := updateMode(t, srv.URL); got != "notify" {
 		t.Fatalf("a refused mode left %q behind", got)
 	}
 }

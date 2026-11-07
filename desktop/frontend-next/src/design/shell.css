@@ -62,6 +62,14 @@
   transition: background var(--m-line), color var(--m-line);
 }
 .studio-feedback:hover { background: var(--overlay); color: var(--text); }
+.studio-update {
+  display: flex; align-items: center; gap: 10px; width: 100%; height: 30px; margin-bottom: 4px; padding: 0 10px; flex: none; box-sizing: border-box;
+  border: 0; border-radius: var(--r-sm); background: var(--overlay); color: var(--text);
+  font: var(--w-med) var(--fs-ui) var(--ui); text-align: left; cursor: pointer;
+}
+.studio-update > span:first-child { display: flex; flex: none; color: var(--accent); }
+.studio-update b { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: inherit; }
+.studio-update:focus-visible { outline: 1px solid var(--focus); outline-offset: -1px; }
 .studio-feedback:focus-visible { outline: 1px solid var(--focus); outline-offset: -1px; }
 .studio-feedback > span:first-child { display: flex; flex: none; color: inherit; }
 .studio-feedback .studio-icon { width: 16px; height: 16px; }
