@@ -80,6 +80,10 @@ select[data-size="sm"] { height: 24px; padding: 0 26px 0 8px; font-size: var(--f
   select:not([multiple]) option::checkmark { order: 1; margin-inline-start: auto; color: var(--accent-ink); }
   select:not([multiple]) option:disabled { color: var(--ghost); cursor: default; }
   select[data-size="sm"] option { min-height: 24px; padding: 2px 8px; font-size: var(--fs-meta); }
+  @media (pointer: coarse) {
+    select:not([multiple]) option { min-height: 40px; }
+    select[data-size="sm"] option { min-height: 40px; }
+  }
 }
 
 .prefs-main :is(input:not([type]), input[type="text"], input[type="password"], input[type="number"], input[type="url"], input[type="email"], input[type="tel"], input[type="time"]):not(.prefs-find):not(.unit-field input), .prefs-main textarea, .prefs-main .unit-field {

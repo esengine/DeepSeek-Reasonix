@@ -96,3 +96,8 @@
 .chrome-context-card .chrome-context-more::after { content: ""; width: 5px; height: 5px; border-top: 1.45px solid var(--faint); border-right: 1.45px solid var(--faint); transform: rotate(45deg); }
 .chrome-context-card .chrome-context-more[aria-expanded="true"]::after { transform: rotate(135deg); }
 .chrome-context-card:not(.studio-overview-card) > .chrome-context-items { margin: 2px 14px 4px; padding: 2px 0 2px 10px; gap: 2px; }
+@media (pointer: coarse) {
+  .chrome-context-card:not(.studio-overview-card) > .chrome-context-parts > div { height: 36px; }
+  .chrome-context-card .chrome-context-more { min-height: 36px; padding-inline: 8px; margin-inline: -8px; }
+  .chrome-context-card:not(.studio-overview-card) > .chrome-context-foot > .manage { min-height: 36px; padding-inline: 4px; }
+}

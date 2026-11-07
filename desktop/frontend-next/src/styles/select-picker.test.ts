@@ -47,4 +47,8 @@ describe("a select's popup list", () => {
   it("follows the small field's size", () => {
     expect(rule(block(), 'select[data-size="sm"] option')).toMatch(/font-size:\s*var\(--fs-meta\)/);
   });
+
+  it("gives every option a finger-sized row on a touch screen", () => {
+    expect(block()).toMatch(/@media \(pointer: coarse\)\s*\{[^}]*select:not\(\[multiple\]\) option\s*\{[^}]*min-height:\s*40px/);
+  });
 });

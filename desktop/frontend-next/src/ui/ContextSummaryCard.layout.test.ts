@@ -27,3 +27,21 @@ describe("the context card's expanded rows", () => {
     expect(ruleFor("\n.chrome-context-items")).toMatch(/grid-template-columns:\s*minmax\(0,\s*1fr\)/);
   });
 });
+
+// The card is the one place a phone reads the context from; its two controls
+// were a line of text tall.
+describe("the context card on a touch screen", () => {
+  const coarse = (): string => {
+    const at = css.indexOf("@media (pointer: coarse)");
+    return at < 0 ? "" : css.slice(at, css.indexOf("\n}", at));
+  };
+
+  it("makes the expand control and the manage link tall enough to press", () => {
+    expect(coarse()).toMatch(/\.chrome-context-more[^{]*\{[^}]*min-height:\s*(3[2-9]|4\d)px/);
+    expect(coarse()).toMatch(/\.manage[^{]*\{[^}]*min-height:\s*(3[2-9]|4\d)px/);
+  });
+
+  it("gives the rows the room those controls need", () => {
+    expect(coarse()).toMatch(/\.chrome-context-parts > div[^{]*\{[^}]*height:\s*(3[6-9]|4\d)px/);
+  });
+});
