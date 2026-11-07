@@ -98,8 +98,9 @@ it("leaves the rendered Workbench untouched when Markdown polls are unchanged", 
   await user.click(await screen.findByRole("button", { name: "notes.md" }));
   await screen.findByRole("heading", { name: "Saved" });
   await act(async () => {});
-  // Whatever the open itself left pending lands before the baseline, not in it.
-  await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+  // A tab that has just opened clears its entering state on a real 220ms timer
+  // (the fake clock covers intervals only), so the baseline waits it out.
+  await act(async () => { await new Promise((resolve) => setTimeout(resolve, 300)); });
   commits.mockClear();
   await tick();
   await tick();

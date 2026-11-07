@@ -47,7 +47,9 @@ function makePort(...ids: string[]) {
 }
 
 function control<T extends HTMLElement = HTMLButtonElement>(action: string, target?: string) {
-  return document.querySelector<T>(`[data-action="backup.${action}"]${target ? `[data-target="${target}"]` : ""}`)!;
+  const at = target ? `[data-target="${target}"]` : "";
+  // A field that also reacts to a key names each event, so its action sits on the change attribute.
+  return document.querySelector<T>(`[data-action="backup.${action}"]${at}, [data-action-change="backup.${action}"]${at}`)!;
 }
 
 function change(action: string, value: string, target?: string) {
