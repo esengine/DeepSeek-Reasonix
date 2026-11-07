@@ -466,7 +466,7 @@ func TestGuardianLoadResetsLegacyConsecutiveUserSessions(t *testing.T) {
 // user turn — consecutive user roles again. The post-review normalization must
 // keep the session strictly alternating across that fold.
 func TestGuardianSessionAlternatesAfterCompaction(t *testing.T) {
-	prov := &scriptedProvider{defaultUsage: &provider.Usage{TotalTokens: 1}} // default allow verdict, also serves the summarizer
+	prov := &scriptedProvider{defaultUsage: &provider.Usage{TotalTokens: 1}} // default allow verdict
 	sink := &captureSink{}
 	gs := NewSession(prov, tool.NewRegistry(), nil, PolicyPrompt(), "guardian-test", 0, nil, sink, nil)
 	parent := sessionstore.NewSession("sys")
@@ -484,9 +484,11 @@ func TestGuardianSessionAlternatesAfterCompaction(t *testing.T) {
 	if len(events) != compactEvery {
 		t.Fatalf("guardian events = %d, want %d", len(events), compactEvery)
 	}
+	// Compaction archives earlier turns to a file, so the compacting review
+	// costs the one review request and no summarizer call.
 	usage := events[len(events)-1].Guardian.Usage
-	if usage == nil || usage.TotalTokens != 2 || usage.RequestCount != 2 {
-		t.Fatalf("compacting review usage = %+v, want total=2 requests=2", usage)
+	if usage == nil || usage.TotalTokens != 1 || usage.RequestCount != 1 {
+		t.Fatalf("compacting review usage = %+v, want total=1 requests=1", usage)
 	}
 	for i := 1; i < len(msgs); i++ {
 		if msgs[i].Role == msgs[i-1].Role {

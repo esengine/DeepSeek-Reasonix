@@ -1494,11 +1494,7 @@ func TestCoordinatorRunsExecutorWhenMarkerNotAlone(t *testing.T) {
 // successful plan.
 func TestCoordinatorHandoffSurvivesPlannerCompaction(t *testing.T) {
 	planner := &mockProvider{name: "planner", streams: [][]provider.Chunk{
-		{ // preflight compaction on the large filler history (estimate-based)
-			{Type: provider.ChunkText, Text: "- goal: prior filler\n- pending: plan the fix"},
-			{Type: provider.ChunkDone},
-		},
-		{ // the plan turn after projection is in place
+		{ // the plan turn; preflight compaction archives the filler without a model call
 			{Type: provider.ChunkText, Text: "Edit main.go and add the missing guard."},
 			{Type: provider.ChunkUsage, Usage: &provider.Usage{PromptTokens: 400, TotalTokens: 450}},
 			{Type: provider.ChunkDone},
