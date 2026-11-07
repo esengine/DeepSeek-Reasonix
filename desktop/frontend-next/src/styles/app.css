@@ -3509,14 +3509,16 @@
   .code-act:hover, .code-act:focus-visible { color: var(--text); background: var(--overlay) }
   .code-act .studio-icon { width: 14px; height: 14px }
   .code-act[data-state="done"] { color: var(--ok) }
-  .code-body { display: flex; align-items: flex-start }
-  .code-gutter {
-    flex: none; padding: 11px 10px 12px 12px; text-align: end;
+  .code-body { display: block }
+  .code-body > pre.term { margin: 0; border-radius: 0; background: none; tab-size: 4; overflow-x: hidden; padding: 11px 0 12px }
+  .code-ln { display: flex; align-items: flex-start }
+  .code-no {
+    flex: none; box-sizing: content-box; width: var(--ln-w); padding: 0 10px 0 12px; text-align: end; font-style: normal;
     font: var(--w-reg) var(--fs-ui)/var(--fs-title) var(--mono); color: var(--ghost); user-select: none;
-    border-inline-end: 1px solid var(--hair);
+    border-inline-end: 1px solid var(--hair); align-self: stretch;
   }
-  .code-gutter > span { display: block }
-  .code-body > pre.term { flex: 1; min-width: 0; margin: 0; border-radius: 0; background: none; tab-size: 4 }
+  .code-tx { flex: 1; min-width: 0; padding-inline: 14px 12px; white-space: pre-wrap; overflow-wrap: anywhere }
+  .md .code-body pre.term .code-tx code { white-space: inherit; overflow-wrap: inherit }
   .code-wrap[data-folded] .code-body {
     max-height: calc(19px * 12 + 11px); overflow: hidden;
     mask-image: linear-gradient(to bottom, #000 72%, transparent);

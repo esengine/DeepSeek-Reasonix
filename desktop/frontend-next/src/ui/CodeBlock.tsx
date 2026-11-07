@@ -1,7 +1,8 @@
-import { useState, type ReactNode } from "react";
+import { useState, type CSSProperties, type ReactNode } from "react";
 import { t } from "../i18n";
 import { CopyButton } from "./CopyButton";
 import { StudioIcon } from "./StudioIcon";
+import { splitLines } from "./codelines";
 
 // Past this many lines a settled block opens folded to FOLDED_LINES, so one long
 // file in a reply does not push the answer around it off the screen.
@@ -41,6 +42,8 @@ export function CodeBlock({ lang, source, live, children }: { lang: string; sour
   const foldable = !live && lines > FOLD_OVER;
   const [open, setOpen] = useState(false);
   const folded = foldable && !open;
+  const rows = splitLines(children);
+  while (rows.length > lines && rows[rows.length - 1].length === 0) rows.pop();
   return (
     <div className="code-wrap" data-lang={lang || undefined} data-folded={folded ? "" : undefined}>
       <div className="code-hd">
@@ -55,11 +58,15 @@ export function CodeBlock({ lang, source, live, children }: { lang: string; sour
           {!live && <CopyButton text={source} iconOnly className="code-act" label={t("chat.copy_this_code")} />}
         </span>
       </div>
-      <div className="code-body">
-        <div className="code-gutter" aria-hidden="true">
-          {Array.from({ length: lines }, (_, i) => <span key={i}>{i + 1}</span>)}
-        </div>
-        <pre className="term">{children}</pre>
+      <div className="code-body" style={{ "--ln-w": `${String(lines).length + 1}ch` } as CSSProperties}>
+        <pre className="term">
+          {rows.map((row, i) => (
+            <span className="code-ln" key={i}>
+              <i className="code-no" aria-hidden="true">{i + 1}</i>
+              <span className="code-tx">{row.length ? row : "\n"}</span>
+            </span>
+          ))}
+        </pre>
       </div>
       {foldable && (
         <button type="button" className="code-more" data-action="code.fold" aria-expanded={open} onClick={() => setOpen(!open)}>
