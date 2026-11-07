@@ -64,6 +64,24 @@ select:not([multiple]):focus-visible { outline: none; border-color: var(--focus)
 select:not([multiple]):disabled { background-color: var(--overlay); color: var(--ghost); cursor: default }
 select[data-size="sm"] { height: 24px; padding: 0 26px 0 8px; font-size: var(--fs-meta); background-position: right 8px center }
 
+@supports (appearance: base-select) {
+  select:not([multiple]), select:not([multiple])::picker(select) { appearance: base-select; }
+  select:not([multiple])::picker-icon { display: none; }
+  select:not([multiple])::picker(select) {
+    box-sizing: border-box; margin-block: 4px; padding: 4px; max-height: min(320px, 50vh);
+    border: 1px solid var(--border); border-radius: var(--r-md); background: var(--float); box-shadow: var(--shadow-float);
+  }
+  select:not([multiple]) option {
+    display: flex; align-items: center; gap: 8px; min-height: 28px; box-sizing: border-box; padding: 4px 10px; border-radius: var(--r-sm);
+    color: var(--text); font: var(--w-reg) var(--fs-ui)/1.3 var(--ui); cursor: pointer;
+  }
+  select:not([multiple]) option:is(:hover, :focus-visible) { background: var(--overlay); outline: none; }
+  select:not([multiple]) option:checked { font-weight: var(--w-med); }
+  select:not([multiple]) option::checkmark { order: 1; margin-inline-start: auto; color: var(--accent-ink); }
+  select:not([multiple]) option:disabled { color: var(--ghost); cursor: default; }
+  select[data-size="sm"] option { min-height: 24px; padding: 2px 8px; font-size: var(--fs-meta); }
+}
+
 .prefs-main :is(input:not([type]), input[type="text"], input[type="password"], input[type="number"], input[type="url"], input[type="email"], input[type="tel"], input[type="time"]):not(.prefs-find):not(.unit-field input), .prefs-main textarea, .prefs-main .unit-field {
   box-sizing: border-box; height: 32px; min-width: 0; margin: 0; padding: 0 10px;
   border: 1px solid var(--border); border-radius: var(--r-sm); background: var(--raised);
