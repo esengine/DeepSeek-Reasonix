@@ -478,3 +478,5 @@
 .page-index { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 0 0 14px; }
 .page-index .pi-label { margin-right: 2px; color: var(--faint); font: var(--w-reg) var(--fs-meta) var(--ui); }
 .page-index .spill { height: 26px; }
+:root:not([data-fold~="phone"]) .prefs-found { top: 0; left: 240px; right: 0; bottom: 0; width: auto; max-height: none; padding: 58px 22px 14px; border: 0; border-left: 1px solid var(--hair); border-radius: 0 var(--r-lg) var(--r-lg) 0; background: var(--surface); box-shadow: none; }
+:root:not([data-fold~="phone"]) .prefs-actions { position: relative; z-index: 6; }
