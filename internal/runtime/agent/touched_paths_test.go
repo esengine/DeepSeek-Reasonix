@@ -319,3 +319,24 @@ func TestCallThroughAProxyFeedsLiveAndReplaysAsItsTarget(t *testing.T) {
 		t.Fatalf("replay observed %q, want only the call whose recorded target resolves: %q", got, want)
 	}
 }
+
+// A replay resolves paths against the disk as it is now, once; a long
+// conversation that read one file a hundred times must not pay a hundred
+// symlink walks for it on every resume.
+func TestReplayObservesEachDistinctPathOnce(t *testing.T) {
+	obs := &recordedPaths{}
+	a := touchedAgent(t, obs, Options{},
+		readingTool{pathTool{name: "read_file", readOnly: true, read: "/ws/hot.go"}},
+		writingTool{pathTool{name: "edit_file", writes: []string{"/ws/hot.go", "/ws/other.go"}}},
+	)
+	var msgs []provider.Message
+	for i := range 50 {
+		id := string(rune('a'+i%26)) + string(rune('A'+i/26))
+		msgs = append(msgs, callMsg(id, "read_file"), resultMsg(id, "read_file", nil))
+	}
+	msgs = append(msgs, callMsg("w", "edit_file"), resultMsg("w", "edit_file", nil))
+	a.SetSession(sessionWith(msgs...))
+	if got, want := obs.seen(), []string{"/ws/hot.go", "/ws/other.go"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("replay observed %q, want each distinct path once: %q", got, want)
+	}
+}

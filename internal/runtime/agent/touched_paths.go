@@ -42,11 +42,18 @@ func touchedPaths(t tool.Tool, args json.RawMessage) []string {
 
 // observeTouchedPaths feeds the arguments the call executed with. A path outside
 // the workspace is refused by the observer and is not the session's to record.
-func (a *Agent) observeTouchedPaths(t tool.Tool, args json.RawMessage) {
+// A non-nil done skips a path already fed through it.
+func (a *Agent) observeTouchedPaths(t tool.Tool, args json.RawMessage, done map[string]struct{}) {
 	if a.svc.pathObserver == nil {
 		return
 	}
 	for _, p := range touchedPaths(t, args) {
+		if done != nil {
+			if _, dup := done[p]; dup {
+				continue
+			}
+			done[p] = struct{}{}
+		}
 		_ = a.svc.pathObserver.Observe(p)
 	}
 }
@@ -65,6 +72,7 @@ func (a *Agent) replayTouchedPaths(s *sessionstore.Session) {
 		return
 	}
 	calls := map[string]provider.ToolCall{}
+	done := map[string]struct{}{}
 	for _, m := range s.Snapshot() {
 		switch m.Role {
 		case provider.RoleAssistant:
@@ -76,14 +84,14 @@ func (a *Agent) replayTouchedPaths(s *sessionstore.Session) {
 			if !ok || m.ToolFailure != nil || a.svc.tools == nil {
 				continue
 			}
-			a.replayCall(c)
+			a.replayCall(c, done)
 		}
 	}
 }
 
 // replayCall observes one stored call. A call through a stable proxy replays as
 // the target the host recorded for it, with the arguments the proxy forwards.
-func (a *Agent) replayCall(c provider.ToolCall) {
+func (a *Agent) replayCall(c provider.ToolCall, done map[string]struct{}) {
 	t, ok := a.svc.tools.Get(c.Name)
 	if !ok {
 		return
@@ -96,5 +104,5 @@ func (a *Agent) replayCall(c provider.ToolCall) {
 		}
 		t, args = target, reader.TargetArgs(args)
 	}
-	a.observeTouchedPaths(t, args)
+	a.observeTouchedPaths(t, args, done)
 }

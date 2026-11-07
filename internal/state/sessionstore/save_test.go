@@ -193,12 +193,25 @@ func TestSnapshotUpToDateFastPath(t *testing.T) {
 	if got := loaded.Messages[len(loaded.Messages)-1].Content; got != "again" {
 		t.Fatalf("reloaded tail = %q, want %q", got, "again")
 	}
-	// A load-adopted baseline must NOT arm the fast path: the ledger can lag
-	// the transcript after an interrupted save, and the first save after a
-	// load is the one that heals it (see
+	// A load whose ledger describes the transcript it read is as good as a
+	// save's baseline; one whose ledger disagrees must not arm the fast path,
+	// because the first save after it is the one that heals the ledger (see
 	// TestSameContentSaveHealsStaleLedgerDigest).
-	if loaded.snapshotUpToDate(path) {
-		t.Fatal("snapshotUpToDate = true for a freshly loaded session")
+	if !loaded.snapshotUpToDate(path) {
+		t.Fatal("snapshotUpToDate = false for a loaded session whose ledger agrees with its transcript")
+	}
+	if err := UpdateBranchMeta(path, false, func(m *BranchMeta) error {
+		m.ContentDigest = "stale"
+		return nil
+	}); err != nil {
+		t.Fatalf("stale the ledger: %v", err)
+	}
+	stale, err := LoadSession(path)
+	if err != nil {
+		t.Fatalf("LoadSession with a stale ledger: %v", err)
+	}
+	if stale.snapshotUpToDate(path) {
+		t.Fatal("snapshotUpToDate = true for a loaded session whose ledger disagrees with its transcript")
 	}
 
 	// A pending rewrite (compaction/rewind) also disarms the fast path.

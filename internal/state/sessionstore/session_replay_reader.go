@@ -69,38 +69,81 @@ func (r *sessionRecordReader) next() ([]byte, int64, error) {
 		break
 	}
 	start := r.offset - 1
-	depth := 1
-	quoted, escaped := false, false
-	for depth != 0 {
-		b, err := r.readByte()
-		if err != nil {
+	scan := recordScan{depth: 1}
+	for scan.depth != 0 {
+		if err := r.advance(&scan); err != nil {
 			if errors.Is(err, io.EOF) {
 				err = io.ErrUnexpectedEOF
 			}
 			return nil, start, err
 		}
-		if int64(len(r.buffer)) >= sessionReplayMaxPayloadBytes {
-			return nil, start, sessionReplayLimitError(r.path, "event_record_bytes", int64(len(r.buffer))+1, sessionReplayMaxPayloadBytes)
-		}
-		r.buffer = append(r.buffer, b)
-		if quoted {
-			if escaped {
-				escaped = false
-			} else if b == '\\' {
-				escaped = true
-			} else if b == '"' {
-				quoted = false
+	}
+	return r.buffer, start, nil
+}
+
+// recordScan is the framing state of one JSON object: how deep it is nested and
+// whether the scan stands inside a string or just after a backslash.
+type recordScan struct {
+	depth           int
+	quoted, escaped bool
+}
+
+// feed consumes bytes of p up to and including the one that closes the object,
+// and reports how many it took.
+func (s *recordScan) feed(p []byte) int {
+	for i, b := range p {
+		if s.quoted {
+			switch {
+			case s.escaped:
+				s.escaped = false
+			case b == '\\':
+				s.escaped = true
+			case b == '"':
+				s.quoted = false
 			}
 			continue
 		}
 		switch b {
 		case '"':
-			quoted = true
+			s.quoted = true
 		case '{', '[':
-			depth++
+			s.depth++
 		case '}', ']':
-			depth--
+			s.depth--
+			if s.depth == 0 {
+				return i + 1
+			}
 		}
 	}
-	return r.buffer, start, nil
+	return len(p)
+}
+
+// advance moves the scan forward by whatever the reader already holds, within
+// both byte budgets. When a budget leaves no room it takes one byte the slow
+// way, which is where the refusal for that budget is raised.
+func (r *sessionRecordReader) advance(scan *recordScan) error {
+	if r.reader.Buffered() == 0 {
+		if _, err := r.reader.Peek(1); err != nil {
+			return err
+		}
+	}
+	chunk, _ := r.reader.Peek(r.reader.Buffered())
+	room := min(int64(len(chunk)), r.maxBytes-r.offset, sessionReplayMaxPayloadBytes-int64(len(r.buffer)))
+	if room <= 0 {
+		b, err := r.readByte()
+		if err != nil {
+			return err
+		}
+		if int64(len(r.buffer)) >= sessionReplayMaxPayloadBytes {
+			return sessionReplayLimitError(r.path, "event_record_bytes", int64(len(r.buffer))+1, sessionReplayMaxPayloadBytes)
+		}
+		r.buffer = append(r.buffer, b)
+		scan.feed(r.buffer[len(r.buffer)-1:])
+		return nil
+	}
+	n := scan.feed(chunk[:room])
+	r.buffer = append(r.buffer, chunk[:n]...)
+	_, _ = r.reader.Discard(n)
+	r.offset += int64(n)
+	return nil
 }

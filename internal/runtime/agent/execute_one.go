@@ -729,7 +729,7 @@ func (a *Agent) finishToolExecution(ctx context.Context, plan *toolCallPlan) too
 		out.keepFull(rawErr)
 		return out
 	}
-	a.observeTouchedPaths(runTool, runArgs)
+	a.observeTouchedPaths(runTool, runArgs, nil)
 	result = silentSuccessDetail(evidenceName, evidenceArgs, result)
 	body, bound, truncMsg := a.boundToolOutput(result, call.Name, call.ID, call.ExecutionArguments(), false)
 	out := toolOutcome{

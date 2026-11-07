@@ -84,3 +84,54 @@ func TestSavingAfterAnotherRuntimeWroteStillSeesIt(t *testing.T) {
 		}
 	}
 }
+
+// Switching away from a session that was opened and never touched saves it
+// once more; that snapshot has nothing to write and must not read the log back.
+func TestSnapshotOfAnUntouchedLoadedSessionReadsNothing(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "s.jsonl")
+	seededSession(t, path, 2000)
+	loaded, err := LoadSession(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, size, err := digestAndSizeSessionMessages(loaded.Snapshot())
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := allocatedBy(func() {
+		if err := loaded.SaveSnapshot(path); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if limit := uint64(size) / 2; got > limit {
+		t.Fatalf("snapshot of an unchanged loaded session allocated %d bytes for a %d byte transcript (limit %d)", got, size, limit)
+	}
+}
+
+// A ledger that does not describe the transcript on disk is what an interrupted
+// save leaves behind; the first save after a load is what heals it.
+func TestSnapshotAfterLoadStillHealsALedgerThatDisagreesWithTheTranscript(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "s.jsonl")
+	seededSession(t, path, 40)
+	if err := UpdateBranchMeta(path, false, func(m *BranchMeta) error {
+		m.ContentDigest = "stale"
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := LoadSession(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := loaded.SaveSnapshot(path); err != nil {
+		t.Fatal(err)
+	}
+	identity, ok, err := SessionContentIdentity(path)
+	if err != nil || !ok {
+		t.Fatalf("identity: ok=%v err=%v", ok, err)
+	}
+	want, _ := DigestSessionMessages(loaded.Snapshot())
+	if identity.Digest != want {
+		t.Fatalf("ledger digest %x was not healed to the transcript's %x", identity.Digest, want)
+	}
+}

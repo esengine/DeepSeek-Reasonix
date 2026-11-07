@@ -1439,7 +1439,11 @@ func loadSessionUnlockedContext(ctx context.Context, path string) (*Session, err
 			if ok {
 				revision = meta.Revision
 			}
-			s.markPersistedFromLoad(path, digest, s.version, revision, s.rewriteVersion)
+			if loadAgreesWithLedger(s, ok, meta, digest) {
+				s.markPersisted(path, digest, s.version, revision, s.rewriteVersion)
+			} else {
+				s.markPersistedFromLoad(path, digest, s.version, revision, s.rewriteVersion)
+			}
 		}
 	}
 	if err := ctx.Err(); err != nil {

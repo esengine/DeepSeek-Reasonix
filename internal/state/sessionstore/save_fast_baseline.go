@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"os"
+	"strings"
 
 	"reasonix/internal/contract/provider"
 	"reasonix/internal/state/store"
@@ -122,4 +123,14 @@ func (s *Session) snapshotDecision(path string, msgs []provider.Message, digest,
 		return decision, nil
 	}
 	return s.checkSnapshotWrite(path, msgs, digest, version, ownedRewrite)
+}
+
+// loadAgreesWithLedger reports that what a load read is the transcript the
+// ledger describes, with nothing waiting to be repaired. Such a baseline is as
+// good as a save's: a snapshot of the session while it is unchanged has nothing
+// to write. A ledger that disagrees is what an interrupted save leaves, and the
+// first save after the load has to run in full to heal it.
+func loadAgreesWithLedger(s *Session, ledgerPresent bool, meta BranchMeta, digest [sha256.Size]byte) bool {
+	return ledgerPresent && !s.normalizedDirty && !s.eventLogDamaged &&
+		strings.TrimSpace(meta.ContentDigest) == digestString(digest)
 }
