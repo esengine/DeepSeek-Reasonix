@@ -63,7 +63,8 @@
   border: 1px solid var(--border); border-bottom: 0; border-radius: var(--r-md) var(--r-md) 0 0;
   background: var(--page); box-shadow: none;
 }
-.compose > .studio-todo[data-open] { inset: auto 0 100%; border-color: transparent; border-radius: var(--r-lg) var(--r-lg) 0 0; background: var(--compose-surface, var(--raised)); box-shadow: 0 -3px 12px rgb(25 30 25 / .07); }
+.compose > .studio-todo[data-open] { background: var(--compose-surface, var(--raised)); box-shadow: 0 -3px 12px rgb(25 30 25 / .07); }
+.compose:has(> .studio-todo[data-open]) { margin-top: var(--todo-h, 0px); }
 .compose > .studio-todo[data-open] > .studio-todo-body { border-bottom: 1px solid var(--hair); }
 .compose > .studio-todo[data-open] > .studio-todo-sum { display: none; }
 .compose > .studio-todo .studio-todo-sum {

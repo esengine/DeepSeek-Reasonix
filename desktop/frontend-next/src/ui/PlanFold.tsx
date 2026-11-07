@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
 import { t } from "../i18n";
 import { currentStep, stepDone, stepLabel, type PlanStep } from "../state/session";
 import { onPlanProgressChange, showsPlanProgress } from "../state/prefs";
@@ -42,6 +42,21 @@ export function PlanFold({ plan, goal, goalStatus, goalRuntime, shown, running, 
   useEffect(() => {
     if (hidden) setOpen(false);
   }, [hidden]);
+  // The open list floats above the composer, so the transcript has to be told
+  // how much of its bottom edge it covers.
+  useLayoutEffect(() => {
+    const strip = root.current;
+    const composer = strip?.closest<HTMLElement>(".compose");
+    if (!open || hidden || !strip || !composer) return;
+    const fit = () => composer.style.setProperty("--todo-h", `${Math.ceil(strip.getBoundingClientRect().height)}px`);
+    fit();
+    const watch = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(fit);
+    watch?.observe(strip);
+    return () => {
+      watch?.disconnect();
+      composer.style.removeProperty("--todo-h");
+    };
+  }, [open, hidden]);
   // The bar is not drawn while the list is open, so focus returns once it is.
   useEffect(() => {
     if (open || !refocus.current) return;
