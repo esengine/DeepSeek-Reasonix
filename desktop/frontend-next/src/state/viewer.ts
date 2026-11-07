@@ -13,6 +13,27 @@ export function setViewer(next: DeviceSelf | null) {
   subs.forEach((fn) => fn());
 }
 
+// Whether the machine this device drives still answers. The device bar is the
+// one place that asks; the title bar reads the answer from here.
+let reachable = true;
+const reachSubs = new Set<() => void>();
+
+export function setReachable(next: boolean) {
+  if (next === reachable) return;
+  reachable = next;
+  reachSubs.forEach((fn) => fn());
+}
+
+export function useReachable(): boolean {
+  return useSyncExternalStore(
+    (fn) => {
+      reachSubs.add(fn);
+      return () => reachSubs.delete(fn);
+    },
+    () => reachable,
+  );
+}
+
 export function useViewer(): DeviceSelf | null {
   return useSyncExternalStore(
     (fn) => {

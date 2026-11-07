@@ -9,6 +9,7 @@
 @import "./composer.css" layer(design);
 @import "./turn.css" layer(design);
 @import "./plan.css" layer(design);
+@import "./phone.css" layer(design);
 @import "./subagent.css" layer(design);
 @import "./jobs.css" layer(design);
 @import "./workbench.css" layer(design);

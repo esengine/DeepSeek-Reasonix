@@ -1,0 +1,30 @@
+[data-fold~="phone"] .chrome { gap: 6px; padding: 6px 8px 8px 42px; }
+[data-fold~="phone"] .studio-menu { left: 8px; top: calc((var(--chrome-h) - 28px) / 2); width: 28px; height: 28px; border-radius: var(--r-sm); color: var(--muted); }
+[data-fold~="phone"] .studio-menu svg { width: 16px; height: 16px; stroke-width: 1.45; }
+[data-fold~="phone"] .chrome .crumb { flex: 1; flex-direction: column; justify-content: center; align-self: stretch; gap: 1px; text-align: center; }
+[data-fold~="phone"] .chrome .crumb-context { display: none; }
+[data-fold~="phone"] .chrome .crumb > b { max-width: 100%; min-width: 0; font: var(--w-semi) var(--fs-lead)/1.2 var(--ui); color: var(--text); }
+[data-fold~="phone"] .chrome .crumb-sub { display: flex; align-items: center; justify-content: center; gap: 4px; max-width: 100%; min-width: 0; color: var(--faint); font: var(--w-reg) var(--fs-micro)/1.2 var(--ui); }
+[data-fold~="phone"] .chrome .r { margin-left: 0; }
+.chrome .crumb-sub > i { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--ok); }
+.chrome .crumb-sub[data-state="run"] > i { background: var(--net); animation: ph-run 1.4s ease-in-out infinite; }
+.chrome .crumb-sub[data-state="down"] > i { background: var(--warn); }
+@keyframes ph-run { 0%, 100% { opacity: .35; } 50% { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .chrome .crumb-sub > i { animation: none; } }
+:root[data-effects="reduced"] .chrome .crumb-sub > i { animation: none; }
+
+.devicebar .db-retry, .devicebar .db-spin { display: none; }
+[data-fold~="phone"] .devicebar[data-down] { height: auto; min-height: 30px; padding: 10px 12px; background: color-mix(in srgb, var(--warn) 14%, var(--surface)); font: var(--w-reg) var(--fs-ui)/1.3 var(--ui); }
+[data-fold~="phone"] .devicebar[data-down] > i { background: var(--warn); }
+[data-fold~="phone"] .devicebar[data-down] .db-what { flex: 1; white-space: normal; }
+[data-fold~="phone"] .devicebar[data-down] .db-spin { display: inline-block; flex: none; width: 13px; height: 13px; color: var(--net); }
+[data-fold~="phone"] .devicebar[data-down] .db-retry { display: inline; flex: none; color: var(--muted); font: var(--w-reg) var(--fs-meta)/1 var(--ui); font-style: normal; }
+
+.apv-more { display: none; }
+[data-fold~="phone"] .flow .call[data-approval] .apv-ft { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; padding: 10px 12px; }
+[data-fold~="phone"] .flow .call[data-approval] .apv-ft .btn { box-sizing: border-box; width: 100%; justify-self: stretch; height: 44px; min-height: 44px; display: grid; place-items: center; padding: 0 10px; border-radius: 10px; font: var(--w-med) var(--fs-lead)/1 var(--ui); }
+[data-fold~="phone"] .flow .call[data-approval] .apv-ft .btn[data-deny] { order: 0; border: 1px solid var(--border); background: transparent; color: var(--err-ink); }
+[data-fold~="phone"] .flow .call[data-approval] .apv-ft .btn[data-primary] { order: 1; border: 0; background: var(--accent); color: var(--accent-fg); }
+[data-fold~="phone"] .flow .call[data-approval] .apv-ft .btn:not([data-primary], [data-deny]) { display: none; order: 2; grid-column: 1 / -1; }
+[data-fold~="phone"] .flow .call[data-approval] .apv-ft[data-more] .btn:not([data-primary], [data-deny]) { display: grid; }
+[data-fold~="phone"] .flow .call[data-approval] .apv-ft .apv-more { display: block; order: 3; grid-column: 1 / -1; justify-self: start; min-height: 32px; padding: 0; border: 0; background: none; color: var(--link); font: var(--w-reg) var(--fs-meta)/1 var(--ui); cursor: pointer; }

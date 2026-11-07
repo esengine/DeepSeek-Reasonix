@@ -2,7 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import { t } from "../i18n";
 import type { HubPort } from "../port/hub";
 import type { DeviceSelf } from "../port/share";
-import { setViewer } from "../state/viewer";
+import { setReachable as publishReachable, setViewer } from "../state/viewer";
+import { RMark } from "./RMark";
 
 // How often a device confirms the machine still answers. The event stream
 // carries the work; this only keeps the bar's dot honest when it stops.
@@ -28,10 +29,14 @@ export function DeviceBar({ hub }: { hub: HubPort }) {
           setSelf(d);
           setViewer(d);
           setReachable(true);
+          publishReachable(true);
           return d !== null;
         },
         () => {
-          if (alive) setReachable(false);
+          if (alive) {
+            setReachable(false);
+            publishReachable(false);
+          }
           return true;
         },
       );
@@ -67,6 +72,8 @@ export function DeviceBar({ hub }: { hub: HubPort }) {
         {reachable ? t("remote.controlling_machine", { machine: self.machine }) : t("remote.lost_the_connection_to_machine", { machine: self.machine })}
       </span>
       <small>{t("remote.this_is_device_n", { n: self.ordinal })}</small>
+      {!reachable && <RMark className="plan-spin db-spin" />}
+      <em className="db-retry">{t("remote.reconnecting")}</em>
       <button data-action={arming ? "device.leave" : "device.ask-leave"} data-armed={arming ? "" : undefined} onClick={leave}>
         {arming ? t("remote.disconnect_2") : t("remote.disconnect")}
       </button>

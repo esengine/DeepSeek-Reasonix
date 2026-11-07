@@ -13,6 +13,7 @@ import { TooltipButton } from "./TooltipButton";
 import { workspaceDirectoryDescription } from "./workspaceDirectory";
 import { WindowControls, zoomOnTitleBar } from "./WindowControls";
 import type { PaneView } from "../state/paneview";
+import { useReachable, useViewer } from "../state/viewer";
 
 const base = (p: string) => p.replace(/[/\\]+$/, "").split(/[/\\]/).pop() || p;
 // The filename is a timestamp and a model ref — true, and useless to read. The
@@ -58,7 +59,10 @@ export function Chrome({ port, status, workspace: ws, title, steer, account, hos
     if (hub && root) void hub.openWorkspace(root).catch((e) => onError?.(e));
   };
 
-  const gathered = useFolded("bar");
+  const phone = useFolded("phone");
+  const gathered = useFolded("bar") || phone;
+  const device = useViewer();
+  const reachable = useReachable();
   const [more, setMore] = useState(false);
   const group = useRef<HTMLDivElement>(null);
   const shut = useCallback(() => setMore(false), []);
@@ -103,6 +107,16 @@ export function Chrome({ port, status, workspace: ws, title, steer, account, hos
           <span className="crumbsep">/</span>
         </span>
         <b title={status?.sessionPath}>{sessionName(title, status?.sessionPath)}</b>
+        {phone && device && (
+          <span className="crumb-sub" data-state={!reachable ? "down" : status?.running ? "run" : "ok"}>
+            <i aria-hidden="true" />
+            {!reachable
+              ? t("remote.machine_disconnected", { machine: device.machine })
+              : status?.running
+                ? t("remote.running_on_machine", { machine: device.machine })
+                : `${device.machine} · ${project}`}
+          </span>
+        )}
       </div>
 
       <span className="badge" hidden={steer === 0}>

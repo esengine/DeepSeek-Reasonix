@@ -19,6 +19,7 @@ export const CHAT: Messages = {
   "chat.all_places": { zh: "全部地点", en: "All places" },
   "chat.allow_for_this_session_lasts": { zh: "“本会话允许”只对这个对话有效，随对话保存，恢复这个对话后仍然有效。", en: "“Allow for this session” lasts for this conversation only and is saved with it, so it still holds when you resume the conversation." },
   "chat.allow_once": { zh: "允许这一次", en: "Allow once" },
+  "chat.more_options": { zh: "更多选项…", en: "More options…" },
   "chat.allow_this_kind_for_this": { zh: "本会话允许此类操作，不再询问", en: "Allow this kind for this session, stop asking" },
   "chat.allowed": { zh: "已允许", en: "Allowed" },
   "chat.allowed_once": { zh: "允许这一次。", en: "Allowed once." },

@@ -48,6 +48,8 @@ export const REMOTE: Messages = {
   "remote.device_n_disconnected": { zh: "设备 {n} 已断开", en: "Device {n} disconnected" },
   "remote.disconnect": { zh: "断开", en: "Disconnect" },
   "remote.disconnect_2": { zh: "确认断开", en: "Disconnect?" },
+  "remote.running_on_machine": { zh: "执行中 · {machine}", en: "Running · {machine}" },
+  "remote.machine_disconnected": { zh: "{machine} · 已断开", en: "{machine} · Disconnected" },
   "remote.disconnect_this_phone_it_will": { zh: "断开这台手机？它需要重新扫码才能再连上。", en: "Disconnect this phone? It will need to scan a new code to connect again." },
   "remote.disconnected": { zh: "已断开", en: "Disconnected" },
   "remote.distribution": { zh: "发行版", en: "Distribution" },

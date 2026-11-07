@@ -106,6 +106,7 @@ export const APP: Messages = {
   "app.send_no_thinking_parameter": { zh: "不发思考参数", en: "Send no thinking parameter" },
   "app.session_panes": { zh: "会话面板", en: "Session panes" },
   "app.show_the_workspace_rail": { zh: "展开工作区栏", en: "Show the workspace rail" },
+  "app.session_list": { zh: "会话列表", en: "Sessions" },
   "app.sign_in": { zh: "重新登录", en: "Sign in" },
   "app.sign_in_again": { zh: "需要重新登录", en: "Sign in again" },
   "app.small": { zh: "小", en: "Small" },

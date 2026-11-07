@@ -6,6 +6,7 @@ import { useState } from "react";
 import { decisionSource } from "../source";
 import { RememberChoice, RememberWhere, type Remembered } from "./RememberChoice";
 import { useViewer } from "../../state/viewer";
+import { useFolded } from "../usefold";
 import { isPlanGate } from "../planLive";
 import { PlanCard } from "./PlanCard";
 
@@ -105,6 +106,8 @@ export function ApprovalCard({ item, onApprove, onFullAccess, onPlan }: Props) {
   const settledBy = decisionSource(item.by, useViewer());
   const [submitting, setSubmitting] = useState<ApprovalVerdict | "">("");
   const [confirmFullAccess, setConfirmFullAccess] = useState(false);
+  const [moreOpen, setMoreOpen] = useState(false);
+  const phone = useFolded("phone");
   const [switchingFullAccess, setSwitchingFullAccess] = useState(false);
   const remembering: Remembered[] = [...(item.a.allowsSession ? ["session" as const] : []), ...(item.a.allowsPersist ? ["always" as const] : [])];
   // Full access cannot answer the origin question, so the card does not offer it.
@@ -161,7 +164,7 @@ export function ApprovalCard({ item, onApprove, onFullAccess, onPlan }: Props) {
               </div>
             )}
             {!sealed && (
-              <div className="apv-ft">
+              <div className="apv-ft" data-more={moreOpen ? "" : undefined}>
                 <button className="btn" data-primary data-action="decision.tool" data-target={item.a.id} data-value="once"
                   disabled={!!submitting} onClick={() => void decide("once")}>
                   {submitting === "once" ? t("common.submitting") : t("chat.allow_once")}
@@ -179,6 +182,11 @@ export function ApprovalCard({ item, onApprove, onFullAccess, onPlan }: Props) {
                   <button className="btn" data-weak="" data-yolo="" data-action="decision.full-access"
                     disabled={!!submitting} onClick={() => setConfirmFullAccess(true)}>
                     {t("chat.switch_to_full_access")}
+                  </button>
+                )}
+                {phone && (remembering.length > 0 || explicit) && (
+                  <button type="button" className="apv-more" data-action="decision.more" aria-expanded={moreOpen} onClick={() => setMoreOpen((on) => !on)}>
+                    {t("chat.more_options")}
                   </button>
                 )}
               </div>
