@@ -278,11 +278,11 @@ CLI 进阶用法和详细配置见 **[CLI 命令参考](./docs/CLI.zh-CN.md)**�
 <!-- reasonix-top-contributors:start -->
 | Contributor | Contributor | Contributor | Contributor |
 | --- | --- | --- | --- |
-| [**SivanCola**](https://github.com/SivanCola) | [**KHG420**](https://github.com/KHG420) | [**ttmouse**](https://github.com/ttmouse) | [**chuiwenwei**](https://github.com/chuiwenwei) |
+| [**SivanCola**](https://github.com/SivanCola) | [**KHG420**](https://github.com/KHG420) | [**chuiwenwei**](https://github.com/chuiwenwei) | [**ttmouse**](https://github.com/ttmouse) |
 | [**lifu963**](https://github.com/lifu963) | [**XTLine**](https://github.com/XTLine) | [**HUQIANTAO**](https://github.com/HUQIANTAO) | [**xxoingr**](https://github.com/xxoingr) |
 | [**Harbor404**](https://github.com/Harbor404) | [**GTC2080**](https://github.com/GTC2080) | [**mchenziyi**](https://github.com/mchenziyi) | [**Li-Charles-One**](https://github.com/Li-Charles-One) |
-| [**light-front-theory**](https://github.com/light-front-theory) | [**imcreazy**](https://github.com/imcreazy) | [**eghrhegpe**](https://github.com/eghrhegpe) | [**noreply**](https://github.com/noreply) |
-| [**par73e**](https://github.com/par73e) | [**Bernardxu123**](https://github.com/Bernardxu123) | [**lancy69**](https://github.com/lancy69) | [**Guan0923**](https://github.com/Guan0923) |
+| [**light-front-theory**](https://github.com/light-front-theory) | [**imcreazy**](https://github.com/imcreazy) | [**lancy69**](https://github.com/lancy69) | [**eghrhegpe**](https://github.com/eghrhegpe) |
+| [**noreply**](https://github.com/noreply) | [**par73e**](https://github.com/par73e) | [**Bernardxu123**](https://github.com/Bernardxu123) | [**Guan0923**](https://github.com/Guan0923) |
 <!-- reasonix-top-contributors:end -->
 
 特别感谢 [**Bernardxu123**](https://github.com/Bernardxu123) 设计的项目 logo和开场视频。
