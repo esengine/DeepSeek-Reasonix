@@ -88,9 +88,23 @@ type RangeStats struct {
 	// IncompleteReasons names why those calls were unpriced, sorted and
 	// deduplicated; a row with no recorded reason still counts above.
 	IncompleteReasons []string `json:"incompleteReasons,omitempty"`
-	ActiveDays        int      `json:"active_days"`
-	TopModel          string   `json:"top_model"`
-	TopProvider       string   `json:"top_provider"`
+	// CountedCalls is the denominator UnpricedCalls is a subset of: one per
+	// non-turn row that carried tokens, a price, or a quote that could not
+	// price the call. Turn markers and request-only failures are not calls.
+	CountedCalls int `json:"countedCalls"`
+	// EstimatedCalls is how many priced calls were quoted from an estimated or
+	// fallback rate card rather than a provider-reported amount.
+	EstimatedCalls int `json:"estimatedCalls"`
+	// UnnamedCardCalls is how many counted calls recorded a price but no
+	// pricing_fingerprint: the amount is known, the rate card behind it is not.
+	UnnamedCardCalls int `json:"unnamedCardCalls"`
+	// UnclassifiedCardCalls is how many counted calls recorded no price fact at
+	// all, so whether their card was named was never recorded. A non-zero value
+	// makes UnnamedCardCalls unknowable for the range, not zero.
+	UnclassifiedCardCalls int    `json:"unclassifiedCardCalls"`
+	ActiveDays            int    `json:"active_days"`
+	TopModel              string `json:"top_model"`
+	TopProvider           string `json:"top_provider"`
 	// Series
 	Daily []DailyTokens `json:"daily"`
 	// Hourly is filled only when the range is one calendar day; the day
@@ -142,9 +156,10 @@ func (w *Writer) Query(f SourceFilter) (RangeStats, error) {
 	return w.queryJSONL(f)
 }
 
-// rangeStatsFromCatalog reads a ready projection, then the unpriced facts the
-// rollups do not carry. Both come from the same stored rows, so this answers
-// what the exact read answers.
+// rangeStatsFromCatalog reads a ready projection, then the per-call facts the
+// rollups keep only as sums: how many calls the money is over, whose money is
+// unknown, and how each price was reached. Both come from the same stored
+// rows, so this answers what the exact read answers.
 func rangeStatsFromCatalog(f SourceFilter, days []string, catalog *usagecatalog.Catalog) (RangeStats, bool) {
 	ctx := context.Background()
 	from, to := f.From.Format(dayLayout), f.To.Format(dayLayout)
@@ -152,12 +167,15 @@ func rangeStatsFromCatalog(f SourceFilter, days []string, catalog *usagecatalog.
 	if err != nil {
 		return RangeStats{}, false
 	}
-	calls, reasons, err := catalog.UnpricedInRange(ctx, from, to, f.Source)
+	prov, err := catalog.ProvenanceInRange(ctx, from, to, f.Source)
 	if err != nil {
 		return RangeStats{}, false
 	}
 	out := rangeStatsFromRollups(f, days, rows)
-	out.UnpricedCalls, out.IncompleteReasons = calls, reasons
+	out.CountedCalls, out.UnpricedCalls, out.EstimatedCalls = prov.CountedCalls, prov.UnpricedCalls, prov.EstimatedCalls
+	out.UnnamedCardCalls, out.UnclassifiedCardCalls = prov.UnnamedCardCalls, prov.UnclassifiedCardCalls
+	out.IncompleteReasons = prov.Reasons
+	out.CostIncomplete = prov.UnpricedCalls > 0
 	return out, true
 }
 
@@ -239,19 +257,14 @@ func aggregateDays(recordsByDay map[string][]record, days []string, f SourceFilt
 				providerTotals[providerOf(model)] += t
 				dayTotals[model] += t
 			}
-			if currency, amount := usageEntry(day, rec).CostIn(view); currency != "" {
-				mode := usagecatalog.CostMode(rec.BillingMode)
+			entry := usageEntry(day, rec)
+			if currency, amount := entry.CostIn(view); currency != "" {
+				mode := usagecatalog.CostMode(entry.BillingMode)
 				dayCost.add(mode, currency, pricing.Amount(amount))
 				totalCost.add(mode, currency, pricing.Amount(amount))
-				out.CostEstimated = out.CostEstimated || (mode == "" && rec.CostEstimated)
+				out.CostEstimated = out.CostEstimated || (mode == "" && entry.CostEstimated)
 			}
-			if reason, unpriced := usagecatalog.UnpricedReason(rec.CostComplete, rec.Total, rec.CostAmount, rec.IncompleteReason); unpriced {
-				out.CostIncomplete = true
-				out.UnpricedCalls++
-				if reason != "" {
-					unpricedReasons[reason] = true
-				}
-			}
+			countCall(&out, rec, entry, unpricedReasons)
 			dayActive = dayActive || rec.Total > 0 || requests > 0
 		}
 		if dayActive {
@@ -293,6 +306,35 @@ func aggregateDays(recordsByDay map[string][]record, days []string, f SourceFilt
 	}
 	sort.SliceStable(out.Daily, func(i, j int) bool { return out.Daily[i].Day < out.Daily[j].Day })
 	return out
+}
+
+// countCall adds one row's provenance facts to the range: whether it is a
+// counted call, and how its price was reached. Counted is the denominator the
+// unpriced count is a subset of; a turn marker or a request-only failure (no
+// tokens, no price, no failed quote) is not a call the money is over.
+func countCall(out *RangeStats, rec record, entry usagecatalog.Entry, reasons map[string]bool) {
+	counted := rec.Total > 0 || entry.CostCurrency != "" || entry.CostIncomplete
+	if counted {
+		out.CountedCalls++
+	}
+	if entry.CostIncomplete {
+		out.CostIncomplete = true
+		out.UnpricedCalls++
+		if entry.IncompleteReason != "" {
+			reasons[entry.IncompleteReason] = true
+		}
+	} else if entry.CostCurrency != "" && entry.CostEstimated {
+		out.EstimatedCalls++
+	}
+	if counted {
+		// No price fact at all: whether the card was named was never
+		// recorded, which is unknown rather than zero.
+		if entry.CostCurrency == "" {
+			out.UnclassifiedCardCalls++
+		} else if rec.PricingFingerprint == "" {
+			out.UnnamedCardCalls++
+		}
+	}
 }
 
 // querySingleDay adds the hour buckets a day rollup cannot answer. One day's
