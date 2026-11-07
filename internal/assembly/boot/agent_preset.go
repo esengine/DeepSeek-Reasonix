@@ -170,13 +170,6 @@ func applyUnifiedProviderToolSurface(reg *tool.Registry, goalTurnsUnreachable bo
 	reg.SetProviderVisibleTools(allow)
 }
 
-// ApplyUnifiedProviderToolSurface restricts a registry to what a provider is
-// shown, at this arm. Exported so a harness reproduces the real surface
-// instead of a second copy of this rule.
-func ApplyUnifiedProviderToolSurface(reg *tool.Registry, goalTurnsUnreachable bool, arm ablation.Set) {
-	applyUnifiedProviderToolSurface(reg, goalTurnsUnreachable, arm, nil)
-}
-
 // pinnedMCPServers is the always-load servers whose schema was known at boot.
 // A server discovered during this session waits for the next one, whatever
 // the discovery race, so the same config and cache give the same schema.

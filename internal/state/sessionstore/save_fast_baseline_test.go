@@ -36,6 +36,9 @@ func allocatedBy(f func()) uint64 {
 // to reload: one more message costs about one encoding pass, not a replay of the
 // event log plus a decode and re-encode of what disk already holds.
 func TestSavingOneMoreMessageDoesNotReplayTheLog(t *testing.T) {
+	if raceDetector {
+		t.Skip("allocation counts are not comparable under the race detector")
+	}
 	path := filepath.Join(t.TempDir(), "s.jsonl")
 	s := seededSession(t, path, 2000)
 	if err := s.Save(path); err != nil {

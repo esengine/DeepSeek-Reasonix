@@ -41,11 +41,11 @@ func shellsOn(goos string, getenv func(string) string, look func(string) (string
 		out = append(out, Shell{Name: name, Kind: kind, Path: p, Args: args})
 	}
 	if goos == "windows" {
-		for _, root := range []string{getenv("ProgramFiles"), getenv("ProgramFiles(x86)"), filepath.Join(getenv("LOCALAPPDATA"), "Programs")} {
+		for _, root := range []string{getenv("ProgramFiles"), getenv("ProgramFiles(x86)"), joinFor(goos, getenv("LOCALAPPDATA"), "Programs")} {
 			if root == "" {
 				continue
 			}
-			if p := filepath.Join(root, "Git", "bin", "bash.exe"); exists(p) {
+			if p := joinFor(goos, root, "Git", "bin", "bash.exe"); exists(p) {
 				add("Git Bash", "bash", p, "--login", "-i")
 			}
 		}
@@ -72,4 +72,19 @@ func shellsOn(goos string, getenv func(string) string, look func(string) (string
 		}
 	}
 	return out
+}
+
+// joinFor joins path parts the way the named OS does, so a listing computed for
+// another OS than the host's still names paths that OS would accept.
+func joinFor(goos string, parts ...string) string {
+	if goos != "windows" {
+		return filepath.Join(parts...)
+	}
+	kept := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if part = strings.TrimRight(part, `\/`); part != "" {
+			kept = append(kept, part)
+		}
+	}
+	return strings.Join(kept, `\`)
 }
