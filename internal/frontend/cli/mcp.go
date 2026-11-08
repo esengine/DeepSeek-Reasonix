@@ -33,6 +33,10 @@ func mcpCommand(args []string) int {
 		mcpUsage()
 		return 2
 	}
+	if len(args) > 1 && (args[1] == "-h" || args[1] == "--help") {
+		mcpUsage()
+		return 0
+	}
 	switch args[0] {
 	case "list", "ls":
 		if len(args) > 1 {
@@ -41,10 +45,6 @@ func mcpCommand(args []string) int {
 		}
 		return mcpList()
 	case "add":
-		if len(args) > 1 && (args[1] == "-h" || args[1] == "--help") {
-			mcpUsage()
-			return 0
-		}
 		return mcpAddCLI(args[1:])
 	case "get":
 		return mcpGetCLI(args[1:])
@@ -64,6 +64,10 @@ func mcpCommand(args []string) int {
 	case "update":
 		return mcpUpdateCLI(args[1:])
 	case "import":
+		if len(args) > 1 {
+			fmt.Fprintf(os.Stderr, "mcp import: unexpected argument %q\n", args[1])
+			return 2
+		}
 		return mcpImportCLI()
 	case "browse", "search":
 		return mcpBrowseCLI(args[1:])

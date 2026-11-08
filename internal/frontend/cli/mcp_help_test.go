@@ -33,3 +33,35 @@ func TestMCPListAndGetRejectExtraArguments(t *testing.T) {
 		}
 	}
 }
+
+func TestMCPHelpFlagPrintsUsageForEverySubcommandAndRunsNothing(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("REASONIX_HOME", home)
+	for _, sub := range []string{"list", "ls", "add", "get", "remove", "rm", "enable", "disable", "retry", "connect", "trust", "auth", "authorize", "update", "import", "browse", "search", "install"} {
+		for _, flag := range []string{"--help", "-h"} {
+			var code int
+			stdout, stderr := captureCLIOutput(t, func() {
+				code = Run([]string{"mcp", sub, flag}, "test")
+			})
+			if code != 0 || !strings.Contains(stdout, "reasonix mcp") || stderr != "" || strings.Contains(stdout, "imported") {
+				t.Errorf("mcp %s %s: exit %d, want 0 with usage only\nstdout:\n%s\nstderr:\n%s", sub, flag, code, stdout, stderr)
+			}
+		}
+	}
+}
+
+func TestMCPImportRejectsArgumentsInsteadOfImporting(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("REASONIX_HOME", home)
+	var code int
+	stdout, stderr := captureCLIOutput(t, func() {
+		code = Run([]string{"mcp", "import", "--nope"}, "test")
+	})
+	if code != 2 || stdout != "" || stderr == "" {
+		t.Fatalf("mcp import --nope exited %d, want 2 with an error\nstdout:\n%s\nstderr:\n%s", code, stdout, stderr)
+	}
+}
