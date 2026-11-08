@@ -6,9 +6,10 @@ import { Workspaces } from "./Workspaces";
 import { RailSearch } from "./railsearch";
 import type { TreeSession, TreeWorkspace } from "../port/hub";
 
-afterEach(cleanup);
+afterEach(() => { cleanup(); vi.useRealTimers(); });
 
 function draw(session: TreeSession, run?: string) {
+  vi.useFakeTimers({ toFake: ["Date"], now: NOON });
   const tree: TreeWorkspace[] = [{ root: "/a", name: "alpha", remembered: true, sessions: [session] }];
   render(<RailSearch><Workspaces
     hub={{} as never} tree={tree} treeRead runtimes={[]} active="" folded={new Set()} onFold={() => {}} reload={vi.fn().mockResolvedValue(undefined)}
@@ -19,7 +20,8 @@ function draw(session: TreeSession, run?: string) {
   return within(screen.getByRole("treeitem", { name: /plan/ }));
 }
 
-const base = { path: "/a/s/one.jsonl", name: "one", title: "plan", lastActiveAt: Date.now() - 3600_000 } as TreeSession;
+const NOON = new Date(2026, 5, 15, 12, 0, 0).getTime();
+const base = { path: "/a/s/one.jsonl", name: "one", title: "plan", lastActiveAt: NOON - 3600_000 } as TreeSession;
 
 it("says 运行中 in place of the time while the conversation runs", () => {
   const row = draw({ ...base, runtimeId: "r1" }, "running");

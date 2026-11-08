@@ -49,7 +49,7 @@
 .ds-row .ds-pin { width: 12px; height: 12px; flex: none; }
 .ds-row .sessquick { flex: none; display: flex; }
 .ds-row .sesspin-action { flex: none; display: grid; }
-.ds-row:not(:is(:hover, :focus-within)) :is(.sessquick, .sesspin-action) { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); opacity: 0; pointer-events: none; }
+.ds-row:not(:is(:hover, :focus-within)) :is(.sessquick, .sesspin-action) { position: absolute; width: 0; height: 0; overflow: hidden; clip-path: inset(50%); opacity: 0; pointer-events: none; }
 .ds-row .sessquick > button, .ds-row .sesspin-action { width: 24px; height: 28px; padding: 0; place-items: center; border: 0; border-radius: var(--r-xs); background: transparent; color: var(--faint); cursor: pointer; }
 .ds-row .sessquick > button { display: grid; }
 .ds-row .sessquick > button:hover, .ds-row .sesspin-action:hover { background: var(--raised); color: var(--text); }
