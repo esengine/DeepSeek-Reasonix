@@ -16,7 +16,7 @@ local.properties
 keystore/
 
 # Build inputs, produced by scripts/ before Gradle runs.
-# jniLibs/ holds the cross-compiled kernel, assets/page/ the built
-# frontend. assets/LICENSE is hand-placed and stays tracked.
+# The page sync also copies the repository license into the APK assets.
 app/src/main/jniLibs/
 app/src/main/assets/page/
+app/src/main/assets/LICENSE

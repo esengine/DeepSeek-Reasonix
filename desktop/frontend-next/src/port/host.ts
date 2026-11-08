@@ -82,6 +82,9 @@ export interface HostPort {
    *  to open: the shell owns the dialog, the kernel owns which workspace runs,
    *  so the page carries one to the other. */
   pickFolder(startIn: string): Promise<string | null>;
+  canScanPairingCode(): boolean;
+  scanPairingCode(): Promise<string | null>;
+  openInApp(url: string): void;
   /** Whether this shell can show a file in the platform's file manager. */
   revealsFiles(): boolean;
   /** Show an entry of the workspace behind the pane at base, "" being its
@@ -203,6 +206,7 @@ interface ElectronBridge {
   saveBytes(name: string, bytes: Uint8Array): Promise<string>;
   showTextContextMenu?(request: TextContextMenuRequest): Promise<TextContextMenuResult>;
   pickFolder(startIn: string): Promise<string>;
+  scanPairingCode?(): Promise<string>;
   revealPath?(base: string, path: string): Promise<Refusal | null>;
   openFile?(base: string, path: string): Promise<Refusal | null>;
   revealWorkspace?(root: string): Promise<Refusal | null>;
@@ -296,6 +300,9 @@ class ElectronHost implements HostPort {
   pickFolder(startIn: string) {
     return this.api.pickFolder(startIn);
   }
+  canScanPairingCode() { return false; }
+  scanPairingCode(): Promise<string | null> { return Promise.resolve(null); }
+  openInApp(_url: string) {}
   revealsFiles() {
     return typeof this.api.revealPath === "function" && typeof this.api.revealWorkspace === "function";
   }
@@ -360,7 +367,7 @@ class BrowserHost implements HostPort {
   inShell() {
     return false;
   }
-  describe() {
+  describe(): Promise<HostInfo> {
     return Promise.resolve({ shell: "browser" as const, platform: "", titleBar: false });
   }
   minimiseWindow() {}
@@ -375,7 +382,7 @@ class BrowserHost implements HostPort {
   captureWindow() {
     return Promise.resolve(null);
   }
-  syncTheme() {}
+  syncTheme(_mode: string, _scheme: "light" | "dark") {}
   showTextContextMenu() {
     return Promise.resolve(null);
   }
@@ -406,9 +413,12 @@ class BrowserHost implements HostPort {
   saveBytes() {
     return Promise.resolve(null);
   }
-  pickFolder() {
+  pickFolder(_startIn: string): Promise<string | null> {
     return Promise.resolve(null);
   }
+  canScanPairingCode() { return false; }
+  scanPairingCode(): Promise<string | null> { return Promise.resolve(null); }
+  openInApp(_url: string) {}
   revealsFiles() {
     return false;
   }
@@ -435,28 +445,90 @@ class BrowserHost implements HostPort {
   drawsBrowserViews() {
     return false;
   }
-  showBrowserView() {}
+  showBrowserView(_target: string, _rect: ViewRect) {}
   hideBrowserView() {}
   freezeBrowserView() {
     return Promise.resolve("");
   }
-  controlBrowserView() {}
-  navigateBrowserView() {
+  controlBrowserView(_target: string, _action: BrowserControl) {}
+  navigateBrowserView(_target: string, _address: string) {
     return Promise.resolve<BrowserRefusal>("scheme");
   }
-  onBrowserLoadState() {
+  onBrowserLoadState(_listener: (state: BrowserLoadState) => void) {
     return () => {};
   }
-  onBrowserLogin() {
+  onBrowserLogin(_listener: (ask: BrowserLogin) => void) {
     return () => {};
   }
-  answerBrowserLogin() {}
-  trustBrowserCertificate() {
+  answerBrowserLogin(_id: string, _username: string, _password: string) {}
+  trustBrowserCertificate(_target: string) {
     return Promise.resolve(false);
   }
 }
 
+interface AndroidBridge {
+  openExternal(url: string): void;
+  openInApp(url: string): void;
+}
+
+function androidApi(): Promise<ElectronBridge> {
+  const ready = bridge();
+  if (ready) return Promise.resolve(ready);
+  return new Promise((resolve, reject) => {
+    const loaded = () => {
+      const api = bridge();
+      if (!api) return;
+      clearTimeout(timeout);
+      window.removeEventListener("reasonix-host-ready", loaded);
+      resolve(api);
+    };
+    const timeout = setTimeout(() => {
+      window.removeEventListener("reasonix-host-ready", loaded);
+      reject(new Error("Android interface is not ready; please try again."));
+    }, 10000);
+    window.addEventListener("reasonix-host-ready", loaded);
+  });
+}
+
+class AndroidHost extends BrowserHost {
+  constructor(private readonly native: AndroidBridge) { super(); }
+  override inShell() { return true; }
+  override describe(): Promise<HostInfo> {
+    return Promise.resolve({ shell: "electron", platform: "android", titleBar: false });
+  }
+  override syncTheme(mode: string, scheme: "light" | "dark") {
+    void androidApi().then(api => api.syncTheme?.(mode, scheme)).catch(() => {});
+  }
+  override async pickFolder(startIn: string) { return (await androidApi()).pickFolder(startIn); }
+  override canScanPairingCode() { return true; }
+  override async scanPairingCode() { return (await androidApi()).scanPairingCode?.() ?? ""; }
+  override openInApp(url: string) { this.native.openInApp(url); }
+  override openExternal(url: string) { this.native.openExternal(url); }
+  private views() {
+    const api = bridge();
+    return api ? new ElectronHost(api) : null;
+  }
+  override drawsBrowserViews() { return this.views()?.drawsBrowserViews() ?? false; }
+  override showBrowserView(target: string, rect: ViewRect) { this.views()?.showBrowserView(target, rect); }
+  override hideBrowserView() { this.views()?.hideBrowserView(); }
+  override freezeBrowserView() { return this.views()?.freezeBrowserView() ?? Promise.resolve(""); }
+  override controlBrowserView(target: string, action: BrowserControl) { this.views()?.controlBrowserView(target, action); }
+  override navigateBrowserView(target: string, address: string) {
+    return this.views()?.navigateBrowserView(target, address) ?? Promise.resolve<BrowserRefusal>("scheme");
+  }
+  override onBrowserLoadState(listener: (state: BrowserLoadState) => void) {
+    return this.views()?.onBrowserLoadState(listener) ?? (() => {});
+  }
+  override onBrowserLogin(listener: (ask: BrowserLogin) => void) {
+    return this.views()?.onBrowserLogin(listener) ?? (() => {});
+  }
+  override answerBrowserLogin(id: string, username: string, password: string) { this.views()?.answerBrowserLogin(id, username, password); }
+  override trustBrowserCertificate(target: string) { return this.views()?.trustBrowserCertificate(target) ?? Promise.resolve(false); }
+}
+
 function pick(): HostPort {
+  const native = (window as unknown as { ReasonixNative?: AndroidBridge }).ReasonixNative;
+  if (native) return new AndroidHost(native);
   const api = bridge();
   if (api) return new ElectronHost(api);
   return new BrowserHost();

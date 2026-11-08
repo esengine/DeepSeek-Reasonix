@@ -20,6 +20,45 @@ type fakeSandboxEscapeApprover struct {
 	sessionChecks  []sandbox.EscapeRequest
 }
 
+func TestAndroidShellRequiresAnExplicitSandboxEscapeDecision(t *testing.T) {
+	oldPrompt, oldCommand := bashSandboxEscapePromptEnabled, bashSandboxCommand
+	t.Cleanup(func() { bashSandboxEscapePromptEnabled, bashSandboxCommand = oldPrompt, oldCommand })
+	bashSandboxEscapePromptEnabled = func() bool { return bashSandboxEscapePlatform("android") }
+	bashSandboxCommand = func(spec sandbox.Spec, sh sandbox.Shell, command string) ([]string, bool) {
+		return unconfinedShellArgv(sh, command), false
+	}
+	sh := sandbox.ResolveShell("", "", nil)
+	for _, tc := range []struct {
+		name     string
+		approver *fakeSandboxEscapeApprover
+		allowed  bool
+	}{
+		{name: "no approver"},
+		{name: "denied", approver: &fakeSandboxEscapeApprover{}},
+		{name: "approved once", approver: &fakeSandboxEscapeApprover{allow: true}, allowed: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			if tc.approver != nil {
+				ctx = sandbox.WithEscapeApprover(ctx, tc.approver)
+			}
+			command := echoForShell(sh, "android-confirmed-command")
+			out, err := (bash{sb: sandbox.Spec{Mode: "enforce"}, shell: sh}).Execute(ctx, argsJSON(t, map[string]any{"command": command}))
+			if tc.allowed != (err == nil) || strings.Contains(out, "android-confirmed-command") != tc.allowed {
+				t.Fatalf("allowed=%v: output=%q error=%v", tc.allowed, out, err)
+			}
+			if tc.approver != nil && (len(tc.approver.calls) != 1 || tc.approver.calls[0].Command != command) {
+				t.Fatalf("approval requests = %+v, want the exact command", tc.approver.calls)
+			}
+		})
+	}
+	for _, platform := range []string{"linux", "darwin", "freebsd"} {
+		if bashSandboxEscapePlatform(platform) {
+			t.Fatalf("%s unexpectedly permits sandbox escape prompts", platform)
+		}
+	}
+}
+
 func (f *fakeSandboxEscapeApprover) ApproveSandboxEscape(ctx context.Context, req sandbox.EscapeRequest) (bool, string, error) {
 	f.calls = append(f.calls, req)
 	return f.allow, f.reason, nil

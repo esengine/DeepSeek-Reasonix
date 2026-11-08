@@ -9,9 +9,7 @@ import android.graphics.Canvas
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
-import android.os.Environment
 import android.os.PowerManager
-import android.provider.DocumentsContract
 import android.provider.Settings
 import android.util.Base64
 import android.util.Log
@@ -34,6 +32,7 @@ import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.ViewCompat
+import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.launch
@@ -193,6 +192,7 @@ class MainActivity : AppCompatActivity() {
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        WindowCompat.setDecorFitsSystemWindows(window, false)
 
         rootLayout = FrameLayout(this)
         web = WebView(this)
@@ -206,6 +206,7 @@ class MainActivity : AppCompatActivity() {
             FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT),
         )
         setContentView(rootLayout)
+        syncWindowTheme("light")
 
         configureWebView()
         // Keep the renderer alive while the app is off screen.
@@ -258,7 +259,7 @@ class MainActivity : AppCompatActivity() {
         // `env(safe-area-inset-*)` is an iOS Safari feature and a WebView answers
         // it with 0, so without this the interface starts under the status bar.
         installInsetsListener()
-        ViewCompat.requestApplyInsets(web)
+        ViewCompat.requestApplyInsets(rootLayout)
 
         // The kernel runs under the service, so it survives the screen going off
         // and a task that takes minutes finishes. Starting it here as well is
@@ -386,80 +387,11 @@ class MainActivity : AppCompatActivity() {
         return picked.takeIf { it.isNotEmpty() }?.toTypedArray()
     }
 
-    /**
-     * A folder on this phone, as a workspace.
-     *
-     * `OpenDocumentTree` is the only system picker for a directory, and it
-     * answers with a tree URI — not the path the kernel opens. The translation
-     * below is the one that makes it usable: the tree's document id names the
-     * volume and the relative folder, and with every-file access granted those
-     * map onto a real directory the kernel can `stat`.
-     *
-     * That mapping is why the permission is asked for first. Without it the path
-     * is real but unreadable, and the kernel reports an empty or missing folder
-     * — a failure a long way from its cause.
-     */
-    private val pickFolderTree = registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
-        bridge.deliverFolder(uri?.let(::realPathFromTree))
-    }
+    private val nativeResults = mutableMapOf<String, String>()
+    private val folders = FolderPicker(this) { path -> finishNativePicker("pickFolder", path) }
 
-    /**
-     * A tree URI as the filesystem path a child process can open, or null when
-     * the volume is one this mapping does not cover (a cloud or MTP provider).
-     *
-     * The path is checked before it is handed over, because the mapping is a
-     * guess about a naming convention rather than a lookup: the document id is
-     * the volume and the folder *below* it, and this turns that into a string.
-     * A tree whose id carries `..` would compose into a path outside the folder
-     * the person picked — and the kernel, once given the all-files permission,
-     * would open it.
-     *
-     * Every part of the id is checked, and the volume is the part that is easy
-     * to miss: a document id of `..:data` composes to `/storage/../data`, which
-     * `canonicalFile` collapses to `/data` and `isDirectory` then accepts, since
-     * it really is a directory. Rejecting only the folder half left exactly the
-     * traversal this function exists to refuse.
-     *
-     * The prefix check at the end is the belt to that braces: whatever the parts
-     * spelled, the answer has to still be the folder that was asked for.
-     */
-    private fun realPathFromTree(uri: Uri): String? = runCatching {
-        val docId = DocumentsContract.getTreeDocumentId(uri)
-        val type = docId.substringBefore(':', "")
-        val rel = docId.substringAfter(':', "")
-        if (!isSafeSegment(type) || !isSafeRelPath(rel)) return@runCatching null
-        val base = when (type) {
-            "primary" -> Environment.getExternalStorageDirectory().absolutePath
-            // A removable volume: its document id is the volume's own name
-            // (`1234-ABCD`), which is the directory under `/storage`.
-            else -> File("/storage", type).path
-        }
-        val target = if (rel.isEmpty()) base else "$base/$rel"
-        val dir = File(target).canonicalFile
-        if (!dir.isDirectory) return@runCatching null
-        // Still under the volume it claimed to be on. A path that resolved
-        // somewhere else is not the folder that was picked, whatever it is.
-        val root = File(base).canonicalFile
-        val canonical = dir.canonicalPath
-        if (canonical != root.canonicalPath && !canonical.startsWith(root.canonicalPath + File.separator)) {
-            return@runCatching null
-        }
-        canonical
-    }.getOrNull()
-
-    /** One path component from a document id: a name, never a direction. `.`
-     *  and `..` are refused because they are the two spellings of "not a name"
-     *  that a filesystem still resolves. */
-    private fun isSafeSegment(part: String): Boolean {
-        if (part.isEmpty() || part == "." || part == "..") return false
-        return !part.contains('/') && !part.contains('\\') && !part.contains('\u0000')
-    }
-
-    /** The folder part of a document id: a chain of safe components, each of
-     *  which is checked, so a `..` cannot hide behind a later segment. */
-    private fun isSafeRelPath(rel: String): Boolean {
-        if (rel.isEmpty()) return true
-        return rel.split('/').all { isSafeSegment(it) }
+    private fun finishNativePicker(method: String, value: String?) {
+        nativeResults.remove(method)?.let { replyHost(it, JSONObject.quote(value.orEmpty())) }
     }
 
     /**
@@ -480,7 +412,7 @@ class MainActivity : AppCompatActivity() {
         // the person's confirmation that that origin may become the window, and
         // it is spent by the one `openInApp` that follows.
         confirmedPairOrigin = text?.let { originOf(Uri.parse(it.trim())) }
-        bridge.deliverScan(text)
+        finishNativePicker("scanPairingCode", text)
     }
 
     /**
@@ -511,7 +443,7 @@ class MainActivity : AppCompatActivity() {
             pickIdentity.launch(arrayOf("*/*"))
             true
         }
-        bridge.onInsets = { currentInsets }
+        bridge.onInsets = { Insets(0, 0, 0, 0) }
         bridge.askForSave = { name, content ->
             pendingSave = name to content
             runCatching { saveTextFile.launch(name) }
@@ -520,110 +452,33 @@ class MainActivity : AppCompatActivity() {
                 .isSuccess
         }
         bridge.askForShare = { name, content -> shareText(name, content) }
-        bridge.askForFolder = { startIn ->
-            // The picker opens at its own last location; `startIn` is a hint it
-            // may ignore, so a failure to use it is not a failure to ask.
-            pickFolderTree.launch(null)
-            true
-        }
         bridge.onRunning = { running -> runOnUiThread { applyRunning(running) } }
-        bridge.filesAccess = { hasAllFilesAccess() }
-        bridge.askForFilesAccess = { openAllFilesSettings() }
+        bridge.filesAccess = folders::hasAccess
+        bridge.askForFilesAccess = { runOnUiThread { folders.requestAccess() } }
         bridge.batteryFree = { batteryUnrestricted() }
         bridge.askForBattery = { requestBatteryExemption() }
-        bridge.askForScan = {
-            // The camera is live from the moment this opens, so the ask is the
-            // launch itself; there is no second step to report.
-            scanCode.launch(Intent(this, ScanActivity::class.java))
-            true
-        }
         bridge.onOpenInApp = { url -> openInApp(url) }
         bridge.onHostCall = { id, method, args -> handleHostCall(id, method, args) }
         target.addJavascriptInterface(bridge, "ReasonixNative")
     }
 
-    /**
-     * The window's real insets, in CSS pixels, recomputed on every change.
-     *
-     * Read from the WebView's own window insets rather than from the decor view,
-     * and every value is the max of the system bars and the display cutout: a
-     * phone with a transparent status bar and a hole-punch camera reports a small
-     * or zero bar inset and a real cutout inset, and padding by only the former
-     * leaves the interface under the camera.
-     */
-    private var currentInsets = Insets(0, 0, 0, 0)
-
     private fun installInsetsListener() {
-        ViewCompat.setOnApplyWindowInsetsListener(web) { _, insets ->
-            val density = resources.displayMetrics.density.takeIf { it > 0f } ?: 1f
-            fun px(value: Int) = Math.round(value / density)
-            val system = insets.getInsets(WindowInsetsCompat.Type.systemBars())
-            val cutout = insets.getInsets(WindowInsetsCompat.Type.displayCutout())
-            val values = Insets(
-                left = px(maxOf(system.left, cutout.left)),
-                top = px(maxOf(system.top, cutout.top)),
-                right = px(maxOf(system.right, cutout.right)),
-                bottom = px(maxOf(system.bottom, cutout.bottom)),
+        ViewCompat.setOnApplyWindowInsetsListener(rootLayout) { view, insets ->
+            val safe = insets.getInsets(
+                WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout() or WindowInsetsCompat.Type.ime(),
             )
-            currentInsets = values
-            pushInsets(values)
-            // The keyboard rides its own channel. It is not a system bar: it
-            // comes and goes with focus, and only the composer rises above it.
-            //
-            // `isVisible` gates the number. An IME inset of zero is not the
-            // same as "no keyboard" — a device can report the navigation bar's
-            // height on this type while the keyboard is down, and feeding that
-            // to the page would lift the composer by a keyboard nobody opened.
-            val ime = if (insets.isVisible(WindowInsetsCompat.Type.ime())) {
-                px(insets.getInsets(WindowInsetsCompat.Type.ime()).bottom)
-            } else {
-                0
-            }
-            pushIme(ime)
-            insets
+            view.setPadding(safe.left, safe.top, safe.right, safe.bottom)
+            WindowInsetsCompat.CONSUMED
         }
     }
 
-    /**
-     * Hand the page the insets it cannot compute for itself.
-     *
-     * A WebView answers `env(safe-area-inset-*)` with `0` on every Android
-     * version — those are an iOS Safari feature — so `mobile.css`'s padding,
-     * which is written against them, does nothing here and the first row of the
-     * interface sits behind the status bar. Android 15 makes that unconditional
-     * by forcing the window edge-to-edge whatever the app asks for, so the
-     * numbers have to be pushed in rather than computed in CSS.
-     *
-     * Pushed on every inset change, not once: the values move when the phone is
-     * rotated, when a foldable is unfolded, and when the keyboard opens.
-     */
-    private fun pushInsets(values: Insets) {
-        web.evaluateJavascript(
-            "window.__reasonixInsets && window.__reasonixInsets(${values.left},${values.top},${values.right},${values.bottom});",
-            null,
-        )
-    }
-
-    /**
-     * Hand the page the keyboard's height, which it cannot reliably measure.
-     *
-     * The page reads `visualViewport` for this, and that works only while the
-     * window stays edge to edge: Android 15 forces that from targetSdk 35, but a
-     * WebView told to `adjustResize` shrinks the window instead, and then the
-     * visual and layout viewports are equal and the difference the page
-     * computes is zero while the keyboard is up. The window insets answer in
-     * exactly that case, so the two sources are both sent and the page takes
-     * the larger — whichever arrangement the platform picked, the number is the
-     * keyboard's real height.
-     *
-     * Pushed on every inset change, including the one that reports the keyboard
-     * going away, so the composer comes back down with it.
-     */
-    private fun pushIme(bottom: Int) {
-        web.evaluateJavascript(
-            "window.__reasonixIme && window.__reasonixIme($bottom);",
-            null,
-        )
+    private fun syncWindowTheme(scheme: String) {
+        val light = scheme != "dark"
+        WindowCompat.getInsetsController(window, web).apply {
+            isAppearanceLightStatusBars = light
+            isAppearanceLightNavigationBars = light
+        }
+        rootLayout.setBackgroundColor(getColor(if (light) R.color.page else R.color.page_dark))
     }
 
     private fun installClients() {
@@ -788,6 +643,8 @@ class MainActivity : AppCompatActivity() {
         // the old object was reachable only from the destroyed window.
         installBridge(fresh)
         installClients()
+        installInsetsListener()
+        ViewCompat.requestApplyInsets(rootLayout)
 
         splash.alpha = 1f
         splash.visibility = View.VISIBLE
@@ -798,10 +655,11 @@ class MainActivity : AppCompatActivity() {
 
     private fun load(origin: String) {
         installClients()
-        // The fragment path: the page exchanges the token for an HttpOnly cookie
-        // before its first request, exactly as a shared `reasonix web` link does.
-        val entry = (application as App).kernel.entryUrl() ?: origin
-        web.loadUrl(entry)
+        val cookie = (application as App).kernel.sessionCookie() ?: return
+        android.webkit.CookieManager.getInstance().setCookie(origin, cookie) { accepted ->
+            if (accepted) web.loadUrl(origin)
+            else showFailure(IllegalStateException("无法建立应用内核的本地会话"))
+        }
     }
 
     /**
@@ -908,31 +766,6 @@ class MainActivity : AppCompatActivity() {
     private fun applyRunning(running: Boolean) {
         if (!::web.isInitialized) return
         web.keepScreenOn = running
-    }
-
-    /** Whether this app may read every file. Below API 30 the concept does not
-     *  exist and the answer is yes. */
-    private fun hasAllFilesAccess(): Boolean =
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) Environment.isExternalStorageManager() else true
-
-    /**
-     * The one place Android offers the every-file permission.
-     *
-     * There is no runtime dialog for it — it is a special access, granted by
-     * hand per app — so the only honest implementation is to open the page that
-     * holds the switch. A person who does not find it there loses nothing: the
-     * app keeps working on the folders it already has.
-     */
-    private fun openAllFilesSettings() {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return
-        val intent = Intent(
-            Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
-            Uri.parse("package:$packageName"),
-        )
-        runCatching { startActivity(intent) }.recoverCatching {
-            // Some ROMs do not route the per-app page; the list is the fallback.
-            startActivity(Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION))
-        }
     }
 
     /** Whether this app is exempt from the system's battery optimisation. */
@@ -1165,6 +998,24 @@ class MainActivity : AppCompatActivity() {
         runOnUiThread {
             try {
                 when (method) {
+                    "syncTheme" -> {
+                        syncWindowTheme(JSONArray(args).optString(0, "light"))
+                        replyHost(id, "null")
+                    }
+                    "pickFolder", "scanPairingCode" -> {
+                        if (nativeResults.isNotEmpty()) {
+                            replyHost(id, JSONObject.quote(""))
+                        } else {
+                            nativeResults[method] = id
+                            runCatching {
+                                if (method == "pickFolder") folders.pick(JSONArray(args).optString(0, ""))
+                                else {
+                                    confirmedPairOrigin = null
+                                    scanCode.launch(Intent(this, ScanActivity::class.java))
+                                }
+                            }.onFailure { finishNativePicker(method, null) }
+                        }
+                    }
                     "showBrowserView" -> {
                         val arr = JSONArray(args)
                         val rect = if (arr.length() > 1) arr.optJSONObject(1) else null
@@ -1383,7 +1234,7 @@ class MainActivity : AppCompatActivity() {
   };
   function call(method, args) {
     return new Promise(function(resolve, reject) {
-      var id = String(nextId++);
+      var id = Date.now() + ':' + String(nextId++);
       pending[id] = { resolve: resolve, reject: reject };
       try {
         ReasonixNative.hostCall(id, method, JSON.stringify(args || []));
@@ -1397,6 +1248,9 @@ class MainActivity : AppCompatActivity() {
     shell: 'electron',
     platform: 'android',
     titleBar: false,
+    syncTheme: function(mode, scheme) { return call('syncTheme', [scheme]); },
+    pickFolder: function(startIn) { return call('pickFolder', [startIn]); },
+    scanPairingCode: function() { return call('scanPairingCode', []); },
     showBrowserView: function(target, rect) { return call('showBrowserView', [target, rect]); },
     hideBrowserView: function() { return call('hideBrowserView', []); },
     freezeBrowserView: function() { return call('freezeBrowserView', []); },
@@ -1419,6 +1273,7 @@ class MainActivity : AppCompatActivity() {
     answerBrowserLogin: function(id, username, password) { return call('answerBrowserLogin', [id, username, password]); },
     trustBrowserCertificate: function(target) { return call('trustBrowserCertificate', [target]); }
   };
+  window.dispatchEvent(new Event('reasonix-host-ready'));
 })();
         """.trimIndent(), null)
     }

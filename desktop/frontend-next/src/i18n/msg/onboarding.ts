@@ -2,6 +2,8 @@ import type { Messages } from "./types";
 
 export const ONBOARDING: Messages = {
   "onboarding.choose_a_folder": { zh: "选择文件夹…", en: "Choose a folder…" },
+  "onboarding.current_workspace": { zh: "当前工作区", en: "Current workspace" },
+  "onboarding.phone_project_hint": { zh: "直接在当前工作区开始，或选择手机上的其他文件夹。", en: "Start in the current workspace, or choose another folder on your phone." },
   "onboarding.choose_another": { zh: "换一个…", en: "Choose another…" },
   "onboarding.choose_the_default_model": { zh: "选默认模型", en: "Choose the default model" },
   "onboarding.common_services": { zh: "常用服务", en: "Common services" },
@@ -35,7 +37,7 @@ export const ONBOARDING: Messages = {
   "onboarding.zhipu": { zh: "智谱", en: "Zhipu" },
   "onboarding.hand_it_a_task": { zh: "欢迎使用 Reasonix", en: "Welcome to Reasonix" },
   "onboarding.what_it_does_and_shows": { zh: "连接一个模型服务，选好默认模型，就可以在项目里开始对话。", en: "Connect a model service and pick a default model, then start a conversation in a project." },
-  "onboarding.about_a_minute": { zh: "大约 1 分钟 · key 只存在这台电脑上", en: "About a minute · the key stays on this computer" },
+  "onboarding.about_a_minute": { zh: "大约 1 分钟 · key 只保存在当前设备上", en: "About a minute · the key stays on this device" },
   "onboarding.connect_one_model_service": { zh: "连接一个模型服务", en: "Connect a model service" },
   "onboarding.pick_one_and_fill_the_key": { zh: "选一家，填上 key 就能用。以后可以再加别的。", en: "Pick one and fill in the key. You can add others later." },
   "onboarding.deepseek_hint": { zh: "推荐 · 便宜", en: "Recommended · low cost" },

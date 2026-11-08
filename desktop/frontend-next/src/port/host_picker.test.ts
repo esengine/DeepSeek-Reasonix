@@ -17,6 +17,13 @@ async function portOver(win: Record<string, unknown>, current = "/w/current") {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("asking for a folder", () => {
+  it.each(["/storage/emulated/0/Documents/project", ""])("carries Android's native answer %j through the runtime port", async (answer) => {
+    const pickFolder = vi.fn(async () => answer);
+    const port = await portOver({ ReasonixNative: {}, reasonixHost: { pickFolder } }, "/data/user/0/app/files/workspace");
+    expect(await port.pickFolder()).toBe(answer);
+    expect(pickFolder).toHaveBeenCalledWith("/data/user/0/app/files/workspace");
+  });
+
   it("opens the Electron panel on the workspace the kernel reports", async () => {
     const opened: string[] = [];
     const port = await portOver({

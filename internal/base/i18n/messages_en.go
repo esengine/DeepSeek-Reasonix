@@ -225,7 +225,7 @@ var English = Messages{
 	MemoryApprovalArchiveFmt:        "Archive memory %q",
 	SandboxEscapeSubjectFallback:    "run shell command unconfined once",
 	SandboxEscapeSubjectPrefix:      "run unconfined once: ",
-	SandboxEscapeWrapReason:         "Windows does not provide an OS-level Bash sandbox for this command. Run it unconfined one time? This bypasses OS isolation for this command only.",
+	SandboxEscapeWrapReason:         "This host cannot provide an OS-level sandbox for this command. Run it unconfined one time? This bypasses OS isolation for this command only.",
 	SandboxEscapeRuntimeReason:      "The OS sandbox could not start this command. Run it unconfined one time? This bypasses OS isolation for this command only.",
 	SandboxEscapeDeclined:           "the user declined to run this command without the OS sandbox - do not retry it unconfined; ask how they would like to proceed.",
 	EgressApprovalReasonFmt:         "A bash command wants to reach %s, which is not in [sandbox] allowed_domains. Allow it?",

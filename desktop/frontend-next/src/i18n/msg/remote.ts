@@ -1,6 +1,12 @@
 import type { Messages } from "./types";
 
 export const REMOTE: Messages = {
+  "remote.scan_connect_computer": { zh: "扫码连接电脑", en: "Scan to connect a computer" },
+  "remote.scan_computer_hint": { zh: "在电脑的「设备访问」中显示二维码，再用手机扫描。", en: "Show a QR code in Device access on your computer, then scan it here." },
+  "remote.open_camera_scan": { zh: "打开相机扫码", en: "Open camera to scan" },
+  "remote.invalid_pairing_code": { zh: "这不是有效的 Reasonix 连接二维码，请重新扫描。", en: "This is not a valid Reasonix connection code. Please scan again." },
+  "remote.confirm_scanned_computer": { zh: "确认地址后，将切换到这台电脑的工作区。", en: "Confirm this address to switch to the computer’s workspace." },
+  "remote.connect_scanned_computer": { zh: "连接这台电脑", en: "Connect to this computer" },
   "remote.a_first_connect_installs_a": { zh: "首次连接需在该机器上安装 reasonix", en: "A first connect installs a reasonix on that machine" },
   "remote.a_forward_did_not_attach": { zh: "部分转发未建立", en: "A forward did not attach" },
   "remote.a_path_on_that_machine": { zh: "该机器上的路径", en: "A path on that machine" },

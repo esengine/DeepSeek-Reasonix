@@ -113,7 +113,7 @@ export function Onboarding({ port, setup, onDone, onSkip, project }: Props) {
   useEffect(() => {
     void port.protocols().then(setCatalog).catch(() => setCatalog([]));
   }, [port]);
-  useEffect(() => { if (step === "connect") first.current?.focus(); }, [step, pick]);
+  useEffect(() => { if (step === "connect" && !matchMedia?.("(pointer: coarse)").matches) first.current?.focus(); }, [step, pick]);
 
   // Where this vendor hands out keys, and — for the refusals that are settled
   // there rather than here — where this particular failure sends the reader.

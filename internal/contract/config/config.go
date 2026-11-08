@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"golang.org/x/text/unicode/norm"
@@ -1317,7 +1318,7 @@ func Default() *Config {
 		UI:      UIConfig{Theme: "auto", ShowTurnUsage: true, ShowChangedFiles: true},
 		Desktop: DesktopConfig{ConversationWidth: "standard"},
 		Billing: BillingConfig{},
-		Tools:   ToolsConfig{PresentFiles: true},
+		Tools:   ToolsConfig{PresentFiles: true, Shell: defaultShell(runtime.GOOS)},
 		// Set here, not left to the zero value: an absent [secrets] still protects.
 		Secrets: SecretsConfig{ProtectCredentialFiles: true},
 		Notifications: NotificationsConfig{

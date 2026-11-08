@@ -23,13 +23,17 @@
     <string name="splash_retry">重试</string>
 
     <string name="wsperm_title">需要「所有文件访问」权限</string>
-    <string name="wsperm_body">要打开手机上的文件夹作为工作区，需要先允许本应用访问所有文件。点「去设置」，在列表里打开 Reasonix 的开关，然后返回这里。</string>
+    <string name="wsperm_body">要直接读写手机公共文件夹，需要开启「所有文件访问」权限。点「去设置」授权后返回，会继续选择文件夹。使用应用默认工作区不需要此权限。</string>
     <string name="wsperm_go">去设置</string>
     <string name="wsperm_later">以后再说</string>
+    <string name="workspace_permission_denied">未开启文件访问权限，仍可使用应用默认工作区。</string>
+    <string name="workspace_unavailable">无法读写这个位置，请选择手机本地存储中的文件夹。</string>
 
     <string name="scan_title">扫描电脑上的二维码</string>
     <string name="scan_hint">对准电脑上「设备访问」里的二维码，识别后即可连接这台电脑。</string>
     <string name="scan_button">扫码连接电脑</string>
     <string name="scan_denied">没有相机权限，无法扫码。请在系统设置里允许。</string>
+    <string name="scan_close">返回</string>
+    <string name="scan_unavailable">相机暂时不可用，请关闭其他占用相机的应用后重试。</string>
     <string name="share_title">分享文件</string>
 </resources>

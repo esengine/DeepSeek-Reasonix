@@ -528,10 +528,10 @@ export function App({ hub }: { hub: HubPort }) {
   );
 
   const branchSession = useBranchSession({ panePorts, runtimes, runsRef, openPane });
-
   const first = useFirstRun({
     port: activePort, setup, welcomed, setSetup, setWelcomed, reloadPanes,
     project: {
+      current: runtimes.find((runtime) => runtime.id === active)?.root,
       pick: async () => (await hub.pickFolder()) || null,
       add: async (dir) => { const workspace = await hub.addWorkspace(dir); await reloadTree(); await openPane({ root: workspace.root }); },
     },

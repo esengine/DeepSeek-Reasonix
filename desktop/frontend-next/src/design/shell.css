@@ -85,6 +85,8 @@
 .phonecard .pc-route { padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--r-md); }
 .phonecard .pc-route[data-on] { border-color: color-mix(in srgb, var(--accent) 40%, var(--border)); }
 .phonecard .pc-route + .pc-route { margin-top: 6px; }
+.phone-pairing > .btn, .phone-pairing .pc-route > .btn { width: 100%; min-height: 44px; margin-top: 12px; }
+.phone-pairing .pc-route > b { display: block; overflow-wrap: anywhere; }
 .phonecard .pc-route .pc-note, .phonecard .pc-route .pc-none { margin: 6px 0 0; color: var(--faint); font: var(--w-med) var(--fs-micro)/1.6 var(--ui); }
 .phonecard .pc-code { display: flex; align-items: center; justify-items: initial; gap: 14px; }
 .phonecard .pc-code > img { flex: none; width: 112px; height: 112px; }

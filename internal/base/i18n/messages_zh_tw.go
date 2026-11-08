@@ -226,7 +226,7 @@ var ChineseTraditional = Messages{
 	MemoryApprovalArchiveFmt:        "封存記憶 %q",
 	SandboxEscapeSubjectFallback:    "僅本次不進沙箱執行 shell 命令",
 	SandboxEscapeSubjectPrefix:      "僅本次不進沙箱執行：",
-	SandboxEscapeWrapReason:         "Windows 不提供這條命令所需的 OS 級 Bash 沙箱。是否僅本次不受限執行？這只會對此命令繞過 OS 隔離。",
+	SandboxEscapeWrapReason:         "目前裝置無法提供這條命令所需的 OS 級沙箱。是否僅本次不受限執行？這只會對此命令繞過 OS 隔離。",
 	SandboxEscapeRuntimeReason:      "OS 沙箱無法啟動這條命令。是否僅本次不受限執行？這只會對此命令繞過 OS 隔離。",
 	SandboxEscapeDeclined:           "使用者拒絕在沒有 OS 沙箱的情況下執行這條命令；不要不進沙箱重試，請詢問使用者希望如何繼續。",
 	EgressApprovalReasonFmt:         "一條 bash 命令要存取 %s，它不在 [sandbox] allowed_domains 中。是否允許？",

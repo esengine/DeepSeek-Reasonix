@@ -15,6 +15,26 @@ This file is for people building it. What a person installing it needs — what 
 does, how to pair with a computer, what it cannot do — belongs in the release
 notes.
 
+## Local host and mobile verification
+
+The APK packages `cmd/reasonix-studio-host`, the same authenticated local host
+used by Studio. Android reads its versioned launch handshake from stdout and
+installs its HttpOnly session cookie before loading the WebView. Stderr remains
+the diagnostic stream; launch credentials never enter a URL or a log.
+
+The native container applies the maximum of system-bar, cutout and keyboard
+insets to every page and overlay. The shared onboarding page has a dedicated layout
+for narrow viewports. Bundled pages are refreshed using the content-hashed Vite
+entry, including when installing another APK with the same version number.
+
+To check the packaged page and real host without a phone, build
+`go build -o reasonix-verify.exe ./cmd/reasonix-studio-host`, run
+`android/scripts/sync-page.sh`, then `python android/scripts/verify-host.py`.
+
+`KERNEL_BIN` can name another host executable. This checks authentication, origin
+rejection, model discovery, credential saving and first-provider activation in
+an isolated temporary home with a local test provider.
+
 ## One command
 
 ```bash
@@ -62,19 +82,17 @@ export PATH="$PATH:$(go env GOPATH)/bin"
 | `build-kernel.sh` | Cross-compiles the kernel only (`GOOS=android GOARCH=arm64 CGO_ENABLED=0`) |
 | `sync-page.sh` | Builds the frontend, copies `dist/` into assets, copies `LICENSE` |
 | `verify-page.sh` | **No phone needed**: starts the real kernel against the packaged page |
+| `verify-keyboard.mjs <adb-serial> [package]` | Checks keyboard resizing and composer visibility in an unlocked phone's foreground Debug WebView |
 | `run.sh [debug\|release]` | `adb install`, launch, follow the log |
 
-`verify-page.sh` is the one to run after a change: it starts the kernel with the
-same arguments `Kernel.kt` uses (`--auth token`, `--token-file`, `--port-file`,
-`-page`) and checks that it binds a port and answers 200. Without a device, that
-is as deep as the chain can be verified.
+`verify-page.sh` runs the isolated local-host smoke check described above.
 
 ## Where the code is
 
 | File | Owns |
 | --- | --- |
 | `MainActivity.kt` | The WebView, the back gesture, downloads, external links, renderer restart |
-| `Kernel.kt` | Unpacking the page, starting and stopping the kernel, waiting for the port, health probes, logs, the workspace directory |
+| `Kernel.kt` | Unpacking the page, starting and stopping the kernel, reading the launch handshake, health probes, logs, the workspace directory |
 | `KernelService.kt` | The foreground service that keeps a long turn alive |
 | `NativeBridge.kt` | `@JavascriptInterface`: what the page may ask the phone for |
 | `BrowserShellServer.kt` | Loopback HTTP server the kernel's browser tools drive the overlay WebView through |
@@ -83,14 +101,29 @@ is as deep as the chain can be verified.
 The page reaches the shell through `window.reasonixHost` and `ReasonixNative`,
 defined in `desktop/frontend-next/src/port/host.ts` (`AndroidHost`).
 
-**Phone and desktop share one page build.** What differs only on a phone is
-decided at runtime, not by a second set of components. `phoneShell()` in
-`src/port/host.ts` and the `[data-shell="android"]` selector in `mobile.css` both
-read `<html data-shell="android">`, which `index.html` sets before the bundle
-loads.
+**Phone and desktop share one page build.** The host port detects Android's
+`ReasonixNative` bridge before the page loads. The browser-view bridge installed
+at page completion is read when needed.
 
-One attribute feeding both is what keeps style and components from disagreeing
-about what a phone is.
+Touch onboarding offers the current
+workspace and a native folder picker; desktop keeps its drag-and-drop choice.
+
+`FolderPicker.kt` owns the storage permission and directory-selection round trip.
+Granting access resumes the picker. Cancelling or refusing it leaves the current
+workspace available. Only readable, writable local storage folders become paths
+for the kernel; document-provider and cloud URIs are not filesystem paths.
+
+Folder selection and scanning use the existing asynchronous host-call channel.
+Activity results settle the page's Promise without blocking the WebView thread.
+Cancelling the camera keeps the connection card usable for another scan.
+
+Android defaults to `/system/bin/sh` for local commands. This is the system
+shell, not bundled Bash; Git, language runtimes and build tools are not included.
+An explicit user shell configuration still takes precedence.
+
+When command confinement is unavailable, enforced mode uses the existing
+sandbox-escape confirmation. Refusing it or having no approver keeps the command
+blocked; the sandbox setting is unchanged.
 
 ## What the page may ask the phone for
 

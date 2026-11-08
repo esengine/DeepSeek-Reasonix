@@ -12,27 +12,11 @@ import java.io.File
 import java.io.FileOutputStream
 import java.net.HttpURLConnection
 import java.net.URL
-import java.security.SecureRandom
+import java.security.MessageDigest
 import java.util.Locale
+import java.util.concurrent.TimeUnit
 
-/**
- * The Reasonix kernel, as this app runs it: one child process serving loopback,
- * plus the two things it needs on disk to start — the page it serves and a
- * credential for this launch.
- *
- * The shape is the desktop host's (`cmd/reasonix-studio-host`), narrowed to what
- * a phone does not have. That host binds a socket, mints a credential, speaks a
- * handshake down a pipe and holds a lease; here the credential goes through
- * `--token-file` and the bound address through `--port-file`, because a phone's
- * app process has no pipe to hand a child and no reason to care which port was
- * free. Everything after that — the kernel's own gate, its auth middleware, its
- * CSRF check — is untouched, so the security of the surface is the one upstream
- * tested, not one this shell invented.
- *
- * One instance lives in the app process. The activity asks it for a URL; the
- * foreground service asks it to stay alive. Both see the same process, so there
- * is nothing to synchronise beyond a lock on start/stop.
- */
+/** Owns the local Studio host, its private launch handshake, and its bundled page. */
 class Kernel(private val context: Context) {
 
     /** Where everything the kernel owns lives. Nothing here is backed up. */
@@ -69,10 +53,6 @@ class Kernel(private val context: Context) {
     /** The built page, unpacked once per version. */
     private val pageDir = File(context.filesDir, "page")
 
-    private val tokenFile = File(home, "remote/launch.token")
-    private val portFile = File(home, "remote/serve.port")
-    private val pidFile = File(home, "remote/serve.pid")
-
     private val lock = Any()
 
     @Volatile
@@ -97,25 +77,12 @@ class Kernel(private val context: Context) {
     var origin: String? = null
         private set
 
-    /**
-     * The launch credential, as the URL fragment the page trades for a cookie.
-     * Kept in memory only: the file on disk belongs to the kernel's own
-     * bookkeeping, and a phone's app data is not a place to leave a second copy.
-     */
+    /** The host's per-launch credential, held only in memory. */
     @Volatile
     private var token: String? = null
 
-    /**
-     * The URL the WebView loads first. It carries the credential in the
-     * fragment, which the page exchanges for an HttpOnly cookie before it makes
-     * any request — the same path a shared `reasonix web` link takes, so the
-     * token never enters a request line, a history entry or a log.
-     */
-    fun entryUrl(): String? {
-        val origin = origin ?: return null
-        val token = token ?: return null
-        return "$origin/#token=$token"
-    }
+    /** Installed by the native shell before the WebView makes its first request. */
+    fun sessionCookie(): String? = token?.let { "reasonix_token=$it; Path=/; HttpOnly; SameSite=Strict" }
 
     /** The plain origin, for reloads once the cookie is set. */
     fun plainUrl(): String? = origin
@@ -131,31 +98,26 @@ class Kernel(private val context: Context) {
      */
     suspend fun start(): Result<String> = withContext(Dispatchers.IO) {
         synchronized(lock) {
-            origin?.let { return@withContext Result.success(it) }
-
+            origin?.takeIf { process?.isAlive == true }?.let { return@withContext Result.success(it) }
+            var child: Process? = null
             runCatching {
                 val binary = kernelBinary()
                 publishPage()
                 prepareHome()
-                val launchToken = mintToken()
-                token = launchToken
-
-                val child = launch(binary, launchToken)
-
-                // The port is the kernel's answer, not this shell's guess. It
-                // writes the file after binding, so waiting on the file is
-                // waiting on the bind.
-                val bound = awaitPort(child)
-                val url = "http://$bound"
-
-                // A kernel that bound a port and then died would look healthy
-                // here and broken in the WebView; the two facts are checked
-                // together, and only a kernel that is answering is adopted.
-                awaitServing(child, url)
-                origin = url
-                process = child
-                url
-            }.onFailure { origin = null; process = null }
+                val started = launch(binary)
+                child = started
+                val connection = HostConnection.read(started).get(START_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+                awaitServing(started, connection)
+                token = connection.token
+                origin = connection.origin
+                process = started
+                connection.origin
+            }.onFailure {
+                child?.destroyForcibly()
+                origin = null
+                token = null
+                process = null
+            }
         }
     }
 
@@ -180,8 +142,6 @@ class Kernel(private val context: Context) {
                     p.destroyForcibly()
                 }
             }
-            portFile.delete()
-            pidFile.delete()
         }
     }
 
@@ -205,23 +165,13 @@ class Kernel(private val context: Context) {
         return binary
     }
 
-    /**
-     * Write the bundled page where the kernel can serve it.
-     *
-     * It goes to app storage rather than being served out of the APK because the
-     * kernel's `--page` is a directory on a real filesystem; there is no
-     * archive-aware variant, and adding one would be a change to the kernel for
-     * this shell's convenience alone.
-     *
-     * Unpacking is versioned: the marker holds the app's version name, so an
-     * update replaces the page and a relaunch does not. A partially written
-     * directory — the app killed mid-copy — is caught by the same marker never
-     * having been written, so the next launch rewrites it.
-     */
+    /** The entry HTML identifies Vite's content-hashed asset graph, including same-version APK rebuilds. */
     private fun publishPage() {
         val marker = File(pageDir, ".unpacked")
-        val stamp = "${BuildConfig.VERSION_NAME}:${BuildConfig.VERSION_CODE}"
-        if (marker.isFile && marker.readText().trim() == stamp) return
+        val entry = context.assets.open("page/index.html").use { it.readBytes() }
+        val digest = MessageDigest.getInstance("SHA-256").digest(entry).joinToString("") { "%02x".format(it) }
+        val stamp = "${BuildConfig.VERSION_NAME}:${BuildConfig.VERSION_CODE}:$digest"
+        if (marker.isFile && marker.readText().trim() == stamp && File(pageDir, "index.html").isFile) return
 
         pageDir.deleteRecursively()
         pageDir.mkdirs()
@@ -243,12 +193,8 @@ class Kernel(private val context: Context) {
     private fun copyAssetTree(assets: AssetManager, from: String, to: File) {
         val children = assets.list(from).orEmpty()
         if (children.isEmpty()) {
-            // A leaf: open it as a stream. A directory that happens to be empty
-            // is indistinguishable and harmless to skip.
-            runCatching {
-                assets.open(from).use { input ->
-                    FileOutputStream(to).use { output -> input.copyTo(output) }
-                }
+            assets.open(from).use { input ->
+                FileOutputStream(to).use { output -> input.copyTo(output) }
             }
             return
         }
@@ -432,69 +378,18 @@ class Kernel(private val context: Context) {
     /** The kernel's `config.WorkspaceSlug`, for the two paths that matter here. */
     private fun slugOf(path: String): String = path.replace('/', '-').replace('\\', '-').replace(':', '-')
 
-    /**
-     * The launch credential.
-     *
-     * Minted here rather than read from configuration: a credential a person can
-     * set is one anything that can read their files can present. 32 bytes, hex,
-     * the same shape the desktop host mints.
-     */
-    private fun mintToken(): String {
-        val bytes = ByteArray(32)
-        SecureRandom().nextBytes(bytes)
-        val token = bytes.joinToString("") { "%02x".format(it) }
-        tokenFile.parentFile?.mkdirs()
-        tokenFile.writeText("$token\n")
-        // 0600 by intent, and the app's own private directory means it is
-        // already unreachable to every other app on the device.
-        runCatching {
-            tokenFile.setReadable(false, false)
-            tokenFile.setReadable(true, true)
-            tokenFile.setWritable(false, false)
-            tokenFile.setWritable(true, true)
-        }
-        return token
-    }
-
-    /**
-     * Start the child.
-     *
-     * `--addr 127.0.0.1:0` lets the kernel pick a free port; `--port-file`
-     * makes it announce which. `--auth token` is the mode a phone needs: the
-     * page authenticates, and a state-changing request without the credential
-     * is refused. `--no-open` is belt and braces — a serve never opens a
-     * browser, and a phone has no browser to open.
-     */
-    private fun launch(binary: File, token: String): Process {
-        portFile.delete()
-        pidFile.delete()
-        // The folder the agent works in, resolved before the command line is
-        // built so it can be named on it. See the note under the environment
-        // block for why naming it is not the same as setting the directory.
+    private fun launch(binary: File): Process {
         val workspace = launchWorkspaceDir()
         val command = listOf(
             binary.absolutePath,
-            "serve",
-            "--addr", "127.0.0.1:0",
-            "--auth", "token",
-            "--token-file", tokenFile.absolutePath,
-            "--port-file", portFile.absolutePath,
-            "--pid-file", pidFile.absolutePath,
-            "--no-open",
             "-page", pageDir.absolutePath,
-            // The project root, said outright. Without this the kernel derives
-            // it from its working directory, and on this phone the two did not
-            // agree: the sidebar named the shared folder, `write_roots` confined
-            // the file tools to the app's own directory, and every write into the
-            // folder the person was looking at came back
-            // `workspace.write_outside_scope`. A flag is a fact the kernel was
-            // told rather than one it inferred from a mount it sees differently.
-            "--dir", workspace.absolutePath,
+            "-studio-version", BuildConfig.VERSION_NAME,
         )
         val builder = ProcessBuilder(command)
         builder.environment().apply {
             put("REASONIX_HOME", home.absolutePath)
             put("HOME", home.absolutePath)
+            put("SHELL", "/system/bin/sh")
             // The kernel's own language, for its tool failures, approval
             // prompts and error sentences. Without this it detects from the
             // POSIX locale variables, and Android sets none of them for an
@@ -573,7 +468,6 @@ class Kernel(private val context: Context) {
         // derives `write_roots` from that root, so the two spellings have to be
         // the same one.
         builder.environment().put("PWD", workspace.absolutePath)
-        builder.redirectErrorStream(true)
         val process = builder.start()
 
         // The kernel's own log is the only place a startup failure says why, and
@@ -670,7 +564,7 @@ class Kernel(private val context: Context) {
 
     private fun drain(process: Process) {
         runCatching {
-            process.inputStream.bufferedReader().useLines { lines ->
+            process.errorStream.bufferedReader().useLines { lines ->
                 lines.forEach { line ->
                     Log.i(TAG, line)
                     synchronized(logLines) {
@@ -685,21 +579,6 @@ class Kernel(private val context: Context) {
     /** The kernel's tail, newest last, for a bug report or the About screen. */
     fun recentLog(): String = synchronized(logLines) { logLines.joinToString("\n") }
 
-    private fun awaitPort(process: Process): String {
-        val deadline = System.currentTimeMillis() + START_TIMEOUT_MS
-        while (System.currentTimeMillis() < deadline) {
-            if (!process.isAlive) {
-                throw IllegalStateException("内核启动即退出。\n${recentLog().takeLast(2000)}")
-            }
-            val text = if (portFile.isFile) runCatching { portFile.readText().trim() }.getOrNull() else null
-            // The file is written by the kernel on the way to serving, and the
-            // kernel rewrites it with the real port when it was given :0.
-            if (!text.isNullOrBlank() && text.contains(":")) return text
-            Thread.sleep(POLL_MS)
-        }
-        throw IllegalStateException("内核在 ${START_TIMEOUT_MS / 1000}s 内没有报告监听地址。\n${recentLog().takeLast(2000)}")
-    }
-
     /**
      * Wait until the bound port answers.
      *
@@ -707,23 +586,24 @@ class Kernel(private val context: Context) {
      * kernel's life; a WebView pointed at it would show a connection error and
      * cache the failure, so the wait belongs here rather than in the page.
      */
-    private fun awaitServing(process: Process, origin: String) {
+    private fun awaitServing(process: Process, connection: HostConnection) {
         val deadline = System.currentTimeMillis() + START_TIMEOUT_MS
         while (System.currentTimeMillis() < deadline) {
             if (!process.isAlive) {
                 throw IllegalStateException("内核在开始服务前退出。\n${recentLog().takeLast(2000)}")
             }
-            if (probe("$origin/")) return
+            if (probe("${connection.origin}/", connection.token)) return
             Thread.sleep(POLL_MS)
         }
-        throw IllegalStateException("内核已监听 $origin，但页面没有响应。\n${recentLog().takeLast(2000)}")
+        throw IllegalStateException("内核已监听 ${connection.origin}，但页面没有响应。\n${recentLog().takeLast(2000)}")
     }
 
-    private fun probe(url: String): Boolean = runCatching {
+    private fun probe(url: String, launchToken: String): Boolean = runCatching {
         (URL(url).openConnection() as HttpURLConnection).run {
             connectTimeout = 1000
             readTimeout = 1000
             requestMethod = "GET"
+            setRequestProperty("Cookie", "reasonix_token=$launchToken")
             try {
                 responseCode in 200..399
             } finally {

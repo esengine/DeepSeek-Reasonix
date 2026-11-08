@@ -1782,3 +1782,26 @@ A sub-agent row, by the list's own width:
 - Appearance → Conversation display offers “Show collapsed plan progress,” off by default and persisted on this machine. Changing it immediately updates mounted plan cards.
 - A nonempty collapsed plan draws the expanded plan's `.prog2` track below its summary, using completed steps over total steps from `stepDone`. Pending and running steps do not count as complete.
 - Opening the card replaces the optional track with the existing expanded progress. Goal-only, empty and hidden cards have no progress track; collapse, Escape, outside dismissal and focus return remain unchanged.
+## Mobile setup
+
+Onboarding uses a zero-minimum grid track so the step labels and key help cannot
+widen the card beyond its viewport.
+
+Below 600px, the current step keeps its label,
+services form two equal columns, and actions form a full-width vertical group.
+
+The page owns vertical scrolling, including while the keyboard shortens the
+viewport. Long model identifiers and connection errors wrap within the card.
+
+Touch input offers the active runtime's workspace as the initial project choice.
+The folder picker replaces desktop drag instructions, and long paths wrap in the
+selected-folder card. Cancelling the picker keeps that choice available.
+
+Android device access opens a scan-and-connect card. Its actions retain 44px
+touch targets, and a scanned computer's origin wraps before the person confirms
+the connection. The pairing credential is never rendered in the card.
+
+Android applies system bars, display cutouts and keyboard insets at the native
+container. The WebView and browser overlay receive the remaining viewport, with
+no extra page padding. System-bar icon contrast follows the page's resolved
+light/dark theme through the host port.

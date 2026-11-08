@@ -19,6 +19,24 @@ function draw(onSkip?: () => void) {
 }
 
 describe("first-run setup", () => {
+  it("keeps service selection visible without opening the touch keyboard", async () => {
+    const original = window.matchMedia;
+    window.matchMedia = ((query: string) => ({ matches: query === "(pointer: coarse)" })) as typeof window.matchMedia;
+    try {
+      const { user } = draw();
+      await user.click(screen.getByRole("button", { name: "开始设置" }));
+      expect(document.activeElement).not.toBe(screen.getByPlaceholderText("sk-…"));
+      const other = screen.getByRole("radio", { name: /MiMo/ });
+      await user.click(other);
+      expect(document.activeElement).toBe(other);
+      await user.click(screen.getByPlaceholderText("sk-…"));
+      await user.keyboard("sk-touch");
+      expect((screen.getByPlaceholderText("sk-…") as HTMLInputElement).value).toBe("sk-touch");
+    } finally {
+      window.matchMedia = original;
+    }
+  });
+
   it("walks from the welcome through a listed service to a default model, without asking how it is spoken to", async () => {
     const { save, onDone, user } = draw();
     expect(screen.getByRole("heading", { name: "欢迎使用 Reasonix" })).toBeTruthy();

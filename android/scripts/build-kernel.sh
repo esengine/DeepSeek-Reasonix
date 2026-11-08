@@ -48,17 +48,15 @@ version_field() {
   sed -n "s/^def $1 *= *\([0-9]*\).*/\1/p" "$app_gradle" | head -n1
 }
 app_version="${REASONIX_APP_VERSION:-$(version_field versionMajor).$(version_field versionMinor).$(version_field versionPatch)}"
-build_time_utc="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 ldflags="-s -w"
 ldflags="$ldflags -X main.version=v$app_version"
-ldflags="$ldflags -X main.buildTimeUTC=$build_time_utc"
 ldflags="$ldflags -X reasonix/internal/tools/productdocs.linkedVersion=v$app_version"
 ldflags="$ldflags -X reasonix/internal/tools/productdocs.linkedRevision=apk-v$app_version"
 
 echo "building the kernel (android/arm64, v$app_version) ..."
 mkdir -p "$(dirname "$out")"
 cd "$upstream"
-go build -trimpath -ldflags="$ldflags" -o "$out" ./cmd/reasonix
+go build -trimpath -ldflags="$ldflags" -o "$out" ./cmd/reasonix-studio-host
 
 size=$(wc -c < "$out")
 echo "kernel ready: $out ($((size / 1024 / 1024)) MiB)"

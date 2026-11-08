@@ -8,11 +8,17 @@ import { useDismiss } from "./dismiss";
 import { clock, deviceLabel, type Share, useShare } from "./PhoneAccess";
 import { Switch } from "./Switch";
 import { TooltipButton } from "./TooltipButton";
+import { host } from "../port/host";
+import { PhonePairing } from "./PhonePairing";
+
+export function PhonePop({ hub }: { hub: HubPort }) {
+  return host().canScanPairingCode() ? <PhonePairing /> : <SharePop hub={hub} />;
+}
 
 /** The chrome's way to put a phone on this window: a code on a card, one
  *  press from anywhere. Drawn only where the kernel has a window to share —
  *  a browser tab or a paired phone gets nothing here. */
-export function PhonePop({ hub }: { hub: HubPort }) {
+function SharePop({ hub }: { hub: HubPort }) {
   const [open, setOpen] = useState(false);
   const box = useRef<HTMLDivElement>(null);
   const close = useCallback(() => setOpen(false), []);

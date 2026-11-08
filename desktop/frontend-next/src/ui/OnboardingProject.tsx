@@ -5,17 +5,17 @@ import { StudioIcon } from "./StudioIcon";
 import { useFileDrop } from "./filedrop";
 
 export interface ProjectChoice {
+  current?: string;
   pick: () => Promise<string | null>;
   add: (path: string) => Promise<void>;
 }
 
 const nameOf = (path: string) => path.replace(/[/\\]+$/, "").split(/[/\\]/).pop() || path;
 
-// The last step: which folder the work happens in. A folder can be dropped on
-// the box or picked; once chosen it sits in the box and "Start" lights up.
 export function OnboardingProject({ project, onDone, onSkip }: { project: ProjectChoice; onDone: () => void; onSkip: () => void }) {
+  const touch = window.matchMedia("(pointer: coarse)").matches;
   const [over, setOver] = useState(false);
-  const [dir, setDir] = useState("");
+  const [dir, setDir] = useState(touch ? project.current ?? "" : "");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
   const drop = useFileDrop((d) => { if (!busy && d.paths[0]) { setDir(d.paths[0]); setErr(""); } }, setOver);
@@ -32,7 +32,7 @@ export function OnboardingProject({ project, onDone, onSkip }: { project: Projec
     if (!dir || busy) return;
     setBusy(true);
     try {
-      await project.add(dir);
+      if (dir !== project.current) await project.add(dir);
       onDone();
     } catch (e) {
       setErr(reason(e));
@@ -42,18 +42,18 @@ export function OnboardingProject({ project, onDone, onSkip }: { project: Projec
   return (
     <>
       <h1 className="onb-t">{t("onboarding.which_project")}</h1>
-      <p className="onb-s">{t("onboarding.drop_to_choose")}</p>
-      <div className="onb-drop" ref={drop} data-over={over ? "" : undefined} data-chosen={dir ? "" : undefined}>
+      <p className="onb-s">{t(touch ? "onboarding.phone_project_hint" : "onboarding.drop_to_choose")}</p>
+      <div className="onb-drop" ref={drop} data-touch={touch ? "" : undefined} data-over={over ? "" : undefined} data-chosen={dir ? "" : undefined}>
         {dir ? (
           <div className="onb-chosen">
             <StudioIcon name="folder" />
-            <b>{nameOf(dir)}</b>
+            <b>{touch && dir === project.current ? t("onboarding.current_workspace") : nameOf(dir)}</b>
             <small title={dir}>{dir}</small>
           </div>
         ) : (
           <>
             <StudioIcon name="folder" />
-            <span>{t("onboarding.drop_a_folder_here")}</span>
+            <span>{t(touch ? "onboarding.choose_a_folder" : "onboarding.drop_a_folder_here")}</span>
           </>
         )}
         <button type="button" className="onb-skip" data-action="onboarding.pick-folder" disabled={busy} onClick={() => void pick()}>

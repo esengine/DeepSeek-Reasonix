@@ -34,8 +34,12 @@ func init() { tool.RegisterBuiltin(bash{}) }
 
 var (
 	bashSandboxCommand             = sandbox.Command
-	bashSandboxEscapePromptEnabled = func() bool { return runtime.GOOS == "windows" }
+	bashSandboxEscapePromptEnabled = func() bool { return bashSandboxEscapePlatform(runtime.GOOS) }
 )
+
+func bashSandboxEscapePlatform(platform string) bool {
+	return platform == "windows" || platform == "android"
+}
 
 // bash runs a shell command. sb, when it enforces, wraps the command in an OS
 // sandbox; the zero value registered at init runs unconfined and is overridden

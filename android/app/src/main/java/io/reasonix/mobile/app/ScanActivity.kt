@@ -8,6 +8,8 @@ import android.view.Gravity
 import android.view.ViewGroup
 import android.widget.FrameLayout
 import android.widget.TextView
+import android.widget.Button
+import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.camera.core.CameraSelector
@@ -17,6 +19,8 @@ import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.core.content.ContextCompat
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import java.util.concurrent.Executors
 
 /**
@@ -82,6 +86,16 @@ class ScanActivity : AppCompatActivity() {
         }
         root.addView(preview)
         root.addView(hint)
+        root.addView(Button(this).apply {
+            text = getString(R.string.scan_close)
+            setOnClickListener { setResult(RESULT_CANCELED); finish() }
+            layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP or Gravity.START)
+        })
+        ViewCompat.setOnApplyWindowInsetsListener(root) { view, insets ->
+            val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout())
+            view.setPadding(bars.left, bars.top, bars.right, bars.bottom)
+            insets
+        }
         setContentView(root)
 
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) ==
@@ -93,10 +107,8 @@ class ScanActivity : AppCompatActivity() {
         }
     }
 
-    private fun refuse() {
-        // No dialog of our own: the permission prompt already said no, and a
-        // second window repeating it is one more tap to dismiss. The caller
-        // gets the same answer as a cancelled scan.
+    private fun refuse(message: Int = R.string.scan_denied) {
+        Toast.makeText(this, message, Toast.LENGTH_LONG).show()
         setResult(RESULT_CANCELED)
         finish()
     }
@@ -104,7 +116,7 @@ class ScanActivity : AppCompatActivity() {
     private fun start() {
         val providerFuture = ProcessCameraProvider.getInstance(this)
         providerFuture.addListener({
-            val provider = runCatching { providerFuture.get() }.getOrNull() ?: return@addListener refuse()
+            val provider = runCatching { providerFuture.get() }.getOrNull() ?: return@addListener refuse(R.string.scan_unavailable)
             val previewUseCase = Preview.Builder().build().also { it.setSurfaceProvider(preview.surfaceProvider) }
             val analysis = ImageAnalysis.Builder()
                 // Only the newest frame matters: a stale one describes where the
@@ -116,7 +128,7 @@ class ScanActivity : AppCompatActivity() {
             runCatching {
                 provider.unbindAll()
                 provider.bindToLifecycle(this, CameraSelector.DEFAULT_BACK_CAMERA, previewUseCase, analysis)
-            }.onFailure { refuse() }
+            }.onFailure { refuse(R.string.scan_unavailable) }
         }, ContextCompat.getMainExecutor(this))
     }
 
@@ -126,10 +138,10 @@ class ScanActivity : AppCompatActivity() {
             val text = Qr.decode(image) ?: return
             if (settled) return
             settled = true
-            setResult(RESULT_OK, Intent().putExtra(EXTRA_TEXT, text))
-            // Finishing from the analysis thread is the whole reason `settled`
-            // exists; the activity teardown has to happen on the main one.
-            runOnUiThread { finish() }
+            runOnUiThread {
+                setResult(RESULT_OK, Intent().putExtra(EXTRA_TEXT, text))
+                finish()
+            }
         } finally {
             image.close()
         }

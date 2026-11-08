@@ -262,21 +262,6 @@ class NativeBridge(
     }
 
     /**
-     * Read the pairing code a computer is showing.
-     *
-     * A phone cannot type what a computer renders as a QR code — it is a
-     * one-time code inside a URL, and the whole reason it is a picture is that
-     * nobody reads one aloud. So the page asks for the camera and gets the text
-     * back, which is the same direction the computer's own dialog describes.
-     *
-     * The answer is the code's own text, not a parsed result: what a pairing
-     * fragment means is the page's to decide, and it already knows how — the
-     * `#pair=` handling ships with the interface.
-     */
-    @JavascriptInterface
-    fun scanPairingCode(): String = if (!trusted()) "" else scanWithCamera()
-
-    /**
      * Load a URL in this window instead of handing it to the browser.
      *
      * The page asks for this once, right after a scan: the code it read points at
@@ -355,11 +340,6 @@ class NativeBridge(
     private val pending = AtomicReference<Uri?>(null)
     private val latch = AtomicReference<CountDownLatch?>(null)
 
-    /** The code the camera read, held between the activity's answer and the
-     *  wait below — the same round trip the file picker takes. */
-    private val scanned = AtomicReference<String?>(null)
-    private val scanLatch = AtomicReference<CountDownLatch?>(null)
-
     /** The main thread, because starting an Activity result must happen there. */
     private val main = Handler(Looper.getMainLooper())
 
@@ -377,13 +357,6 @@ class NativeBridge(
      * stale answer here is a stripe of interface under the status bar.
      */
     var onInsets: (() -> Insets?)? = null
-
-    /**
-     * How to open the camera. Set by the activity, which owns the Activity
-     * Result API; like `askForFile` it answers whether the ask was dispatched,
-     * and the code itself arrives through `deliverScan`.
-     */
-    var askForScan: () -> Boolean = { false }
 
     /**
      * How to put a file where the person picks. Set by the activity, which owns
@@ -440,51 +413,6 @@ class NativeBridge(
     fun deliverSave(uri: Uri?) {
         saveTarget.set(uri)
         saveLatch.get()?.countDown()
-    }
-
-    /**
-     * Read the pairing code a computer is showing, and return it.
-     *
-     * The same shape as `pickFile` and for the same reason: a
-     * `@JavascriptInterface` method is called on the WebView's thread and must
-     * return a value, so the camera is opened on the main thread and this one
-     * waits. The block lasts as long as the person is aiming, which is why the
-     * timeout is generous — a scan that gave up after a few seconds would be
-     * one nobody could complete.
-     *
-     * An empty string is "no code", which is what a refusal, a cancellation and
-     * a timeout all are. The caller acts on the text, so a distinct error would
-     * only be a fourth way to say the same thing.
-     */
-    private fun scanWithCamera(): String {
-        val gate = CountDownLatch(1)
-        scanLatch.set(gate)
-        scanned.set(null)
-
-        val posted = CountDownLatch(1)
-        var dispatched = false
-        main.post {
-            dispatched = runCatching { askForScan() }.getOrDefault(false)
-            posted.countDown()
-        }
-        val ready = runCatching { posted.await(SCAN_TIMEOUT_SECONDS, TimeUnit.SECONDS) }.getOrDefault(false)
-        if (!ready || !dispatched) {
-            scanLatch.set(null)
-            return ""
-        }
-        return try {
-            if (!gate.await(SCAN_TIMEOUT_SECONDS, TimeUnit.SECONDS)) "" else scanned.get().orEmpty()
-        } catch (_: InterruptedException) {
-            ""
-        } finally {
-            scanLatch.set(null)
-        }
-    }
-
-    /** Called by the activity when the scanner answers. Null is a dismissal. */
-    fun deliverScan(text: String?) {
-        scanned.set(text)
-        scanLatch.get()?.countDown()
     }
 
     /**
@@ -670,62 +598,9 @@ class NativeBridge(
 
     var askForBattery: (() -> Unit)? = null
 
-    /**
-     * Ask for a folder on this phone and answer with its real filesystem path.
-     *
-     * "" is a dismissal, the same answer `importIntoHome` gives — and, unlike
-     * that one, an empty string is a normal outcome here rather than a failure.
-     * The `startIn` hint is a path the kernel knows; the picker may ignore it,
-     * which is the picker's business.
-     *
-     * The round trip is the same latch as `pickFile`, for the same reason: a
-     * document-tree picker is another activity, and this call cannot suspend.
-     */
-    @JavascriptInterface
-    fun pickFolder(startIn: String): String {
-        if (!trusted()) return ""
-        val gate = CountDownLatch(1)
-        folderLatch.set(gate)
-        folderPending.set(null)
-
-        val posted = CountDownLatch(1)
-        var dispatched = false
-        main.post {
-            dispatched = runCatching { askForFolder(startIn) }.getOrDefault(false)
-            posted.countDown()
-        }
-        val ready = runCatching { posted.await(PICK_TIMEOUT_SECONDS, TimeUnit.SECONDS) }.getOrDefault(false)
-        if (!ready || !dispatched) {
-            folderLatch.set(null)
-            return ""
-        }
-        return try {
-            if (!gate.await(PICK_TIMEOUT_SECONDS, TimeUnit.SECONDS)) "" else folderPending.get().orEmpty()
-        } catch (_: InterruptedException) {
-            ""
-        } finally {
-            folderLatch.set(null)
-        }
-    }
-
-    var askForFolder: (String) -> Boolean = { false }
-
-    private val folderPending = AtomicReference<String?>(null)
-    private val folderLatch = AtomicReference<CountDownLatch?>(null)
-
-    /** Called by the activity with the folder's real path, or null on dismissal. */
-    fun deliverFolder(path: String?) {
-        folderPending.set(path ?: "")
-        folderLatch.get()?.countDown()
-    }
-
     companion object {
-        const val BRIDGE_VERSION = "4"
+        const val BRIDGE_VERSION = "5"
         private const val PICK_TIMEOUT_SECONDS = 5L * 60
-
-        /** Long, because this is however long someone takes to aim. A shorter
-         *  one would turn "still lining it up" into a failed scan. */
-        private const val SCAN_TIMEOUT_SECONDS = 5L * 60
 
         /** Only as long as the sheet takes to appear: the answer is "something
          *  took it", which is known the moment the Intent resolves. */

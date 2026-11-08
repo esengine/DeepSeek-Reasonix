@@ -23,6 +23,13 @@ type ShellConfig struct {
 	Env  map[string]string `toml:"env"`
 }
 
+func defaultShell(platform string) ShellConfig {
+	if platform == "android" {
+		return ShellConfig{Prefer: "bash", Path: "/system/bin/sh"}
+	}
+	return ShellConfig{}
+}
+
 // warnShellEnvProblems reports [tools.shell] env the load could not honour: a
 // project table it discarded, and entries that cannot become environment entries
 // (the bash tool drops those, so they would silently never take effect).
