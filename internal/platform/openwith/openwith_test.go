@@ -288,3 +288,26 @@ func TestAProgramOutsideEveryProjectCarriesNoReason(t *testing.T) {
 		}
 	}
 }
+
+func TestLinuxTerminalFollowsTheMachinesDefaultBeforeAnyFixedOrder(t *testing.T) {
+	dir := "/home/a/proj"
+	f := newFake(t, "linux", map[string]string{"PATH": "/usr/bin"})
+	f.dirs[dir] = true
+	f.files["/usr/bin/konsole"] = true
+	f.files["/usr/bin/kitty"] = true
+	if _, err := f.m.open("terminal", dir); err != nil {
+		t.Fatal(err)
+	}
+	if want := []call{{"/usr/bin/konsole", []string{"--workdir", dir}}}; !reflect.DeepEqual(f.started, want) {
+		t.Fatalf("without a default-terminal launcher started %v, want %v", f.started, want)
+	}
+
+	f.started = nil
+	f.files["/usr/bin/xdg-terminal-exec"] = true
+	if _, err := f.m.open("terminal", dir); err != nil {
+		t.Fatal(err)
+	}
+	if want := []call{{"/usr/bin/xdg-terminal-exec", []string{"--dir=" + dir}}}; !reflect.DeepEqual(f.started, want) {
+		t.Fatalf("with xdg-terminal-exec started %v, want %v", f.started, want)
+	}
+}

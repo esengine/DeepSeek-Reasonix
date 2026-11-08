@@ -49,6 +49,7 @@ var targets = []target{
 		"windows": {{exes: []string{`%LOCALAPPDATA%\Microsoft\WindowsApps\wt.exe`}, lead: []string{"-d"}}},
 		"darwin":  {{apps: []string{"Terminal"}}},
 		"linux": {
+			{commands: []string{"xdg-terminal-exec"}, glue: "--dir="},
 			{commands: []string{"gnome-terminal"}, glue: "--working-directory="},
 			{commands: []string{"konsole"}, lead: []string{"--workdir"}},
 			{commands: []string{"xfce4-terminal"}, glue: "--working-directory="},
