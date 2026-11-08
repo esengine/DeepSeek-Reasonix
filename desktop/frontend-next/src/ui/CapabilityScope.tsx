@@ -1,6 +1,9 @@
-import { useState } from "react";
+import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
+import { createPortal } from "react-dom";
 import { t } from "../i18n";
 import type { CapabilityScope } from "../port/port";
+import { useDismiss } from "./dismiss";
+import { beside, pinToViewport, useFollow, zoom } from "./place";
 
 // A switch flipped here answers for this project, not for every project. That
 // is the useful default and also the invisible one, so the row that carries an
@@ -23,21 +26,39 @@ export function ScopePill({
   scope: CapabilityScope; scopes: CapabilityScope[]; onPick: (root: string) => void;
 }) {
   const [open, setOpen] = useState(false);
+  const trigger = useRef<HTMLButtonElement>(null);
+  const panel = useRef<HTMLDivElement>(null);
+  const close = useCallback(() => { setOpen(false); trigger.current?.focus({ preventScroll: true }); }, []);
+  const place = useCallback(() => {
+    if (!panel.current || !trigger.current) return;
+    const rect = trigger.current.getBoundingClientRect();
+    const width = panel.current.offsetWidth * zoom();
+    pinToViewport(panel.current, rect.right - width, beside(rect, panel.current.offsetHeight * zoom(), innerHeight, "below", 4), 12);
+  }, []);
+  useFollow(open, place, scopes, { anchor: trigger, container: panel });
+  useDismiss(open, panel, close, trigger);
+  useEffect(() => {
+    if (!open || !panel.current) return;
+    const observer = new ResizeObserver(place);
+    observer.observe(panel.current);
+    return () => observer.disconnect();
+  }, [open, place]);
   return (
     <span className="scopeanchor">
-      <button type="button" className="spill who" data-action="ext.scope" aria-expanded={open} onClick={() => setOpen(!open)}>
+      <button ref={trigger} type="button" className="spill who" data-action="ext.scope" aria-haspopup="listbox" aria-expanded={open} onClick={() => setOpen(!open)}>
         {scope.label || scope.name}
         <i className="cv" aria-hidden>▾</i>
       </button>
-      {open && (
+      {open && createPortal(
         <ScopePicker
+          panel={panel}
           scopes={scopes}
           at={scope.root}
           onPick={(root) => {
-            setOpen(false);
+            close();
             onPick(root);
           }}
-        />
+        />, document.body,
       )}
     </span>
   );
@@ -96,9 +117,9 @@ export function ScopeAway({ scope, onBack }: { scope: CapabilityScope; onBack: (
 // worth finding are the ones already carrying an exception — so that is the
 // filter, and search only appears when the list is long enough to need it.
 function ScopePicker({
-  scopes, at, onPick,
+  panel, scopes, at, onPick,
 }: {
-  scopes: CapabilityScope[]; at: string; onPick: (root: string) => void;
+  panel: RefObject<HTMLDivElement | null>; scopes: CapabilityScope[]; at: string; onPick: (root: string) => void;
 }) {
   const [q, setQ] = useState("");
   const [onlyChanged, setOnlyChanged] = useState(false);
@@ -109,7 +130,7 @@ function ScopePicker({
     return !needle || (sc.label || sc.name).toLowerCase().includes(needle) || sc.root.toLowerCase().includes(needle);
   });
   return (
-    <div className="scope-pick" role="listbox">
+    <div ref={panel} className="scope-pick" role="listbox" aria-label={t("ext.manage_which_project")}>
       {searchable && (
         <input
           className="q"

@@ -36,8 +36,9 @@
 .bk-chip:has(> input:disabled) { opacity: .55; cursor: default; }
 .bk .bk-warn { color: var(--warn-ink); }
 .bk .bk-wait { color: var(--warn-ink); }
-.bk-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-.bk-fields > label { display: block; }
+.bk-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 180px), 1fr)); gap: 10px; }
+.bk-fields > label { display: block; min-width: 0; }
+.bk-fields > label.full { grid-column: 1 / -1; }
 .bk-fields > label > span { display: block; margin: 10px 0 6px; font: var(--w-med) var(--fs-meta)/1.4 var(--ui); color: var(--muted); }
 .bk-fields input { width: 100%; height: 32px; box-sizing: border-box; padding: 0 10px; border: 1px solid var(--border); border-radius: var(--r-sm); background: var(--surface); color: var(--text); font: var(--w-reg) var(--fs-ui) var(--ui); }
 .ns-done, .ns-fail { display: flex; align-items: center; gap: 8px; margin-top: 8px; padding: 10px 12px; border-radius: var(--r-md); font: var(--w-reg) var(--fs-ui)/1.55 var(--ui); }
@@ -46,11 +47,11 @@
 .ns-fail { background: color-mix(in srgb, var(--warn) 12%, transparent); }
 .ns-fail .studio-icon { color: var(--warn-ink); }
 .ns-done .studio-icon, .ns-fail .studio-icon { flex: none; width: 16px; height: 16px; }
-.ns-veil { position: fixed; inset: 0; z-index: 60; display: grid; place-items: center; padding: 20px; background: color-mix(in oklab, var(--page) 80%, transparent); }
-.ns-dlg { width: 440px; max-width: 100%; overflow: hidden; border: 1px solid var(--border); border-radius: var(--r-md); background: var(--float); box-shadow: var(--shadow-float); }
+.ns-veil { position: fixed; inset: 0; z-index: 60; display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); place-items: center; padding: 20px; background: color-mix(in oklab, var(--page) 80%, transparent); }
+.ns-dlg { width: 440px; max-width: 100%; max-height: 100%; overflow: auto; border: 1px solid var(--border); border-radius: var(--r-md); background: var(--float); box-shadow: var(--shadow-float); }
 .ns-dlg > header { display: flex; align-items: center; gap: 8px; padding: 14px 16px 0; }
 .ns-dlg > header h3 { flex: 1; margin: 0; font: var(--w-semi) var(--fs-lead)/1.4 var(--ui); }
-.ns-dlg .ns-x { width: 28px; height: 28px; padding: 0; border: 0; border-radius: var(--r-sm); background: transparent; color: var(--muted); display: inline-grid; place-items: center; cursor: pointer; }
+.ns-dlg .ns-x { flex: none; width: 28px; height: 28px; padding: 0; border: 0; border-radius: var(--r-sm); background: transparent; color: var(--muted); display: inline-grid; place-items: center; cursor: pointer; }
 .ns-dlg .ns-x:hover { background: var(--overlay); color: var(--text); }
 .ns-dlg > p { margin: 0; padding: 10px 16px 0; color: var(--muted); font: var(--w-reg) var(--fs-ui)/1.7 var(--ui); }
 .ns-dlg .ns-drop { display: flex; flex-direction: column; align-items: center; gap: 8px; margin: 12px 16px 16px; padding: 22px 16px; border: 1px dashed var(--border); border-radius: var(--r-md); color: var(--muted); font: var(--w-reg) var(--fs-ui)/1.5 var(--ui); }

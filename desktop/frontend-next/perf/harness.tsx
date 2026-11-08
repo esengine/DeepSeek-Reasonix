@@ -64,7 +64,7 @@ class BenchPort extends MockPort {
   opensFiles() { return query.has("deliveries") || super.opensFiles(); }
   revealsFiles() { return query.has("deliveries") || super.revealsFiles(); }
   async account() {
-    const state = await super.account();
+    const state = query.has("signedin") ? { signedIn: true, user: { handle: "demo", email: "demo@example.com", label: "demo" } } : await super.account();
     const label = query.get("accountLabel");
     return label && state.signedIn && state.user ? { ...state, user: { ...state.user, label } } : state;
   }

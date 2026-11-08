@@ -13,15 +13,15 @@ try {
   const lefts = () =>
     page.evaluate(() => {
       const left = (selector) => Math.round(document.querySelector(selector).getBoundingClientRect().left);
-      return { title: left(".prefs-main .prefs-pagetitle"), index: left(".prefs-main .page-index"), col: left(".prefs-main .prefs-col") };
+      return { title: left(".prefs-main .prefs-pagetitle"), col: left(".prefs-main .prefs-col") };
     });
   for (const name of ["模型", "连接", "常用"]) {
     await page.locator(".prefs-nav button", { hasText: new RegExp(`^${name}`) }).first().click();
     await page.waitForTimeout(400);
     const at = await lefts();
-    assert.equal(at.index, at.title, `${name}: the page index starts where the title does (${JSON.stringify(at)})`);
+    assert.equal(await page.locator(".page-index").count(), 0);
     assert.equal(at.col, at.title, `${name}: the cards start where the title does (${JSON.stringify(at)})`);
-    console.log(`PASS ${name}: title, index and cards all start at ${at.title}px`);
+    console.log(`PASS ${name}: title and cards start at ${at.title}px without a duplicate index`);
   }
   await page.locator(".prefs-nav button", { hasText: /^操作与性能/ }).first().click();
   await page.waitForTimeout(400);

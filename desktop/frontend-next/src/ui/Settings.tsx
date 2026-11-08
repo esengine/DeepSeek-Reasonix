@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { StudioIcon } from "./StudioIcon";
 import { useModalFocus } from "./useModalFocus";
 import { SettingsLeaveContext, useSettingsLeave } from "./SettingsLeave";
@@ -6,8 +6,7 @@ import { t } from "../i18n";
 import { listenAction } from "./listen";
 import { useRuntimeReload } from "./RuntimeReload";
 import type { CapabilityScope, McpEntry, ModelEntry, PluginPackage, SkillEntry } from "../port/port";
-import { usePageIndex, useSettingsSearch } from "./useSettingsSearch";
-import { PageIndex } from "./PageIndex";
+import { useSettingsSearch } from "./useSettingsSearch";
 import { useSettingLanding } from "./useSettingLanding";
 import { bytes, tokens as fmtTokens } from "../i18n/format";
 import { STORAGE_TALLY_DELAY, cachedStorageTotal, storageTotal } from "./storageTally";
@@ -61,8 +60,6 @@ const ELSEWHERE: string[] = [];
 // The user's question is "is it there and does it work", so the state is the
 // label. A failed server keeps its error on the row that names it.
 const NET_MODE: Record<string, string> = { auto: "look.follow_the_system", env: "settings.environment_variables", custom: "about.manual", off: "models.direct" };
-
-const TWO_COLUMN: readonly Section[] = ["common", "session", "tools", "ext", "display", "controls", "appearance", "storage"];
 
 const homeFor = (section: Section, anchor: string): Section => {
   const entry = SETTING_AT(anchor);
@@ -314,7 +311,6 @@ export function Settings({ hub, onError, port, networkPort, localWorkspacePort, 
   // 搜索命中的是这张表里的条目，包括当前没有挂载的那些分区；能不能显示由 shown
   // 决定，和它有没有被渲染过无关。
   const found = useSettingsSearch(query, shown, remoteBook);
-  const pageItems = usePageIndex(at, shown, remoteBook);
   // 落点：跳过去之后短暂标一下「就是这里」。这是导航反馈，不是状态变化。
   const pathOf = (section: Section) => {
     const home = pageHome(section);
@@ -333,6 +329,10 @@ export function Settings({ hub, onError, port, networkPort, localWorkspacePort, 
       if (section === "ext") setExtTab(anchor === "market" ? "market" : "installed");
     });
   };
+  useLayoutEffect(() => {
+    const panel = root.current?.querySelector<HTMLElement>(".prefs-main");
+    if (panel) panel.scrollTop = 0;
+  }, [at, deepAt, pageNow]);
   useSettingLanding(root, landed, at, setLanded);
 
   return (
@@ -415,7 +415,6 @@ export function Settings({ hub, onError, port, networkPort, localWorkspacePort, 
         <div className="prefs-main" key={at} role="tabpanel" aria-labelledby={pageNow ? `prefs-${at}-${pageNow}` : `prefs-${at}`} data-sec={at}>
           <ConfigTrouble port={port} onRepaired={onChanged} />
           {!solo && <SettingsTitle at={at} />}
-          {!solo && !deepAt && <PageIndex items={pageItems} onGo={(entry) => go(entry.section, entry.anchor)} />}
           <Boundary
             fallback={
               <div className="find" data-lvl="err" role="alert">
@@ -427,7 +426,7 @@ export function Settings({ hub, onError, port, networkPort, localWorkspacePort, 
           {/* Keyed on the section: replacing this column is the navigation,
               and it is the one thing here whose mount really is the cause. */}
           <SettingDeepContext.Provider value={{ pages: !solo, open: deepAt, section: t(SECTION_NAME[at] ?? at), go: (id) => navigation.leave(() => { setLanded(""); setDeep(id); }) }}>
-          <div className="prefs-col" key={`${at}:${deepAt ?? ""}`} data-cols={TWO_COLUMN.includes(at) && !deepAt && !solo ? 2 : undefined} data-deep={deepAt ?? undefined}>
+          <div className="prefs-col" key={`${at}:${deepAt ?? ""}`} data-deep={deepAt ?? undefined}>
           {solo ? <SoloStyle section={soloSection} /> : <SettingsPageStyle section={at} page={pageNow} />}
           {/* Every refused write on every page lands in one state, so it is
               said in one place. Copied onto the pages somebody remembered, it

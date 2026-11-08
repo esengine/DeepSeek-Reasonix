@@ -32,8 +32,8 @@ describe("the export chips follow the board", () => {
     expect(rule(".bk-chip[data-on] .box")).toMatch(/background:\s*var\(--accent\)/);
   });
 
-  it("lays the two passphrase fields side by side", () => {
-    expect(rule(".bk-fields")).toMatch(/grid-template-columns:\s*1fr 1fr/);
+  it("keeps passphrase fields readable and stacks them when two columns cannot fit", () => {
+    expect(rule(".bk-fields")).toMatch(/grid-template-columns:\s*repeat\(auto-fit, minmax\(min\(100%, 180px\), 1fr\)\)/);
   });
 });
 

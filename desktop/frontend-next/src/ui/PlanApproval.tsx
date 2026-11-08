@@ -22,11 +22,12 @@ export function PlanApproval({ port }: { port: AgentPort }) {
 
   if (!state) return <div className="empty">{t("plan.could_not_read_the_plan")}</div>;
 
-  const flip = async () => {
+  const pick = async (auto: boolean) => {
+    if (auto === state.auto) return;
     setBusy(true);
     setError("");
     try {
-      setState(await port.savePlanApproval(!state.auto));
+      setState(await port.savePlanApproval(auto));
     } catch (e) {
       setError(reason(e));
     } finally {
@@ -38,7 +39,7 @@ export function PlanApproval({ port }: { port: AgentPort }) {
     <>
       <SettingRow id="plan-approval" title={t("settings.plan_approval")} desc={t("settings.show_plans_before_running")} more={t("plan.a_submitted_plan_starts_without")}>
         <SegChoice label={t("settings.plan_approval")} value={state.auto ? "auto" : "ask"} action="plan-approval.auto" disabled={busy}
-          onPick={() => void flip()} options={[["ask", t("settings.every_time")], ["auto", t("settings.not_needed")]]} />
+          onPick={(value) => void pick(value === "auto")} options={[["ask", t("settings.wait_for_confirmation")], ["auto", t("settings.start_automatically")]]} />
       </SettingRow>
       {error && <div className="why">{error}</div>}
     </>

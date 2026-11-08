@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { parse } from "@babel/parser";
 import { renderToStaticMarkup } from "react-dom/server";
 import { Group } from "./Group";
-import { SETTINGS, SETTING_AT, type SettingScope } from "./prefsnav";
+import { NAV, SETTINGS, SETTING_AT, pageHome, type SettingScope } from "./prefsnav";
 import { walk, type Node } from "./roots";
 
 // The settings screen has to answer two questions about itself: where a
@@ -83,6 +83,13 @@ function rendered(): { ids: string[]; unnamed: string[] } {
 
 describe("the settings catalogue", () => {
   const seen = rendered();
+
+  it("gives every visible setting a navigable page or an editor on one", () => {
+    const homes = new Set(NAV.flatMap(([, items]) => items.map(([id]) => id as string)));
+    const entries = new Set(SETTINGS.filter((e) => !e.hidden && !e.within && homes.has(pageHome(e.section))).map((e) => e.anchor));
+    const lost = SETTINGS.filter((e) => !e.hidden && !entries.has(e.anchor) && !(e.within && entries.has(e.within))).map((e) => e.anchor);
+    expect(lost).toEqual([]);
+  });
 
   it("carries every block the screen renders", () => {
     const known = new Set(SETTINGS.map((e) => e.anchor));

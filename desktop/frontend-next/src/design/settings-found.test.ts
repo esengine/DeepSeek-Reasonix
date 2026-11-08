@@ -22,6 +22,6 @@ describe("the settings search results", () => {
     expect(found).toMatch(/top:\s*0/);
     expect(found).toMatch(/padding:\s*58px /);
     expect(studio).toMatch(/\.prefs-hd \{ min-height: 58px/);
-    expect(rule(':root:not([data-fold~="phone"]) .prefs-actions')).toMatch(/z-index:\s*6/);
+    expect(rule('.prefs-actions')).toMatch(/z-index:\s*6/);
   });
 });

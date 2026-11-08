@@ -31,7 +31,7 @@
 .toast-actions .act[data-primary] { border-color: var(--accent); background: var(--accent); color: var(--accent-fg); }
 .toast[data-stacked] .toast-actions { margin: 4px 0 0 26px; gap: 6px; }
 .preset-confirm-veil { background: color-mix(in oklab, var(--page) 80%, transparent); }
-.preset-confirm { width: 380px; max-width: 100%; padding: 0; overflow: hidden; border: 1px solid var(--border); border-radius: var(--r-md); background: var(--float); box-shadow: var(--shadow-float); }
+.preset-confirm { width: 380px; max-width: 100%; max-height: 100%; padding: 0; overflow: auto; border: 1px solid var(--border); border-radius: var(--r-md); background: var(--float); box-shadow: var(--shadow-float); }
 .preset-confirm > header { display: flex; align-items: center; gap: 8px; padding: 14px 16px 0; }
 .preset-confirm > header h3 { flex: 1; margin: 0; font: var(--w-semi) var(--fs-lead)/1.4 var(--ui); }
 .preset-confirm .pc-x { width: 28px; height: 28px; padding: 0; border: 0; border-radius: var(--r-sm); background: transparent; color: var(--muted); display: inline-grid; place-items: center; flex: none; cursor: pointer; }

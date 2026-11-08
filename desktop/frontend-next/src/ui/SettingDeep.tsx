@@ -56,7 +56,7 @@ export function SettingDeep({ id, title, now, hint, act, ctl, children }: { id: 
         <span aria-hidden="true">/</span>
         <b aria-current="page">{title}</b>
       </nav>
-      {children}
+      <SettingDeepContext.Provider value={{ ...deep, pages: false }}>{children}</SettingDeepContext.Provider>
     </div>
   );
 }

@@ -1,6 +1,5 @@
 import { useMemo } from "react";
 import { SETTINGS } from "./prefsnav";
-import { pageIndexOf } from "./settingPageIndex";
 import { searchSettings } from "./settingSearch";
 import type { Section } from "./prefsnav";
 import { useShellGraphics } from "./GraphicsSection";
@@ -26,10 +25,4 @@ export function useSettingsSearch(query: string, shown: (id: Section) => boolean
     const q = query.trim();
     return q ? searchSettings(visible, q) : null;
   }, [query, visible]);
-}
-
-/** What a page holds, for its index. */
-export function usePageIndex(at: Section, shown: (id: Section) => boolean, shownKey: unknown) {
-  const visible = useVisibleSettings(shown, shownKey);
-  return useMemo(() => pageIndexOf(visible, at), [visible, at]);
 }

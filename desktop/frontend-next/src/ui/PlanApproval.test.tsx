@@ -9,23 +9,27 @@ import type { AgentPort } from "../port/port";
 
 afterEach(cleanup);
 
-const every = () => screen.findByRole("radio", { name: "每次" });
-const never = () => screen.findByRole("radio", { name: "不需要" });
+const every = () => screen.findByRole("radio", { name: "等待确认" });
+const never = () => screen.findByRole("radio", { name: "自动开始" });
 
 describe("the plan-approval switch", () => {
-  it("starts off, says what it releases and what it leaves alone, and saves the opposite of what it shows", async () => {
+  it("describes both choices and saves only a different selection", async () => {
     const p = new MockPort() as unknown as AgentPort;
     const save = vi.spyOn(p, "savePlanApproval");
     render(<PlanApproval port={p} />);
     const ask = await every();
     expect(ask.getAttribute("aria-checked")).toBe("true");
-    const why = screen.getByText("计划做好后要不要先给你看").getAttribute("title") ?? "";
+    const why = screen.getByText("计划完成后，等待你确认或自动开始执行").getAttribute("title") ?? "";
     expect(why).toMatch(/工具批准、沙箱和拒绝规则照常生效/);
     expect(why).toMatch(/项目配置不能替你打开/);
+    await userEvent.click(ask);
+    expect(save).not.toHaveBeenCalled();
     await userEvent.click(await never());
     expect(save).toHaveBeenCalledWith(true);
-    await waitFor(() => expect((screen.getByRole("radio", { name: "不需要" })).getAttribute("aria-checked")).toBe("true"));
-    await userEvent.click(screen.getByRole("radio", { name: "每次" }));
+    await waitFor(() => expect((screen.getByRole("radio", { name: "自动开始" })).getAttribute("aria-checked")).toBe("true"));
+    await userEvent.click(await never());
+    expect(save).toHaveBeenCalledTimes(1);
+    await userEvent.click(screen.getByRole("radio", { name: "等待确认" }));
     expect(save).toHaveBeenLastCalledWith(false);
   });
 

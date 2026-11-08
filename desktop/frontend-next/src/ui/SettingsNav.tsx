@@ -79,16 +79,14 @@ export function SettingsNav({ at, values, shown, danger, disabled, onSelect, pag
 export function SettingsTitle({ at }: { at: Section }) {
   const group = NAV.find(([, items]) => items.some(([id]) => id === at));
   const name = group?.[1].find(([id]) => id === at)?.[1] ?? at;
-  const count = SETTINGS.filter((e) => !e.hidden && !e.within && pageHome(e.section) === at).length;
   const desc = SECTION_DESC[at];
   return (
     <div className="prefs-pagetitle">
       {group?.[0] && <span className="group">{t(group[0])}</span>}
       <h2>{t(name)}</h2>
-      {(desc || count > 0) && (
+      {desc && (
         <span className="desc">
-          {desc && <span className="what">{t(desc)}</span>}
-          {count > 0 && <span className="count">{t("settings.n_items", { n: count })}</span>}
+          <span className="what">{t(desc)}</span>
         </span>
       )}
       <p className="usual">{t("settings.page_usual")}</p>

@@ -13,6 +13,32 @@ gate or a component enforces it, that is named.
 `TOKENS.md` holds the vocabulary — colour, type, motion and space — that these
 rules are written in.
 
+## Settings pages
+
+- Primary groups stay expanded in one column, with frequent choices first.
+  Section headings provide the overview without a second navigation row.
+  Page titles describe their purpose without repeating the sidebar count.
+  Search reaches individual controls without remounting the page.
+- Rows keep descriptions readable while using compact vertical spacing.
+  Collaboration, automation and monitoring never require opening a disclosure.
+- Descriptions wrap; controls move below them in narrow columns. Exceptional
+  scope and timing come from the catalogue's ApplyNote below each description.
+  Cards, typography and controls use the existing theme tokens.
+- Management editors retain their own navigation and forms. Narrow pages wrap
+  controls and extension toolbars; the category strip alone scrolls sideways.
+  Entering or leaving an editor starts at the top with one return breadcrumb.
+  Usage tables retain their labelled horizontal scroller for exact figures.
+- Close controls share the header's grid row without positional offsets.
+  Standalone windows extend the title background across the full row and
+  centre the close button above the scrolling content.
+- The sheet clips overflow without becoming a second scroll container. Focus
+  movement and keyboard navigation scroll the content, leaving the header fixed.
+- Project scope pickers use the shared viewport placement and dismissal hooks.
+  Their portalled list stays within the viewport when the page scrolls or resizes.
+  Marketplace source addresses wrap within their detail card.
+- Confirmation and import backdrops use shrinkable grid tracks in both axes.
+  Dialogs fit the available width and height, and scroll internally on short screens.
+
 ## Session row spacing
 
 Session rows reserve an 8px inline-end inset inside their highlight. The shared

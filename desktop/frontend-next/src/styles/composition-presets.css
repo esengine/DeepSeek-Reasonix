@@ -88,7 +88,7 @@
 .preset-page-footer .btn { min-width: 84px; }
 .composition-extra { border-top: 1px solid var(--hair); margin-top: 24px; padding-top: 16px; }
 .composition-extra summary { cursor: pointer; color: var(--muted); }
-.preset-confirm-veil { position: fixed; inset: 0; display: grid; place-items: center; padding: 20px; background: color-mix(in oklab, var(--page) 80%, transparent); z-index: 1100; }
+.preset-confirm-veil { position: fixed; inset: 0; display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); place-items: center; padding: 20px; background: color-mix(in oklab, var(--page) 80%, transparent); z-index: 1100; }
 .preset-confirm { width: min(100%, 420px); padding: 24px; border: 1px solid var(--border); border-radius: var(--r-lg); background: var(--surface); box-shadow: var(--lit); }
 .preset-confirm h3 { margin: 0 0 12px; font-size: var(--fs-title); }
 .preset-confirm p { color: var(--muted); margin: 0 0 24px; line-height: 1.6; }

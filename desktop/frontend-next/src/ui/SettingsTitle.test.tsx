@@ -6,11 +6,11 @@ import { SettingsTitle } from "./SettingsNav";
 
 afterEach(cleanup);
 
-it("names the page, how many settings it holds and what it is for", () => {
+it("names the page and what it is for without repeating the navigation count", () => {
   const { container } = render(<SettingsTitle at="model" />);
   const bar = container.querySelector(".prefs-pagetitle")!;
   expect(bar.querySelector("h2")?.textContent).toBe("模型");
-  expect(bar.querySelector(".count")?.textContent).toMatch(/^\d+ 项$/);
+  expect(bar.querySelector(".count")).toBeNull();
   expect(bar.querySelector(".desc .what")?.textContent).toBe("接哪个服务、每种用途用哪个模型、上下文怎么维护");
   expect(bar.querySelector(".group")).toBeNull();
 });

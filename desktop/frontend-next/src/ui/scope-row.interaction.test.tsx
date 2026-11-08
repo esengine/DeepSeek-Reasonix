@@ -38,6 +38,31 @@ describe("the extension scope row in settings", () => {
     expect(onPick).toHaveBeenCalledWith("/work/site");
     expect(screen.queryByRole("option")).toBeNull();
   });
+
+  it("dismisses the project picker with Escape and returns focus without changing the scope", async () => {
+    const onPick = vi.fn();
+    render(<ScopeRow scope={scope()} scopes={scopes} onPick={onPick} />);
+    const trigger = screen.getByRole("button", { name: /app/ });
+    await userEvent.click(trigger);
+    await userEvent.click(screen.getByRole("button", { name: "只看有例外的" }));
+    expect(screen.getAllByRole("option")).toHaveLength(1);
+    await userEvent.keyboard("{Escape}");
+    expect(screen.queryByRole("listbox")).toBeNull();
+    expect(document.activeElement).toBe(trigger);
+    expect(onPick).not.toHaveBeenCalled();
+  });
+
+  it("dismisses on an outside press and can reopen to select a project", async () => {
+    const onPick = vi.fn();
+    render(<><ScopeRow scope={scope()} scopes={scopes} onPick={onPick} /><button>Outside</button></>);
+    await userEvent.click(screen.getByRole("button", { name: /app/ }));
+    await userEvent.click(screen.getByRole("button", { name: "Outside" }));
+    expect(screen.queryByRole("listbox")).toBeNull();
+    expect(onPick).not.toHaveBeenCalled();
+    await userEvent.click(screen.getByRole("button", { name: /app/ }));
+    await userEvent.click(screen.getByRole("option", { name: /site/ }));
+    expect(onPick).toHaveBeenCalledExactlyOnceWith("/work/site");
+  });
 });
 
 describe("the extension page naming another project", () => {
