@@ -11,12 +11,14 @@ require (
 	charm.land/lipgloss/v2 v2.0.6
 	git.sr.ht/~jackmordaunt/go-toast/v2 v2.0.3
 	github.com/BurntSushi/toml v1.6.0
+	github.com/UserExistsError/conpty v0.1.4
 	github.com/alecthomas/chroma/v2 v2.27.0
 	github.com/atotto/clipboard v0.1.4
 	github.com/aymanbagabas/go-udiff v0.4.1
 	github.com/bmatcuk/doublestar/v4 v4.10.4
 	github.com/charmbracelet/colorprofile v0.4.3
 	github.com/charmbracelet/x/ansi v0.11.9
+	github.com/creack/pty v1.1.24
 	github.com/godbus/dbus/v5 v5.2.4
 	github.com/gorilla/websocket v1.5.3
 	github.com/joho/godotenv v1.5.1
@@ -27,14 +29,14 @@ require (
 	github.com/rivo/uniseg v0.4.7
 	github.com/sabhiram/go-gitignore v0.0.0-20210923224102-525f6e181f06
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.3
-	github.com/spf13/pflag v1.0.10
+	github.com/spf13/pflag v1.1.0
 	github.com/tdewolff/parse/v2 v2.8.20
 	github.com/tree-sitter/go-tree-sitter v0.25.0
 	github.com/tree-sitter/tree-sitter-javascript v0.25.0
 	github.com/tree-sitter/tree-sitter-python v0.25.0
 	github.com/tree-sitter/tree-sitter-rust v0.24.2
 	github.com/tree-sitter/tree-sitter-typescript v0.23.2
-	github.com/yuin/goldmark v1.8.6
+	github.com/yuin/goldmark v1.8.7
 	github.com/zalando/go-keyring v0.2.8
 	go.starlark.net v0.0.0-20260908191801-89a6a09411d5
 	go.uber.org/goleak v1.3.0
@@ -46,20 +48,18 @@ require (
 	golang.org/x/term v0.47.0
 	golang.org/x/text v0.43.0
 	gopkg.in/yaml.v3 v3.0.1
-	modernc.org/sqlite v1.61.0
+	modernc.org/sqlite v1.61.1
 	mvdan.cc/sh/v3 v3.14.1
 	rsc.io/qr v0.2.0
 )
 
 require (
-	github.com/UserExistsError/conpty v0.1.4 // indirect
 	github.com/charmbracelet/ultraviolet v0.0.0-20261008173134-6b8d4baf91b4 // indirect
 	github.com/charmbracelet/x/term v0.2.2 // indirect
 	github.com/charmbracelet/x/termios v0.1.1 // indirect
 	github.com/charmbracelet/x/windows v0.2.2 // indirect
 	github.com/clipperhouse/displaywidth v0.11.0 // indirect
 	github.com/clipperhouse/uax29/v2 v2.7.0 // indirect
-	github.com/creack/pty v1.1.24 // indirect
 	github.com/danieljoos/wincred v1.2.3 // indirect
 	github.com/dlclark/regexp2/v2 v2.2.1 // indirect
 	github.com/dustin/go-humanize v1.1.0 // indirect
