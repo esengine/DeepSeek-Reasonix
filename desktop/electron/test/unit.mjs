@@ -625,7 +625,7 @@ test("Windows is given the format it reads the small sizes from", () => {
   assert.equal(iconFile("linux"), "icon.png");
 });
 
-const { profileFor } = require("../src/instance.js");
+const { profileFor, instanceID } = require("../src/instance.js");
 
 // Two homes are two Studios, and the profile is what carries that into the
 // platform's own lock. Sharing one would make the second launch look like a
@@ -639,6 +639,14 @@ test("each instance gets a profile of its own", () => {
   // An identity nobody could work out leaves the default alone rather than
   // inventing a profile that no second launch would agree on.
   assert.equal(profileFor(base, ""), base);
+});
+
+test("the instance probe runs the kernel without a console window of its own", () => {
+  let options;
+  const run = (binary, args, opts) => { options = { binary, args, opts }; return "abc123\n"; };
+  assert.equal(instanceID("host", run), "abc123");
+  assert.deepEqual(options.args, ["-instance-id"]);
+  assert.equal(options.opts.windowsHide, true);
 });
 
 // A program that cannot be started emits "error" and never "exit". Waiting for

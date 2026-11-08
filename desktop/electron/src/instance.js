@@ -6,9 +6,9 @@ const { execFileSync } = require("node:child_process");
 // one Studio, canonicalized where it lives. The kernel answers it, because the
 // home is resolved from an environment and a platform default this process
 // does not own.
-function instanceID(binary) {
+function instanceID(binary, run = execFileSync) {
   try {
-    return execFileSync(binary, ["-instance-id"], { encoding: "utf8", timeout: 10000 }).trim();
+    return run(binary, ["-instance-id"], { encoding: "utf8", timeout: 10000, windowsHide: true }).trim();
   } catch {
     // A kernel that cannot be run at all is a launch that is going to fail with
     // a better message in a moment. Refusing to start here would report it as
