@@ -14,7 +14,7 @@ try {
   const shown = (row, selector) =>
     row.evaluate((el, sel) => {
       const node = el.querySelector(sel);
-      return !!node && getComputedStyle(node).display !== "none" && node.getBoundingClientRect().width > 0;
+      return !!node && getComputedStyle(node).display !== "none" && getComputedStyle(node).opacity !== "0" && node.getBoundingClientRect().width > 2;
     }, selector);
   const rows = page.locator(".ds-row.sessrow");
   await page.mouse.move(700, 450);

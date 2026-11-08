@@ -33,9 +33,12 @@ describe("session and project rows follow the board", () => {
     expect(rule(".ds-row:is(:hover, :focus-within) .ds-more")).toMatch(/display:\s*grid/);
   });
 
-  it("keeps the pin button hidden until the row is hovered or focused", () => {
-    expect(rule(".ds-row .sessquick, .ds-row .sesspin-action")).toMatch(/display:\s*none/);
-    expect(rule(".ds-row .sessquick > button, .ds-row .sesspin-action")).not.toMatch(/display:/);
-    expect(rule(".ds-row:is(:hover, :focus-within) .sesspin-action")).toMatch(/display:\s*grid/);
+  it("hides the quick buttons until the row is hovered or focused, without taking them out of the tab order", () => {
+    const hidden = rule(".ds-row:not(:is(:hover, :focus-within)) :is(.sessquick, .sesspin-action)");
+    expect(hidden).toMatch(/opacity:\s*0/);
+    expect(hidden).toMatch(/pointer-events:\s*none/);
+    expect(hidden).not.toMatch(/display:\s*none/);
+    expect(rule(".ds-row .sesspin-action")).toMatch(/display:\s*grid/);
+    expect(rule(".ds-row .sessquick, .ds-row .sesspin-action")).not.toMatch(/display:\s*none/);
   });
 });
