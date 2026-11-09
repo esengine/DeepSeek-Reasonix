@@ -61,6 +61,14 @@ function benchPack(): ThemePack | null {
 
 class BenchPort extends MockPort {
   private driverRunning: boolean | undefined;
+  async providerHealthSettings() {
+    return query.has("modelhealth") ? { enabled: true } : super.providerHealthSettings();
+  }
+  async providerHealth(name: string) {
+    return query.has("modelhealth")
+      ? { connection: "reachable" as const, wallet: "unsupported" as const, checkedAt: Date.now() }
+      : super.providerHealth(name);
+  }
   opensFiles() { return query.has("deliveries") || super.opensFiles(); }
   revealsFiles() { return query.has("deliveries") || super.revealsFiles(); }
   async account() {

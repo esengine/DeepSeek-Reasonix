@@ -218,6 +218,9 @@ and selected states, while long titles truncate within the remaining width.
 
 ## Composer shelf
 
+- Model choices reserve the first line for the model name. Protocol and image
+  capability share the second line; the capability badge and connection status
+  keep their width, while long names and endpoints truncate inside the menu.
 - A mode is this turn's capability, not a preference, which is why it lives on
   the composer and not in settings. A pill is its label's width or it is nothing:
   shrinking one squeezed the shelf's own controls, and Chinese wraps.

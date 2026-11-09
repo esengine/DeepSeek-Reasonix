@@ -16,7 +16,6 @@ export const WORKBENCH_ACTIONS: UIAction[] = [
   { id: "workbench.change-open", kind: "view", target: "none", proof: "interaction" },
   { id: "workbench.section-fold", kind: "view", target: "none", proof: "interaction" },
   { id: "workbench.changes-page", kind: "view", target: "none", proof: "interaction" },
-  { id: "workbench.launch-find", kind: "view", target: "none", proof: "interaction" },
   { id: "workbench.dismiss", kind: "view", target: "none", proof: "interaction" },
   { id: "workbench.launch-browser", kind: "view", target: "none", proof: "interaction" },
   { id: "workbench.launch-terminal", kind: "view", target: "none", proof: "interaction" },

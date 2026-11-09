@@ -40,7 +40,7 @@ it("keeps a terminal's screen mounted but not in front when another tab is chose
   const port = new MockPort();
   await openTerminalFromLauncher(port);
   fireEvent.click(document.querySelector('[data-action="workbench.new"]')!);
-  fireEvent.click(document.querySelector('[data-action="workbench.launch-find"]')!);
+  fireEvent.click(document.querySelector('[data-action="workbench.launch-files"]')!);
   expect((await screen.findByTestId("screen")).getAttribute("data-shown")).toBe("no");
 });
 
