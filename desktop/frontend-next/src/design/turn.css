@@ -15,7 +15,7 @@
   height: 26px; min-height: 26px; padding: 0 6px; margin: 0 -6px; gap: 7px; box-sizing: border-box; border-radius: var(--r-xs);
   background: transparent; color: var(--muted); font: var(--w-reg) var(--fs-ui)/1 var(--ui);
 }
-.activity-group[open] > summary { background: transparent; border-bottom: 0; }
+.activity-group[open] > summary { background: var(--surface); border-bottom: 0; }
 .activity-group > summary:hover { background: var(--overlay); color: var(--text); }
 .activity-group > summary .studio-icon { width: 12px; height: 12px; color: var(--faint); }
 .activity-group .activity-title { color: inherit; font: inherit; }

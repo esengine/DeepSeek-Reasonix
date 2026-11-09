@@ -17,4 +17,8 @@ describe("the turn follows the boards", () => {
     expect(rule(".rc[data-worked]")).toMatch(/justify-content:\s*flex-end/);
     expect(rule(".rc[data-worked] .rc-tick")).toMatch(/width:\s*14px/);
   });
+
+  it("paints a stuck, open activity heading in the conversation's own colour so rows scroll under it unseen", () => {
+    expect(rule(".activity-group[open] > summary")).toMatch(/background:\s*var\(--surface\)/);
+  });
 });
