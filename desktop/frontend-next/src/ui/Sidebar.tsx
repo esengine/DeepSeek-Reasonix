@@ -1,6 +1,6 @@
-import { GearMark } from "./GearMark";
+import { SidebarTools } from "./SidebarTools";
 import { FeedbackBadge, feedbackEntryTab } from "./feedbackentry";
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { t } from "../i18n";
 import logoWordmark from "../assets/logo-wordmark.svg";
 import type { ApprovalMode } from "../port/port";
@@ -8,16 +8,12 @@ import type { HubPort, RuntimeView, TreeSession, TreeWorkspace } from "../port/h
 import { workspaceContains } from "../port/hub";
 import type { RemoteHost } from "../port/remote";
 import type { Adder } from "./addws";
-import { TooltipButton } from "./TooltipButton";
-import { approvalName } from "./approvals";
 import { ContentMatches } from "./ContentMatches";
-import { useDestinations } from "./navdest";
-import { ICON, SECTION_NAME, SETTINGS, type Section } from "./prefsnav";
+import { SECTION_NAME, SETTINGS } from "./prefsnav";
 import { RailSearch } from "./railsearch";
 import { RemoteHosts, remoteProjectKey, remoteWorkspaces } from "./RemoteHosts";
 import { remoteProjects } from "./remoteProjects";
 import { StudioIcon } from "./StudioIcon";
-import { UpdateDot } from "./UpdateDot";
 import { UpdateNotice } from "./UpdateNotice";
 import { useHiddenHosts } from "../state/remotehide";
 import { useSidebarFolds } from "../state/sidebarFolds";
@@ -26,7 +22,6 @@ import { Palette, type Command } from "./Palette";
 import { Workspaces } from "./Workspaces";
 import { OpenProject } from "./OpenProject";
 import type { TreePaging, TreeView } from "./treewindow";
-import { MASK, useHidesAmounts } from "./wallet";
 import { useFileDrop } from "./filedrop";
 import type { PaneView } from "../state/paneview";
 import { RecentSessions } from "./RecentSessions";
@@ -93,18 +88,6 @@ interface Props {
  *  is signed in. It owns only what nothing outside it reads — which scope the
  *  session filter is on, whether the switcher is open, and which workspaces are
  *  folded. Everything else belongs to the window and arrives as a prop. */
-/** The foot's icon row is one toolbar: the arrow keys walk its buttons, Home and End jump to either end. */
-function moveAlongToolbar(event: ReactKeyboardEvent<HTMLDivElement>) {
-  const step = { ArrowRight: 1, ArrowLeft: -1, Home: -Infinity, End: Infinity }[event.key];
-  if (step === undefined) return;
-  const buttons = [...event.currentTarget.querySelectorAll<HTMLButtonElement>(":scope > button:not(:disabled)")];
-  const at = buttons.indexOf(document.activeElement as HTMLButtonElement);
-  if (at < 0) return;
-  event.preventDefault();
-  const to = step === Infinity ? buttons.length - 1 : step === -Infinity ? 0 : (at + step + buttons.length) % buttons.length;
-  buttons[to].focus();
-}
-
 export function Sidebar({
   hub,
   collapsed,
@@ -152,14 +135,14 @@ export function Sidebar({
   onError,
 }: Props) {
   const [railScope, setRailScope] = useState<SessionScope>("all");
-  const destinations = useDestinations();
+
   const [palette, setPalette] = useState(false);
   const [projectPicker, setProjectPicker] = useState(false);
   const [recent, setRecent] = useState(false);
   const [located, setLocated] = useState<{ target: string } | null>(null);
   const locatedOnce = useRef<typeof located>(null);
   const [folded, setFolded] = useSidebarFolds();
-  const hideAmounts = useHidesAmounts();
+
   const hiddenHosts = useHiddenHosts();
   // Hidden hosts stay manageable in settings but do not contribute project rows.
   const shownRemotes = useMemo(
@@ -398,37 +381,7 @@ export function Sidebar({
       </div>
       {!navShown && <div className="railfoot">
         <UpdateNotice onOpen={() => onSettings("versions")} />
-        <div className="studio-quicknav" role="toolbar" aria-label={t("session.sidebar_shortcuts")} onKeyDown={moveAlongToolbar}>
-          {destinations.map(([mark, label, section]) => {
-            const reading = mark === "usage" ? (wallet ? (hideAmounts ? MASK : wallet) : "")
-              : mark === "remote" && online > 0 ? t("common.n_online", { n: online })
-              : mark === "tools" && approval ? approvalName(approval) : "";
-            const name = reading ? `${t(label)} · ${reading}` : t(label);
-            const opensFiles = mark === "files";
-            return (
-              <TooltipButton
-                key={mark}
-                className={mark === "usage" ? "studio-wallet" : undefined}
-                data-action={opensFiles ? "files.open" : "settings.section"}
-                data-value={opensFiles ? undefined : section}
-                aria-label={name}
-                title={name}
-                onClick={() => (opensFiles ? onFiles() : onSettings(mark === "usage" ? "spend" : mark === "ext" ? "extensions" : section))}
-              >
-                {mark === "files" ? <StudioIcon name="file" aria-hidden="true" />
-                  : <svg viewBox="0 0 16 16" width={16} height={16} fill="none" stroke="currentColor" strokeWidth={1.45} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{ICON[mark as Section]}</svg>}
-                {mark === "remote" && online > 0 && <i className="qdot" data-tone="ok" aria-hidden="true" />}
-              </TooltipButton>
-            );
-          })}
-          <span className="qspace" aria-hidden="true" />
-          <TooltipButton className="studio-settings" data-action="chrome.settings" onClick={() => onSettings()} aria-label={t("common.settings")} title={t("common.settings")} shortcut={chord(",")}>
-            <svg viewBox="0 0 16 16" width={16} height={16} fill="none" stroke="currentColor" strokeWidth={1.45} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-              {GearMark}
-            </svg>
-            <UpdateDot />
-          </TooltipButton>
-        </div>
+        <SidebarTools wallet={wallet} approval={approval} online={online} onSettings={onSettings} onFiles={onFiles} />
         <button className="studio-feedback" data-action="feedback.open" onClick={() => onFeedback(feedbackEntryTab(feedbackUnread))}>
           <span aria-hidden="true"><StudioIcon name="feedback" /></span>
           <b>{t("common.send_feedback")}</b>

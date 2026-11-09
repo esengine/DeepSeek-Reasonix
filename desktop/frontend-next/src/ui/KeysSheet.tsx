@@ -29,7 +29,7 @@ const KEYS: Array<[string, string]> = [
 export function KeysSheet() {
   return (
     <Group
-      id="keys" pill={t("settings.view_and_edit")}
+      id="keys"
       title={t("settings.keyboard_shortcuts")}
       hint={t("settings.all_shortcuts_incl_global_and_esc")}
     >

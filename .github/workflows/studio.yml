@@ -158,9 +158,15 @@ jobs:
           node perf/codeeditor-size.mjs
           node perf/composer-reflow.mjs
           node perf/composer-toolbar-row.mjs
+          node perf/control-icons.mjs
+          node perf/nav-selection.mjs
           node perf/action-icons.mjs
           node perf/rowhit.mjs
           node perf/prefs-wide-centered.mjs
+          node perf/settings-fullscreen.mjs
+          node perf/settings-page-column.mjs
+          node perf/sidebar-tools.mjs
+          node perf/select-alignment.mjs
           node perf/tab-pip.mjs
           node perf/syntax-tokens.mjs
           node perf/tab-close-inside.mjs
@@ -217,6 +223,19 @@ jobs:
           node perf/i18n-rendered.mjs
           node perf/narrow-rail.mjs
           node perf/selfcheck.mjs branch-tooltip
+
+      - name: Keep UI control previews
+        if: always() && steps.spa.outputs.run == 'true'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: studio-ui-control-previews
+          path: |
+            desktop/frontend-next/perf/shots/control-icons-*.png
+            desktop/frontend-next/perf/shots/nav-selection-*.png
+            desktop/frontend-next/perf/shots/settings-full-*.png
+            desktop/frontend-next/perf/shots/sidebar-tools-*.png
+            desktop/frontend-next/perf/shots/select-alignment-*.png
+          retention-days: 7
 
   # What a hosted page does over the relay, end to end: the production bundle,
   # the real Studio host and kernel, a real Chromium; only the accounts API and

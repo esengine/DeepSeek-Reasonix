@@ -13,7 +13,7 @@ import { NavEntriesSection } from "./NavEntriesSection";
 const props = { at: null, onGo: vi.fn(), onFiles: vi.fn(), onHome: vi.fn(), onRail: vi.fn(), onFeedback: vi.fn(), onNew: vi.fn(), feedbackUnread: 0, shown: true };
 
 beforeEach(() => { localStorage.clear(); localStorage.setItem("rx-nav-rail", "on"); });
-afterEach(cleanup);
+afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
 const rail = () => [...document.querySelectorAll(".nav .navgrp:not(.foot) button")].map((b) => b.getAttribute("aria-label"));
 
@@ -79,6 +79,14 @@ function sidebar() {
 
 const shortcuts = () => [...document.querySelectorAll(".studio-quicknav > button:not(.studio-settings)")].map((b) => b.getAttribute("aria-label"));
 
+it("keeps a named Settings row when every optional shortcut is hidden", async () => {
+  render(<NavEntriesSection />);
+  sidebar();
+  for (const name of ["用量", "文件", "工具与权限", "扩展", "记忆", "远程"]) await userEvent.click(screen.getByRole("switch", { name: `显示：${name}` }));
+  expect(document.querySelector(".studio-settings")?.textContent).toContain("设置");
+  expect(screen.queryByRole("button", { name: "侧栏入口" })).toBeNull();
+});
+
 it("gives the sidebar the same order and the same hidden entries as the rail", async () => {
   render(<NavEntriesSection />);
   sidebar();
@@ -97,13 +105,18 @@ it("takes the wallet row out of the sidebar when Usage is hidden", async () => {
   expect(document.querySelector(".studio-wallet:not(.studio-feedback)")).toBeNull();
 });
 
-it("walks the foot's icon row with the arrow keys and names each entry with its reading", async () => {
+it("opens the named tools card with the keyboard and returns focus on Escape", async () => {
+  vi.spyOn(globalThis, "requestAnimationFrame").mockImplementation(() => 0);
   render(<NavEntriesSection />);
   sidebar();
-  const bar = screen.getByRole("toolbar", { name: "侧栏入口" });
+  const trigger = screen.getByRole("button", { name: "侧栏入口" });
+  trigger.focus();
+  await userEvent.keyboard("{ArrowDown}");
+  const bar = screen.getByRole("menu", { name: "侧栏入口" });
   const buttons = [...bar.querySelectorAll<HTMLButtonElement>(":scope > button")];
-  expect(buttons.at(-1)!.getAttribute("aria-label")).toBe("设置");
-  buttons[0].focus();
+  expect(buttons.at(-1)!.getAttribute("aria-label")).toBe("远程");
+  expect(buttons.map((button) => button.querySelector("span")?.textContent)).toEqual(["用量", "文件", "工具与权限", "扩展", "记忆", "远程"]);
+  expect(document.activeElement).toBe(buttons[0]);
   await userEvent.keyboard("{ArrowRight}");
   expect(document.activeElement).toBe(buttons[1]);
   await userEvent.keyboard("{ArrowLeft}{ArrowLeft}");
@@ -112,6 +125,13 @@ it("walks the foot's icon row with the arrow keys and names each entry with its 
   expect(document.activeElement).toBe(buttons[0]);
   await userEvent.keyboard("{End}");
   expect(document.activeElement).toBe(buttons.at(-1));
+  await userEvent.keyboard("{Escape}");
+  expect(screen.queryByRole("menu", { name: "侧栏入口" })).toBeNull();
+  expect(document.activeElement).toBe(trigger);
+  await userEvent.keyboard("{ArrowUp}");
+  expect(document.activeElement).toBe(buttons.at(-1));
+  await userEvent.keyboard("{Escape}");
+  expect(document.activeElement).toBe(trigger);
 });
 
 it("names the approval mode on the tools entry once the session reports one", () => {

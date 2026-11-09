@@ -5,19 +5,17 @@ import "./testkit";
 import { MockPort } from "../port/mock";
 import type { AgentPort } from "../port/port";
 import { SafetySettings } from "./SafetySettings";
-import { SettingDeepContext } from "./SettingDeep";
 
 afterEach(cleanup);
 
 function draw(mode: "ask" | "yolo" = "ask") {
-  const go = vi.fn();
   const onMode = vi.fn();
   render(
-    <SettingDeepContext.Provider value={{ pages: true, open: null, section: "权限与安全", go }}>
+    <>
       <SafetySettings port={new MockPort() as unknown as AgentPort} mode={mode} busy="" onMode={onMode} onChanged={() => {}} />
-    </SettingDeepContext.Provider>,
+    </>,
   );
-  return { go, onMode };
+  return { onMode };
 }
 
 it("is three cards, every block one row with its scope and when it takes effect", async () => {
@@ -29,15 +27,14 @@ it("is three cards, every block one row with its scope and when it takes effect"
   expect(document.querySelector('[data-setting="approval"] .apply')?.textContent).toContain("本机");
 });
 
-it("picks an approval mode from the row and opens pages from pills, counting rules and tools", async () => {
-  const { go, onMode } = draw();
+it("picks an approval mode while rules and tool controls stay expanded", async () => {
+  const { onMode } = draw();
   fireEvent.click(screen.getByRole("radio", { name: "自动批准" }));
   expect(onMode).toHaveBeenCalledWith("auto");
-  const rules = await screen.findByRole("button", { name: /^编辑规则（\d+ 条）$/ });
-  fireEvent.click(rules);
-  expect(go).toHaveBeenLastCalledWith("rules");
-  fireEvent.click(await screen.findByRole("button", { name: /^查看与调整（\d+）$/ }));
-  expect(go).toHaveBeenLastCalledWith("tool-list");
+  await waitFor(() => {
+    expect(document.querySelector('#set-rules [data-action="permissions.recipe"]')).toBeTruthy();
+    expect(document.querySelector('#set-tool-list button')).toBeTruthy();
+  });
 });
 
 it("says what the permissive mode does only while it is picked", () => {

@@ -1,4 +1,4 @@
-import { useContext, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { t } from "../i18n";
 import type { HubPort } from "../port/hub";
 import type { AgentPort } from "../port/port";
@@ -13,7 +13,6 @@ import { PlanApproval } from "./PlanApproval";
 import { ProgressWatch } from "./ProgressWatch";
 import { SectionCard } from "./SectionCard";
 import { SessionRef } from "./SessionRef";
-import { SettingDeep, SettingDeepContext } from "./SettingDeep";
 import { SubagentClaims } from "./SubagentClaims";
 import { TurnNarrationSetting } from "./TurnNarrationSetting";
 
@@ -21,6 +20,7 @@ interface Props {
   port: AgentPort;
   hub: Pick<HubPort, "tree">;
   persona: boolean;
+  onPersona: () => void;
   onChanged: () => void;
 }
 
@@ -37,8 +37,7 @@ function useAutomationCounts(port: AgentPort) {
   return counts;
 }
 
-export function AgentSettings({ port, hub, persona, onChanged }: Props) {
-  const deep = useContext(SettingDeepContext);
+export function AgentSettings({ port, hub, persona, onPersona, onChanged }: Props) {
   const counts = useAutomationCounts(port);
   const hooksHint = t("settings.hooks_hint") + (counts.hooks ? ` · ${t("settings.n_hooks", { n: counts.hooks })}` : "");
   const runsHint = t("settings.scheduled_runs_hint") + (counts.schedules
@@ -47,19 +46,17 @@ export function AgentSettings({ port, hub, persona, onChanged }: Props) {
   return (
     <>
       <SectionCard title={t("settings.persona_and_presets")}>
-        <div className="srow" data-setting="persona">
+        <div className="srow" id="set-persona" data-setting="persona">
           <div className="srow-meta">
             <span className="srow-name">{t("persona.system_persona")}</span>
             <span className="srow-desc">{t("settings.persona_hint")}</span>
             <ApplyNote id="persona" />
           </div>
           <div className="srow-ctl">
-            <button type="button" className="spill" data-action="settings.open-page" data-target="agent-presets" onClick={() => deep.go("agent-presets")}>{t("settings.edit_persona")}</button>
+            <button type="button" className="spill" data-action="settings.edit-persona" onClick={() => onPersona()}>{t("settings.edit_persona")}</button>
           </div>
         </div>
-        <SettingDeep id="agent-presets" title={t("persona.agent_presets")} hint={t("settings.presets_hint")} act={t("settings.manage_presets")}>
-          <AgentPresets port={port} focusPersona={persona} />
-        </SettingDeep>
+        <AgentPresets port={port} focusPersona={persona} />
       </SectionCard>
       <SectionCard title={t("settings.plans_and_questions")}>
         <PlanApproval port={port} />
@@ -73,10 +70,10 @@ export function AgentSettings({ port, hub, persona, onChanged }: Props) {
         <PeersSection port={port} hub={hub} />
       </SectionCard>
       <SectionCard title={t("settings.automation")}>
-        <Group id="hooks" title={t("settings.hooks")} hint={hooksHint} pill={t("settings.manage_storage")}>
+        <Group id="hooks" title={t("settings.hooks")} hint={hooksHint}>
           <Hooks port={port} onChanged={onChanged} />
         </Group>
-        <ScheduledRuns port={port} hint={runsHint} pill={t("settings.manage_storage")} />
+        <ScheduledRuns port={port} hint={runsHint} />
       </SectionCard>
     </>
   );

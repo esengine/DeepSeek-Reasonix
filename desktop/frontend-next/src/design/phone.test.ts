@@ -119,15 +119,13 @@ describe("the composer's tool row on a phone", () => {
     expect(rule(row + " > .turn-more")).toMatch(/display:\s*inline-grid/);
   });
 
-  it("makes send a 36px accent circle, and stop the same size with the pause mark", () => {
+  it("makes send a 36px accent circle, and stop the same size", () => {
     const both = rule('[data-fold~="phone"] .compose .go .btn.send, [data-fold~="phone"] .compose .go .btn.stop');
     expect(both).toMatch(/width:\s*36px/);
     expect(both).toMatch(/height:\s*36px/);
     expect(both).toMatch(/border-radius:\s*50%/);
-    expect(rule('\n[data-fold~="phone"] .compose .go .btn.send')).toMatch(/background:\s*var\(--accent\)/);
+    expect(rule('\n[data-fold~="phone"] .compose .go .btn.send:not(:disabled)')).toMatch(/background:\s*var\(--accent\)/);
     expect(rule('\n[data-fold~="phone"] .compose .go .btn.stop')).toMatch(/background:\s*var\(--overlay\)/);
-    expect(rule('[data-fold~="phone"] .compose .btn.stop .ic-stop')).toMatch(/display:\s*none/);
-    expect(rule(".btn.stop .ic-pause")).toMatch(/display:\s*none/);
   });
 
   it("drops the keyboard hints, which a touch screen has no keys for", () => {

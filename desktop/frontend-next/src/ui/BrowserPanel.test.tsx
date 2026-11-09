@@ -9,7 +9,8 @@ afterEach(cleanup);
 describe("BrowserPanel", () => {
   it("opens a typed address when Enter is pressed", async () => {
     const user = userEvent.setup();
-    render(<BrowserPanel id="b0" scheme="light" onAddress={vi.fn()} onExternal={vi.fn()} />);
+    const external = vi.fn();
+    render(<BrowserPanel id="b0" scheme="light" onAddress={vi.fn()} onExternal={external} />);
 
     const address = screen.getByRole("textbox", { name: "网页地址" });
     await user.clear(address);
@@ -17,6 +18,17 @@ describe("BrowserPanel", () => {
 
     expect((address as HTMLInputElement).value).toBe("https://example.com/docs");
     expect(screen.getByTitle("Reasonix 内置 Browser").getAttribute("src")).toBe("https://example.com/docs");
+    const toolbar = document.querySelector(".studio-browser-toolbar")!;
+    const outside = toolbar.querySelector<HTMLButtonElement>('[data-action="browser.external"]')!;
+    expect(outside.querySelector(".lucide-external-link")).not.toBeNull();
+    await user.click(outside);
+    expect(external).toHaveBeenCalledWith("https://example.com/docs");
+    const frame = screen.getByTitle("Reasonix 内置 Browser");
+    await user.click(toolbar.querySelector('[data-action="browser.reload"]')!);
+    expect(screen.getByTitle("Reasonix 内置 Browser")).not.toBe(frame);
+    await user.click(toolbar.querySelector('[data-action="browser.back"]')!);
+    expect((address as HTMLInputElement).value).toBe("reasonix://start");
+    expect(outside.disabled).toBe(true);
   });
 
   it("keeps invalid addresses in the field and explains the error", async () => {

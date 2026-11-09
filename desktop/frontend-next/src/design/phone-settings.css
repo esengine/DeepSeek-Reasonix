@@ -1,7 +1,6 @@
 [data-fold~="phone"] .prefs { inset: 0; padding: 0; }
 [data-fold~="phone"] .prefs-sheet { width: 100%; height: 100%; border: 0; border-radius: 0; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto auto auto minmax(0, 1fr); }
 [data-fold~="phone"] .prefs-sheet .prefs-hd h1 { grid-column: 1; grid-row: 1; padding: 14px 16px 8px; }
-[data-fold~="phone"] .prefs-sheet .prefs-actions { grid-column: 1; grid-row: 1; justify-self: end; align-self: center; padding: 8px 10px; }
 [data-fold~="phone"] .prefs-sheet .prefs-find { grid-column: 1; grid-row: 2; width: calc(100% - 24px); margin: 0 12px 8px; }
 [data-fold~="phone"] .prefs-sheet > .prefs-hd > .prefs-find { grid-column: 1; grid-row: 2; width: calc(100% - 24px); margin: 0 12px 8px; }
 [data-fold~="phone"] .prefs-sheet .prefs-nav { grid-column: 1; grid-row: 3; display: flex; flex-direction: row; gap: 4px; padding: 4px 28px 8px 10px; mask-image: linear-gradient(90deg, #000 calc(100% - 28px), transparent); overflow-x: auto; overflow-y: hidden; border-right: 0; border-bottom: 1px solid var(--hair); scrollbar-width: none; }
@@ -9,6 +8,7 @@
 [data-fold~="phone"] .prefs-sheet .prefs-nav :is(.navsec, .nv) { display: none; }
 [data-fold~="phone"] .prefs-sheet .prefs-nav button { flex: none; min-height: 32px; padding: 6px 10px; }
 [data-fold~="phone"] .prefs-sheet .prefs-main { grid-column: 1; grid-row: 4; padding: 16px 14px 48px; }
+[data-fold~="phone"] .prefs-sheet .prefs-main > .page-index { top: -16px; }
 [data-fold~="phone"] .prefs-sheet[data-solo] .prefs-main { grid-column: 1; grid-row: 2 / -1; }
 [data-fold~="phone"] .prefs-sheet .prefs-main .prefs-pagetitle { display: grid; gap: 6px; padding-right: 0; }
 [data-fold~="phone"] .prefs-sheet .prefs-main .prefs-pagetitle > * { max-width: none; width: auto; }

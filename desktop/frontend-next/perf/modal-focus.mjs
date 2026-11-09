@@ -38,8 +38,8 @@ for (const scheme of ["light", "dark"]) {
   await page.evaluate(() => [...document.querySelectorAll("button")].find((x) => /备份原文件并修复/.test(x.textContent))?.click());
   await page.waitForTimeout(300);
   await page.evaluate(() => document.activeElement?.blur());
-  const settingsOut = await outside(".prefs-sheet", 60);
-  check(`${scheme}: Tab never leaves the settings sheet`, settingsOut.length === 0, settingsOut.slice(0, 3).join("; "));
+  const settingsOut = await outside(".prefs-screen", 60);
+  check(`${scheme}: Tab never leaves the full-screen settings surface`, settingsOut.length === 0, settingsOut.slice(0, 3).join("; "));
   await page.keyboard.press("Escape");
   await page.waitForTimeout(400);
 

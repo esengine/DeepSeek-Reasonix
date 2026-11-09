@@ -253,11 +253,9 @@ export const MODELS: Messages = {
   "models.with_no_level_picked_the": { zh: "未选档位时按继承处理。", en: "With no level picked, the model inherits." },
   "models.you_can_write_proxy_password": { zh: "可填写 ${PROXY_PASSWORD}", en: "You can write ${PROXY_PASSWORD}" },
   "models.check_while_the_list_opens": { zh: "打开模型列表时顺便检查连接和余额，不发送生成请求", en: "Check connections and balances when the model list opens; no generation request is sent" },
-  "models.services_connected_n": { zh: "已接入 {n} 个服务；地址、密钥、模型列表在这里改", en: "{n} services connected; change addresses, keys and model lists here" },
-  "models.manage_services": { zh: "管理服务", en: "Manage services" },
+
   "models.services": { zh: "服务", en: "Services" },
   "models.uses_and_context": { zh: "用途与上下文", en: "Uses and context" },
   "models.which_model_for_each_use": { zh: "对话、规划、子代理、看图分别用哪个模型", en: "Which model chat, planning, subagents and image reading each use" },
-  "models.set_by_use": { zh: "按用途设置", en: "Set by use" },
-  "models.compacts_from_this_share": { zh: "上下文到多少开始压缩；默认窗口的 {p}%", en: "How full the context gets before it compacts; {p}% of the window by default" },
+
 };

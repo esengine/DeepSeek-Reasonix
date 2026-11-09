@@ -5,8 +5,9 @@ import userEvent from "@testing-library/user-event";
 import "./testkit";
 import { Versions } from "./Versions";
 import { HttpError, type UpdateProgress, type VersionHub, type VersionNotes } from "../port/port";
+import { boot, STORAGE } from "../i18n";
 
-afterEach(cleanup);
+afterEach(() => { cleanup(); localStorage.setItem(STORAGE, "zh"); boot(); });
 
 const row = (version: string, hasNotes: boolean, current = false, older = false) => ({
   version,
@@ -183,17 +184,25 @@ describe("version notes on the version panel", () => {
 describe("notes that carry two languages", () => {
   const both = "## 新增\n\n- 中文条目\n\n---\n\n<!-- lang:en -->\n\n## New\n\n- English item\n";
 
-  it("show the window's language first and switch to the other on request", async () => {
+  it.each(["zh", "en"])("names both languages and switches notes in a %s window", async (language) => {
+    localStorage.setItem(STORAGE, language);
+    boot();
     render(<Versions port={portWith(doc("2.21.0", both))} />);
     await screen.findByText("2.19.0");
-    await userEvent.click(screen.getAllByRole("button", { name: "更新内容" })[0]);
-    expect(await screen.findByText("中文条目")).toBeTruthy();
-    expect(screen.queryByText("English item")).toBeNull();
+    await userEvent.click(document.querySelector('[data-action="versions.notes"]')!);
+    expect(await screen.findByText(language === "en" ? "English item" : "中文条目")).toBeTruthy();
+    const chinese = screen.getByRole("button", { name: "简体中文" });
+    expect(chinese.getAttribute("aria-pressed")).toBe(String(language === "zh"));
+    expect(screen.queryByText("settings.text")).toBeNull();
     expect(screen.queryByText(/lang:en/)).toBeNull();
     await userEvent.click(screen.getByRole("button", { name: "English" }));
     expect(await screen.findByText("English item")).toBeTruthy();
     expect(screen.queryByText("中文条目")).toBeNull();
     expect(screen.getByRole("button", { name: "English" }).getAttribute("aria-pressed")).toBe("true");
+    await userEvent.click(chinese);
+    expect(await screen.findByText("中文条目")).toBeTruthy();
+    expect(screen.queryByText("English item")).toBeNull();
+    expect(chinese.getAttribute("aria-pressed")).toBe("true");
   });
 
   it("show no switch for notes in one language", async () => {

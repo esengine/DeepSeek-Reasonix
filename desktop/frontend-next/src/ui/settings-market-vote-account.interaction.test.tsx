@@ -75,7 +75,7 @@ async function fixture(strict: boolean, initial: AccountState, target: AccountSt
   render(strict ? <StrictMode>{form}</StrictMode> : form);
   const user = userEvent.setup();
   const requests = (path: string, method?: string) => fetcher.mock.calls.filter(([url, init]) => url === path && (!method || init?.method === method));
-  await user.click(document.querySelector<HTMLButtonElement>('[data-action="settings.open-page"][data-target="account"]')!);
+  await user.click(document.querySelector<HTMLButtonElement>('[data-action="settings.page-index"][data-target="account"]')!);
   if (!initial.signedIn) {
     await user.click(screen.getByRole("button", { name: "登录" }));
     await waitFor(() => expect(requests("/kernel/account/poll")).toHaveLength(1), { timeout: 2500 });

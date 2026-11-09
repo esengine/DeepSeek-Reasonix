@@ -25,14 +25,18 @@ try {
   }
   await page.locator(".prefs-nav button", { hasText: /^操作与性能/ }).first().click();
   await page.waitForTimeout(400);
-  await page.getByRole("button", { name: "调整导航" }).click();
+  const keys = await page.locator('#set-keys').elementHandle();
+  await page.locator('[data-action="settings.page-index"][data-target="naventries"]').click();
   await page.waitForTimeout(600);
-  const shown = await page.evaluate(() => {
-    const card = document.querySelector(".prefs-col .deep-page").closest(".prefs-card");
-    return [...card.children].filter((c) => !c.classList.contains("deep-page") && getComputedStyle(c).display !== "none").length;
+  assert.ok(await keys.evaluate((node) => node.isConnected), "locating a region preserves sibling editors");
+  const placement = await page.locator('#set-naventries').evaluate((node) => {
+    const panel = node.closest('.prefs-main');
+    const index = panel.querySelector('.page-index').getBoundingClientRect();
+    return { top: node.getBoundingClientRect().top, index: index.bottom, bottom: panel.getBoundingClientRect().bottom };
   });
-  assert.equal(shown, 0, "an open sub-page shows nothing of the page it was opened from");
-  console.log("PASS sub-page: nothing of the parent page remains above it");
+  assert.ok(placement.top >= placement.index && placement.top < placement.bottom, `located region clears the pill index: ${JSON.stringify(placement)}`);
+  assert.equal(await page.locator('.deep-page').count(), 0);
+  console.log("PASS locating a region scrolls without replacing any editors");
   assert.deepEqual(errors, []);
 } finally {
   await browser.close();

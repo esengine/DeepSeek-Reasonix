@@ -56,7 +56,8 @@ describe("feedback and settings with no pane open", () => {
   it("opens settings in the app's own workspace when there is no folder", async () => {
     const { hub, opened } = paneless({ folders: false });
     render(<App hub={hub} />);
-    await userEvent.click(await screen.findByRole("button", { name: /扩展/ }));
+    await userEvent.click(await screen.findByRole("button", { name: "侧栏入口" }));
+    await userEvent.click(await screen.findByRole("menuitem", { name: /扩展/ }));
     await waitFor(() => expect(opened).toEqual([undefined]));
     expect(document.querySelector(".errbar")).toBeNull();
   });

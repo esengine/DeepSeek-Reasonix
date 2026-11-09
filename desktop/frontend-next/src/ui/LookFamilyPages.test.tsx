@@ -1,31 +1,29 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { afterEach, expect, it, vi } from "vitest";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { afterEach, expect, it } from "vitest";
 import "./testkit";
 import { MockPort } from "../port/mock";
 import type { AgentPort } from "../port/port";
 import { Appearance } from "./Appearance";
 import { ChatDisplaySettings } from "./ChatDisplaySettings";
 import { OpsSettings } from "./OpsSettings";
-import { SettingDeepContext } from "./SettingDeep";
 
 afterEach(cleanup);
 
-const frame = (node: React.ReactNode, go = vi.fn()) =>
-  render(<SettingDeepContext.Provider value={{ pages: true, open: null, section: "x", go }}>{node}</SettingDeepContext.Provider>);
+const frame = (node: React.ReactNode) =>
+  render(<>{node}</>);
 const titles = () => [...document.querySelectorAll(".prefs-card > header h3")].map((h) => h.textContent);
 const has = (id: string) => !!document.querySelector(`[data-setting="${id}"]`);
 
-it("appearance is theme, text and window cards: pills for what is an editor, rows for what is a value", async () => {
-  const go = vi.fn();
+it("expands appearance editors in theme, text and window cards", async () => {
   const port = new MockPort() as unknown as AgentPort;
   frame(<Appearance port={port} theme="auto" onTheme={() => {}} contrast="" onContrast={() => {}} weight="" onWeight={() => {}}
-    reloadThemes={() => {}} look={{}} onLook={() => {}} />, go);
+    reloadThemes={() => {}} look={{}} onLook={() => {}} />);
   expect(titles().slice(0, 3)).toEqual(["主题", "文字", "窗口"]);
   for (const id of ["mode", "scheme", "wallpaper", "effects", "font", "size", "weight", "contrast", "window"]) await waitFor(() => expect(has(id), id).toBe(true));
   expect(has("advanced-appearance")).toBe(false);
-  fireEvent.click(screen.getByRole("button", { name: "选择壁纸" }));
-  expect(go).toHaveBeenLastCalledWith("wallpaper");
+  expect(screen.getByRole("combobox", { name: "界面" })).toBeTruthy();
+  expect(screen.getByRole("slider", { name: "界面大小微调" })).toBeTruthy();
 });
 
 it("conversation display is process, files and previews, and notices", async () => {

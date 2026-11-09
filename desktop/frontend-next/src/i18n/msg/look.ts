@@ -2,7 +2,7 @@ import type { Messages } from "./types";
 
 export const LOOK: Messages = {
   "look.a_few_of_name_s": { zh: "{name} 有几项没生效", en: "A few of {name}'s entries did not take" },
-  "look.advanced_look": { zh: "高级外观", en: "Advanced appearance" },
+
   "look.at_the_current_window_size": { zh: "当前窗口尺寸下，此壁纸只有上下会被裁剪，左右正好填满，因此横向焦点无法调整。", en: "At the current window size this wallpaper is cropped only top and bottom and fills the width exactly, so the horizontal focus cannot be moved." },
   "look.at_the_current_window_size_2": { zh: "当前窗口尺寸下，此壁纸只有左右会被裁剪，上下正好填满，因此纵向焦点无法调整。", en: "At the current window size this wallpaper is cropped only left and right and fills the height exactly, so the vertical focus cannot be moved." },
   "look.back_to_the_default_typeface": { zh: "恢复默认字体", en: "Back to the default typeface" },
@@ -41,7 +41,7 @@ export const LOOK: Messages = {
   "look.if_the_window_keeps_your": { zh: "窗口一直占用显卡、或界面花屏时，先试「视觉效果：节能」，不行再改为「仅软件渲染」：改用 CPU 绘制，显卡不再参与。设置保存后，需退出并重新打开 Studio 才会生效。", en: "If the window keeps your GPU busy or draws garbage, try Visual effects: Reduced first; if that is not enough, choose Software only: the CPU draws the window and the GPU stays out of it. The choice is saved now and applies after you quit and reopen Studio." },
   "look.illustrated_and_background_themes_you": { zh: "插画与背景主题，可随时切回基础主题", en: "Illustrated and background themes; you can return to a foundation theme at any time" },
   "look.import_theme": { zh: "导入主题…", en: "Import theme…" },
-  "look.import_themes_custom_colours": { zh: "导入主题、自定义颜色", en: "Import themes, custom colours" },
+
   "look.import_wallpaper_engine": { zh: "导入 Wallpaper Engine…", en: "Import Wallpaper Engine…" },
   "look.imported_name": { zh: "已导入「{name}」。", en: "Imported “{name}”." },
   "look.in_effect_now": { zh: "立即生效", en: "In effect now" },

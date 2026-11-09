@@ -12,7 +12,7 @@ export function UsageSettings({ port, onChanged }: { port: AgentPort; onChanged:
   const [rev, setRev] = useState(0);
   return (
     <>
-      <Group id="usage" pill={t("settings.view_usage")}
+      <Group id="usage"
         title={t("usage.usage_cost")}
         hint={t("settings.usage_hint")}
       >

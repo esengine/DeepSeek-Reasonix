@@ -31,13 +31,11 @@ it("keeps machine reads separate from active-pane account operations", async () 
   render(<App hub={hub} />);
   await userEvent.click(await screen.findByRole("button", { name: "设置" }));
   await userEvent.click(await screen.findByRole("tab", { name: /^数据/ }, { timeout: 10000 }));
-  await userEvent.click(await screen.findByRole("button", { name: /^打开记忆/ }));
   await screen.findAllByText("This machine fact");
   expect(remoteMemories).not.toHaveBeenCalled();
   expect(localAccount).not.toHaveBeenCalled();
   expect(remoteAccount).toHaveBeenCalled();
   await userEvent.click(screen.getByRole("tab", { name: /账号/ }));
-  await userEvent.click(await screen.findByRole("button", { name: "账号信息" }));
   await screen.findAllByText("Remote account");
   await userEvent.click(screen.getByRole("button", { name: "退出登录" }));
   await userEvent.click(screen.getByRole("button", { name: /确认退出/ }));
@@ -74,15 +72,14 @@ it.each(["second", "remote"])("uses the active local workspace, or first local f
   render(<App hub={hub} />);
   await userEvent.click(await screen.findByRole("button", { name: "设置" }));
   await userEvent.click(await screen.findByRole("tab", { name: /^数据/ }));
-  await userEvent.click(await screen.findByRole("button", { name: /^打开记忆/ }));
   await screen.findAllByText(`${expected} fact`);
   await userEvent.click(document.querySelector<HTMLButtonElement>('.memdetail [data-action="memory.forget"]')!);
   expect(forgot).toHaveBeenCalledWith(expected);
   await userEvent.click(screen.getByRole("tab", { name: /^模型/ }));
-  await userEvent.click(await waitFor(() => document.querySelector<HTMLButtonElement>('[data-action="settings.open-page"][data-target="model"]')!));
+  await userEvent.click(await waitFor(() => document.querySelector<HTMLButtonElement>('[data-action="settings.page-index"][data-target="model"]')!));
   await waitFor(() => expect((screen.getByRole("combobox", { name: "默认模型" }) as HTMLSelectElement).value).toBe(expected));
   await userEvent.click(screen.getByRole("tab", { name: /^数据/ }));
-  await userEvent.click(await waitFor(() => document.querySelector<HTMLButtonElement>('[data-action="settings.open-page"][data-target="storage"]')!));
+  await userEvent.click(await waitFor(() => document.querySelector<HTMLButtonElement>('[data-action="settings.page-index"][data-target="storage"]')!));
   await userEvent.click(await screen.findByRole("button", { name: "选择旧版数据目录…" }));
   expect(imported).toHaveBeenCalledWith("/legacy-fixture", `/${expected}`);
   expect(storage).toHaveBeenCalled();
@@ -92,7 +89,6 @@ it.each(["second", "remote"])("uses the active local workspace, or first local f
     await userEvent.click(tabs[0]);
     await userEvent.click(screen.getByRole("button", { name: "设置" }));
     await userEvent.click(await screen.findByRole("tab", { name: /^数据/ }));
-    await userEvent.click(await screen.findByRole("button", { name: /^打开记忆/ }));
     await screen.findAllByText("first fact");
     expect(screen.queryByText("second fact")).toBeNull();
   }
@@ -126,7 +122,7 @@ it("saves a second-local-only default through the owner that offered it", async 
   render(<App hub={hub} />);
   await userEvent.click(await screen.findByRole("button", { name: "设置" }));
   await userEvent.click(await screen.findByRole("tab", { name: /^模型/ }));
-  await userEvent.click(await waitFor(() => document.querySelector<HTMLButtonElement>('[data-action="settings.open-page"][data-target="model"]')!));
+  await userEvent.click(await waitFor(() => document.querySelector<HTMLButtonElement>('[data-action="settings.page-index"][data-target="model"]')!));
   const select = await screen.findByRole("combobox", { name: "默认模型" }) as HTMLSelectElement;
   await userEvent.selectOptions(select, extension);
   await waitFor(() => expect(localWrite).toHaveBeenCalledWith(extension));

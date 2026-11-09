@@ -108,8 +108,8 @@ body { background: var(--page); }
 .navgrp { gap: 3px; }
 .navbtn { width: 36px; height: 36px; border-radius: var(--r-sm); }
 .navbtn:hover { background: var(--overlay); box-shadow: none; }
-.navbtn[aria-current] { color: var(--text); background: var(--overlay); }
-.navbtn[aria-current]::before { left: -5px; top: 10px; bottom: 10px; background: var(--text); }
+.navbtn[aria-current] { color: var(--accent-ink); background: var(--accent-wash); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 18%, var(--border)); }
+.navbtn[aria-current]::before { left: -5px; top: 10px; bottom: 10px; background: var(--accent-ink); }
 .navhint { left: calc(100% + 8px); }
 .rail {
   background: color-mix(in srgb, var(--page) 94%, var(--surface));
@@ -1117,7 +1117,7 @@ body { background: var(--page) !important; }
   border: 0; border-radius: var(--r-sm); background: transparent; color: var(--faint); cursor: pointer;
 }
 .studio-browser-toolbar > button:hover:not(:disabled) { color: var(--text); background: var(--float); }
-.studio-browser-toolbar svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 1.35; stroke-linecap: round; stroke-linejoin: round; }
+.studio-browser-toolbar svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 .studio-browser-toolbar {
   min-height: 46px; flex: none; display: flex; align-items: center; gap: 4px; padding: 8px 9px;
   border-bottom: 1px solid var(--hair); background: var(--surface);
@@ -3542,8 +3542,6 @@ button, input, textarea { font-size: var(--fs-ui); }
 
 :root[data-pack] .chrome-context-card section > button { color: var(--link); }
 :root[data-pack] .studio-brand-accent { color: var(--brand); }
-:root[data-pack] .navbtn[aria-current],
-:root[data-pack] .navbtn[aria-current]::before { background: var(--accent); }
 :root[data-pack] .btn.send:not(:disabled) { background: var(--accent); color: var(--accent-fg); }
 :root[data-pack] .studio-effort-menu .studio-effort-strength i[data-on] { background: var(--accent); }
 :root[data-pack] .compose:hover::after,

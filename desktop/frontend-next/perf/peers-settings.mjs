@@ -40,12 +40,12 @@ for (const scheme of ["light", "dark"]) {
     await page.waitForSelector('[data-action="settings.section"][data-value="tools"]');
     await section("session");
     await page.waitForTimeout(300);
-    check(`${tag}: session messages have a settings entry of their own`, (await page.locator('[data-action="settings.open-page"][data-target="peers"]').count()) === 1);
+    check(`${tag}: session messages have a settings entry of their own`, (await page.locator('[data-action="settings.page-index"][data-target="peers"]').count()) === 1);
     await section("tools");
     await page.waitForTimeout(300);
     check(`${tag}: and no longer sit at the foot of tools and permissions`, (await page.locator('[role="switch"][aria-label="启用会话间消息"]').count()) === 0);
     await section("session");
-    await page.locator('[data-action="settings.open-page"][data-target="peers"]').click();
+    await page.locator('[data-action="settings.page-index"][data-target="peers"]').click();
     await page.waitForSelector('[role="switch"][aria-label="启用会话间消息"]', { timeout: 8000 });
     const s = await page.evaluate(() => {
       const sw = (n) => document.querySelector(`[role="switch"][aria-label="${n}"]`);

@@ -577,7 +577,6 @@ export const ACTIONS: UIAction[] = [
   { id: "tray.icon", kind: "kernel-mutation", target: "none", proof: "authority-effect" },
   { id: "tray.close-to-tray", kind: "kernel-mutation", target: "none", proof: "authority-effect" },
   { id: "notify.enabled", kind: "kernel-mutation", target: "none", proof: "authority-effect" },
-  { id: "notify.more", kind: "view", target: "none", proof: "interaction" },
   { id: "notify.turn-done", kind: "kernel-mutation", target: "none", proof: "authority-effect" },
   { id: "notify.approval", kind: "kernel-mutation", target: "none", proof: "authority-effect" },
   { id: "notify.ask", kind: "kernel-mutation", target: "none", proof: "authority-effect" },
@@ -651,8 +650,8 @@ export const ACTIONS: UIAction[] = [
   { id: "appearance.effects", kind: "view", target: "none", proof: "browser" },
   { id: "pane.close", kind: "destructive", target: "none", proof: "authority-effect" },
   { id: "settings.section", kind: "navigation", target: "none", proof: "interaction" },
-  { id: "settings.open-page", kind: "navigation", target: "entity", proof: "interaction" },
-  { id: "settings.close-page", kind: "navigation", target: "none", proof: "interaction" },
+  { id: "settings.edit-persona", kind: "navigation", target: "none", proof: "interaction" },
+  { id: "sidebar.tools", kind: "view", target: "none", proof: "interaction" },
   { id: "settings.page", kind: "navigation", target: "none", proof: "interaction" },
   // Finding a setting changes what is on screen and nothing else: it reaches
   // no kernel state, and the jump it offers is settings.section, because

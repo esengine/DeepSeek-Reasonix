@@ -1,6 +1,7 @@
 import type { Messages } from "./types";
 
 export const SETTINGS: Messages = {
+  "settings.back_to_workspace": { zh: "返回工作区", en: "Back to workspace" },
   "settings.a_system_notification_when_a": { zh: "一轮结束、等你处理时，系统通知提醒你", en: "A system notification when a turn ends or something waits for you" },
   "settings.account": { zh: "账号", en: "Account" },
   "settings.account_and_about": { zh: "账号与关于", en: "Account and About" },
@@ -38,7 +39,7 @@ export const SETTINGS: Messages = {
   "settings.data": { zh: "数据", en: "Data" },
   "settings.default_0_nothing_is_folded": { zh: "默认 0：不自动收起，打开的会话都保留。设成一个数字后，打开的会话超过它时，会收起最久没动的空闲会话；对话仍在列表里，随时可以重新打开。保留得越多，占用的内存越多。", en: "Default 0: nothing is folded away and every open session stays. Set a number and, once more sessions than that are open, the idle one untouched longest is folded away; its conversation stays in the list and can be opened again. The more you keep, the more memory it uses." },
   "settings.detailed": { zh: "详细", en: "Detailed" },
-  "settings.details": { zh: "细项", en: "Details" },
+
   "settings.door_does_not_offer_model": { zh: "{door} 不提供 {model}，请在下方选择该来源支持的模型。", en: "{door} does not offer {model}. Choose one it does provide below." },
   "settings.drafts_a_plan_read_only": { zh: "仅生成计划，不写入", en: "Drafts a plan, read-only" },
   "settings.empty_is_automatic_1_to": { zh: "留空表示自动；可填 1 到 {max}", en: "Empty is automatic; 1 to {max}" },
@@ -181,7 +182,7 @@ export const SETTINGS: Messages = {
   "settings.tool_approvals": { zh: "工具批准", en: "Tool approvals" },
   "settings.type_this_code_into_the": { zh: "在浏览器里打开的页面输入这串代码。没自动打开就手动访问 {uri}", en: "Type this code into the page your browser opened. If none opened, go to {uri}" },
   "settings.use_send_now_in_the": { zh: "可在待发送队列中选择“立即发送”来停止当前回复并开始新一轮。暂停、编辑和取回仍然可用。", en: "Use Send now in the queue to stop the current response and start a new turn. Hold, edit, and take back remain available." },
-  "settings.where_you_are": { zh: "当前位置", en: "Where you are" },
+
   "settings.changes_apply_from_the_next_turn": { zh: "启用、停用、安装或更新后，从下一轮开始生效；正在跑的这一轮不受影响。改了扩展自己的代码，用「重载运行时」重新读取。", en: "Enabling, disabling, installing or updating takes effect from the next turn; the one running is unaffected. After editing an extension's own code, use Reload runtime to read it again." },
   "settings.used_for_posting_to_the": { zh: "用于社区发帖与崩溃问题跟进。与模型 API key 无关 —— 登录不会上传你的对话、代码或密钥。", en: "Used for posting to the community and following up crashes. Unrelated to your model API keys — signing in uploads none of your conversations, code or secrets." },
   "settings.warns_when_the_drive_holding": { zh: "项目或会话所在的磁盘剩余空间很少时提醒（不足 5 GB 或不足 3%），同一块盘长时间不重复提醒；只提醒，不会清理任何文件", en: "Warns when the drive holding your project or sessions runs short (under 5 GB or 3%), and does not repeat for the same drive for hours. It only warns; it never deletes anything." },
@@ -208,41 +209,40 @@ export const SETTINGS: Messages = {
   "settings.token_unit": { zh: "令牌", en: "tokens" },
   "settings.edit_persona": { zh: "编辑人设", en: "Edit persona" },
   "settings.persona_hint": { zh: "写在每个会话开头的身份说明", en: "The identity note written at the start of every session" },
-  "settings.presets_hint": { zh: "工具、模型、提示词的组合；新任务默认用哪个", en: "A bundle of tools, model and prompt; which one new tasks start with" },
+
   "settings.sessions_send_each_other": { zh: "让一个会话给另一个会话发消息（实验）", en: "Let one session send another a message (experimental)" },
   "settings.persona_and_presets": { zh: "人设与预设", en: "Persona and presets" },
-  "settings.manage_presets": { zh: "管理预设", en: "Manage presets" },
+
   "settings.which_currency_costs_show": { zh: "费用用什么币种显示", en: "Which currency costs are shown in" },
   "settings.days_before_archiving": { zh: "多少天没动的会话自动归档", en: "How many idle days before a conversation is archived" },
   "settings.migrated_sessions_in_the_sidebar": { zh: "旧版迁移过来的会话是否出现在侧栏", en: "Whether sessions migrated from 1.x show in the sidebar" },
   "settings.where_session_records_go": { zh: "会话记录写到哪里", en: "Where session records are written" },
-  "settings.open_memory": { zh: "打开记忆", en: "Open memory" },
+
   "settings.what_it_remembers": { zh: "它记住的东西：星系、遗忘、整理", en: "What it remembers: constellations, forgetting, tidying" },
-  "settings.view_usage": { zh: "查看用量", en: "View usage" },
+
   "settings.usage_hint": { zh: "输入、输出、费用，按天和按模型看", en: "Input, output and cost, by day and by model" },
-  "settings.manage_storage": { zh: "管理", en: "Manage" },
+
   "settings.storage_hint": { zh: "会话、索引、缓存占了多少空间", en: "How much space sessions, indexes and caches take" },
-  "settings.export_and_import": { zh: "导出与导入…", en: "Export and import…" },
+
   "settings.config_in_one_file": { zh: "把模型、扩展、记忆等配置加密导出成一个文件", en: "Export models, extensions and memory to one encrypted file" },
   "settings.back_up_to_the_cloud": { zh: "登录后把配置备份到云端", en: "Back up your configuration to the cloud once signed in" },
   "settings.size_of_requests_sent": { zh: "发给模型服务商的请求有多大", en: "How large the requests sent to model providers are" },
   "settings.other_machines": { zh: "其他机器", en: "Other machines" },
   "settings.network_hint": { zh: "代理和网络诊断", en: "Proxy and network diagnostics" },
   "settings.remote_hint": { zh: "连接其他机器上的 Reasonix", en: "Connect to Reasonix on other machines" },
-  "settings.remote_machines": { zh: "远程机器", en: "Remote machines" },
+
   "settings.phone_hint": { zh: "用手机访问这台电脑上的会话，含通知设置", en: "Reach this computer's sessions from a phone, with notification settings" },
-  "settings.set_up_phone_access": { zh: "设置手机访问", en: "Set up phone access" },
+
   "settings.account_hint": { zh: "社区发帖、崩溃跟进时用；与模型密钥无关", en: "Used for community posts and crash follow-up; unrelated to model keys" },
-  "settings.sign_in": { zh: "登录", en: "Sign in" },
-  "settings.account_info": { zh: "账号信息", en: "Account" },
+
   "settings.version_and_diagnostics": { zh: "版本与诊断", en: "Version and diagnostics" },
   "settings.versions_hint": { zh: "当前版本、可用更新、回退", en: "Current version, available updates, rolling back" },
-  "settings.versions_and_updates": { zh: "版本与更新", en: "Versions and updates" },
+
   "settings.logs_hint": { zh: "出问题时附上的日志位置", en: "Where the logs to attach when something goes wrong are" },
   "settings.trace_hint": { zh: "把执行轨迹导出给开发者排查", en: "Export execution traces for a developer to look into" },
   "settings.about_note": { zh: "社区与贡献者、赞助在这里展示，不是开关。", en: "The community, contributors and sponsorship are shown here; they are not switches." },
   "settings.look_at": { zh: "查看", en: "View" },
-  "settings.set_up_trace": { zh: "导出轨迹", en: "Export traces" },
+
   "settings.about": { zh: "关于", en: "About" },
   "settings.preview_office_in_workbench": { zh: "在工作台里预览 Word、Excel、PPT", en: "Preview Word, Excel and PowerPoint in the workbench" },
   "settings.divider_before_new_answer": { zh: "回到会话时，在新回答前画一条分隔线", en: "A divider before the new answer when you return to a session" },
@@ -251,28 +251,22 @@ export const SETTINGS: Messages = {
   "settings.how_long_before_a_page_sleeps": { zh: "网页在后台闲置多久后休眠", en: "How long a background page idles before it sleeps" },
   "settings.hint_text_in_the_composer": { zh: "输入框里的提示文字", en: "The hint text inside the composer" },
   "settings.buttons_shown_on_row_hover": { zh: "会话行悬停时显示的按钮", en: "Buttons shown when you hover a session row" },
-  "settings.which_entries_the_left_rail_shows": { zh: "左侧导航显示哪些入口、什么顺序", en: "Which entries the left rail shows, and in what order" },
+  "settings.which_entries_the_left_rail_shows": { zh: "选择图标栏与侧栏工具卡片显示的入口和顺序", en: "Choose the entries and order for the icon rail and sidebar tools card" },
   "settings.finished_sessions_stay_in_running": { zh: "会话结束后在进行中列表里再留多久", en: "How long a finished session stays in the running list" },
   "settings.theme_card": { zh: "主题", en: "Theme" },
   "settings.text_card": { zh: "文字", en: "Text" },
-  "settings.accent_and_overall_tone": { zh: "强调色和整体色调", en: "Accent colour and overall tone" },
-  "settings.chat_background_image_or_video": { zh: "对话背景图片或视频", en: "The conversation's background image or video" },
-  "settings.choose_wallpaper": { zh: "选择壁纸", en: "Choose wallpaper" },
+
   "settings.frosted_glass_glow_effects": { zh: "毛玻璃、光晕等视觉效果", en: "Frosted glass, glow and other effects" },
-  "settings.interface_and_code_typeface": { zh: "界面和代码字体", en: "Interface and code typefaces" },
-  "settings.change": { zh: "更换", en: "Change" },
-  "settings.overall_text_size": { zh: "整体文字大小", en: "Overall text size" },
-  "settings.adjust": { zh: "调整", en: "Adjust" },
+
   "settings.weight_of_text": { zh: "文字粗细", en: "Weight of text" },
   "settings.contrast_between_text_and_background": { zh: "文字和底色的对比", en: "Contrast between text and background" },
-  "settings.view_and_edit": { zh: "查看与修改", en: "View and edit" },
+
   "settings.all_shortcuts_incl_global_and_esc": { zh: "所有快捷键，含全局显示 / 隐藏、Esc 停止", en: "All shortcuts, including global show / hide and Esc to stop" },
-  "settings.adjust_navigation": { zh: "调整导航", en: "Adjust navigation" },
-  "settings.remember_window_position_and_size": { zh: "记住窗口位置和大小、标题栏样式", en: "Remember window position and size, and the title bar style" },
+
   "settings.process_card": { zh: "过程", en: "Process" },
   "settings.files_and_previews_card": { zh: "文件与预览", en: "Files and previews" },
   "settings.notices_card": { zh: "提示", en: "Notices" },
-  "settings.older_turns_fold_to_a_line": { zh: "较早的对话折叠成一行", en: "Earlier turns fold into one line" },
+
   "settings.generated_files_as_clickable_cards": { zh: "生成的文件显示成可以点开的卡片", en: "Generated files appear as cards you can open" },
   "settings.tabs_and_navigation_card": { zh: "标签与导航", en: "Tabs and navigation" },
   "settings.while_running_card": { zh: "运行中", en: "While running" },

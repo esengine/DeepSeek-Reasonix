@@ -51,14 +51,14 @@ it.each(["market", "plugins", "mcp", "skills", "composition-picker"])(
     const entry = SETTING_AT(anchor)!;
     const { find, calls } = await draw();
     await act(async () => {});
-    expect(block(anchor)).toBeNull();
+    if (anchor !== "composition-picker") expect(block(anchor)).toBeNull();
     const reads = [...calls];
     await userEvent.type(find(), `  ${t(entry.title).toUpperCase()}  `);
     const hit = screen.queryAllByRole<HTMLButtonElement>("option").find((item) => item.dataset.target === anchor);
     expect(hit).toBeDefined();
     expect(hit?.dataset.value).toBe(entry.section);
     expect(hit?.querySelector(".what")?.textContent).toBe(t(entry.title));
-    expect(block(anchor)).toBeNull();
+    if (anchor !== "composition-picker") expect(block(anchor)).toBeNull();
     expect(calls).toEqual(reads);
     if (anchor === "market") {
       hit!.focus();

@@ -53,6 +53,12 @@ node perf/queue.mjs      # 待送达：正文读不回来时，「改」不许�
 node perf/reask.mjs      # 改写框：没有换行的长段落，框要长到让人读得到全文，宽屏和手机宽度各一遍
 node perf/composer-reflow.mjs # Draft and skill-chip wrapping during column transitions, interface zoom and native scrollbar gutters
 node perf/composer-toolbar-row.mjs # The buttons under the composer stay on one row from 900 to 400 px of conversation width, with the widest realistic labels
+node perf/control-icons.mjs # Composer and browser action icons: readable geometry, alignment, running states, focus and labels
+node perf/nav-selection.mjs # Navigation selection: quiet theme surfaces, icon contrast and keyboard focus in default, sky and photo packs
+node perf/select-alignment.mjs # Selects: rendered text alignment and keyboard dismissal in both languages, schemes, widths and font sizes
+node perf/settings-fullscreen.mjs # All settings categories fill the window with fixed gutters, single-column cards and contained controls at wide/phone widths and enlarged text
+node perf/settings-page-column.mjs # Pill navigation scrolls to expanded controls without replacing editors or hiding them under the sticky index
+node perf/sidebar-tools.mjs # Named footer card: saved order and visibility, hover transfer, click, keyboard focus and viewport containment
 node perf/workbench-save.mjs # File toolbar sizing, Save contrast and edit/save/read states: light/dark × Chinese/English × desktop/browser × wide/phone
 node perf/onboarding.mjs # First-run setup: zoom-aware card bounds, resize, scrolling, focus and completion
 node perf/running.mjs    # 执行过程：在跑的步骤自己在动、收起后由标题接着动，步骤行没有空栏

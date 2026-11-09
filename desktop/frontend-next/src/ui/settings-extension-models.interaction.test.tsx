@@ -53,7 +53,7 @@ async function extensions() {
 
 async function choices() {
   await userEvent.click(document.querySelector<HTMLButtonElement>('[data-action="settings.section"][data-value="model"]')!);
-  await userEvent.click(await waitFor(() => document.querySelector<HTMLButtonElement>('[data-action="settings.open-page"][data-target="model"]')!));
+  await userEvent.click(await waitFor(() => document.querySelector<HTMLButtonElement>('[data-action="settings.page-index"][data-target="model"]')!));
   return screen.findByRole<HTMLSelectElement>("combobox", { name: t("common.default_model") });
 }
 
@@ -156,7 +156,7 @@ it("shows the existing unavailable state when the refreshed catalog fails", asyn
   await userEvent.click(screen.getByRole("button", { name: t("app.reload_runtime") }));
   await screen.findByText(t("app.live_the_next_turn_runs"));
   await userEvent.click(document.querySelector<HTMLButtonElement>('[data-action="settings.section"][data-value="model"]')!);
-  await userEvent.click(await waitFor(() => document.querySelector<HTMLButtonElement>('[data-action="settings.open-page"][data-target="model"]')!));
+  await userEvent.click(await waitFor(() => document.querySelector<HTMLButtonElement>('[data-action="settings.page-index"][data-target="model"]')!));
   expect(await screen.findByText(t("usage.could_not_read_the_model"))).toBeTruthy();
   expect(screen.queryByRole("combobox", { name: t("common.default_model") })).toBeNull();
 });

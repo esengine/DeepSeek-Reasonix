@@ -7,13 +7,6 @@ export const ZOOM_PRESETS: [number, string][] = [
   [1.3, "app.larger"],
 ];
 
-/** The three rungs the settings row offers in place; the page behind it keeps all four and the slider. */
-export const SIZE_STEPS: [number, string][] = [
-  [0.9, "app.small"],
-  [1, "look.standard"],
-  [1.15, "app.large"],
-];
-
 const EPS = 1e-9;
 
 /** The next interface scale for a keyboard press: -1 steps down, 1 up, 0 resets

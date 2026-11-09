@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import type { AgentPort, NotifyPrefs } from "../port/port";
 import { t } from "../i18n";
-import { PillButton, SettingRow } from "./SettingRow";
+import { SettingRow } from "./SettingRow";
 import { Switch } from "./Switch";
 
 /** What this machine is allowed to interrupt for. A kernel with no window
@@ -9,7 +9,6 @@ import { Switch } from "./Switch";
  *  land on the server's desktop, not on the watcher's. */
 export function Notifications({ port }: { port: AgentPort }) {
   const [prefs, setPrefs] = useState<NotifyPrefs | null>(null);
-  const [more, setMore] = useState(false);
 
   useEffect(() => {
     let live = true;
@@ -36,10 +35,8 @@ export function Notifications({ port }: { port: AgentPort }) {
   return (
     <>
       <SettingRow id="notify" title={t("common.notifications")} desc={t("settings.a_system_notification_when_a")}>
-        <PillButton action="notify.more" onClick={() => setMore(!more)}>{t(more ? "common.collapse" : "settings.details")}</PillButton>
         <Switch data-action="notify.enabled" on={prefs.enabled} label={t("settings.send_system_notifications")} onClick={() => flip({ enabled: !prefs.enabled })} />
       </SettingRow>
-      {more && (
         <div className="srow-more">
       <div className="lrow">
         <span className="tx">
@@ -86,7 +83,6 @@ export function Notifications({ port }: { port: AgentPort }) {
         <Switch data-action="notify.disk-low" on={prefs.diskLow} busy={!active} label={t("settings.when_disk_space_is_low")} onClick={() => flip({ diskLow: !prefs.diskLow })} />
       </div>
         </div>
-      )}
     </>
   );
 }
