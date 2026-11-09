@@ -1726,6 +1726,19 @@ A sub-agent row, by the list's own width:
 - A nonempty collapsed plan draws the expanded plan's `.prog2` track below its summary, using completed steps over total steps from `stepDone`. Pending and running steps do not count as complete.
 - Opening the card replaces the optional track with the existing expanded progress. Goal-only, empty and hidden cards have no progress track; collapse, Escape, outside dismissal and focus return remain unchanged.
 
+## Provider form fields
+
+- A compound input gives its editable text the space left after the unit label.
+  Only standalone setting-row and threshold controls use a fixed numeric width.
+- Provider inputs and selects share a 32px height. Model names occupy their own
+  row; capacity and price fields fill the remaining grid width. Container queries
+  reduce columns using the form's available width and scaled text size.
+- Billing choices use short names, with their meaning explained beneath the
+  picker. The provider form's selects fill their column and reserve arrow space.
+- `provider-fields.mjs` checks full numeric values, inheritance hints, currency
+  and billing choices at wide, intermediate and phone widths, both languages,
+  both schemes and enlarged text.
+
 ## Sidebar tool card
 
 - The footer keeps Settings and Feedback as labelled rows aligned at the left.

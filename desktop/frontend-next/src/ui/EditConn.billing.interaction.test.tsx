@@ -55,6 +55,7 @@ describe("how a connection is billed", () => {
 
   it("says what the subscription figures mean", async () => {
     await open(entry());
+    expect(screen.getByRole("option", { name: "订阅套餐（估算）" })).toBeTruthy();
     expect(screen.getByText("订阅套餐的用量按上面的价格折算成估算值，单独显示，不会计入实际花费。")).toBeTruthy();
   });
 });
