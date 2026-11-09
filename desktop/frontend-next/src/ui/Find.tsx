@@ -1,3 +1,4 @@
+import { StudioIcon } from "./StudioIcon";
 import { useEffect, useRef } from "react";
 import { t } from "../i18n";
 import type { FindScope } from "../state/find";
@@ -89,9 +90,7 @@ function Bar({
         role="search"
         data-missed={missed ? "" : undefined}
       >
-        <svg viewBox="0 0 16 16" aria-hidden="true">
-          <path d="M7.2 3.1a4.1 4.1 0 1 0 0 8.2 4.1 4.1 0 0 0 0-8.2M10.3 10.3 13 13" />
-        </svg>
+        <StudioIcon name="search" />
         <input
           ref={box}
           type="search"
@@ -140,9 +139,7 @@ function Bar({
           title={t("chat.previous_match")}
           onClick={() => onStep(-1)}
         >
-          <svg viewBox="0 0 16 16" aria-hidden="true">
-            <path d="M4.4 9.6 8 6l3.6 3.6" />
-          </svg>
+          <StudioIcon name="up" />
         </button>
         <button
           className="st"
@@ -153,9 +150,7 @@ function Bar({
           title={t("chat.next_match")}
           onClick={() => onStep(1)}
         >
-          <svg viewBox="0 0 16 16" aria-hidden="true">
-            <path d="M4.4 6.4 8 10l3.6-3.6" />
-          </svg>
+          <StudioIcon name="down" />
         </button>
         <span className="sep" aria-hidden="true" />
         <button
@@ -167,7 +162,7 @@ function Bar({
           title={t("common.match_case")}
           onClick={() => setMode({ caseSensitive: !caseSensitive })}
         >
-          Aa
+          <StudioIcon name="matchCase" />
         </button>
         <button
           className="mode-toggle"
@@ -178,7 +173,7 @@ function Bar({
           title={t("chat.read_the_query_as_a")}
           onClick={() => setMode({ regex: !regex })}
         >
-          .*
+          <StudioIcon name="regex" />
         </button>
         <button
           className="st"
@@ -188,9 +183,7 @@ function Bar({
           title={t("chat.close_find")}
           onClick={onClose}
         >
-          <svg viewBox="0 0 16 16" aria-hidden="true">
-            <path d="M4.5 4.5 11.5 11.5M11.5 4.5 4.5 11.5" />
-          </svg>
+          <StudioIcon name="close" />
         </button>
       </div>
       {missed ? (

@@ -34,6 +34,8 @@ describe("market votes", () => {
     const port = portWith({ signedIn: true, value: 1, upCount: 3, downCount: 1, approvalRate: 0.75, canVote: true });
     render(<MarketVote port={port} pkg={pkg} />);
     await waitFor(() => expect(up().getAttribute("aria-pressed")).toBe("true"));
+    expect(up().querySelector("svg.lucide-thumbs-up[aria-hidden=true]")).not.toBeNull();
+    expect(screen.getByRole("button", { name: /踩/ }).querySelector("svg.lucide-thumbs-down")).not.toBeNull();
     await userEvent.click(up());
     expect(port.voteMarket).toHaveBeenLastCalledWith("acme/kit", 0);
     await waitFor(() => expect(up().getAttribute("aria-pressed")).toBe("false"));

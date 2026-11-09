@@ -1,3 +1,4 @@
+import { StudioIcon } from "../../StudioIcon";
 import { useLayoutEffect, useRef, useState } from "react";
 import { Badge, Button, Group as MantineGroup, Paper, Stack, Text } from "@mantine/core";
 import { Workspace, type RichInputProps } from "./Workspace";
@@ -30,12 +31,12 @@ export default function MapPlanner({ node, value, disabled, change }: RichInputP
       <Stack gap="xs"><MapCanvas places={visible} order={order} active={active} focusVersion={focusVersion} focus={focus} /><Text size="xs" c="dimmed">{t("chat.dashed_lines_show_visit_order")}</Text></Stack>
       <Stack ref={listRef} gap="sm" className="rich-map-list">
         {visible.map(p => { const at = order.indexOf(p.value), included = at >= 0; return <Paper ref={active === p.value ? activeRef : undefined} key={p.value} p="md" radius="md" className="rich-stop" data-active={active === p.value}>
-          <Stack gap="sm"><MantineGroup justify="space-between" wrap="nowrap"><Badge circle color={included ? "teal" : "gray"} variant="light">{included ? at + 1 : "+"}</Badge><Button variant="subtle" size="sm" data-action="surface.explore" onClick={() => focus(p.value)}>{p.label}</Button>{p.group && <Text size="xs" c="dimmed">{p.group}</Text>}</MantineGroup>
+          <Stack gap="sm"><MantineGroup justify="space-between" wrap="nowrap"><Badge circle color={included ? "teal" : "gray"} variant="light">{included ? at + 1 : <StudioIcon name="plus" />}</Badge><Button variant="subtle" size="sm" data-action="surface.explore" onClick={() => focus(p.value)}>{p.label}</Button>{p.group && <Text size="xs" c="dimmed">{p.group}</Text>}</MantineGroup>
           {active === p.value && <OptionImage image={p.image} />}
           {p.description && <Text size="sm">{p.description}</Text>}
           {active === p.value && p.facts?.map(f => <MantineGroup key={f.label} justify="space-between"><Text c="dimmed" size="xs">{f.label}</Text><Text size="xs">{f.value}</Text></MantineGroup>)}
           <MantineGroup gap="xs"><Button variant={included ? "light" : "filled"} color="teal" size="xs" disabled={disabled} data-action="surface.edit" data-target={node.key} onClick={() => change(included ? order.filter(id => id !== p.value) : [...order, p.value])}>{included ? t("chat.remove_stop") : t("chat.add_stop")}</Button>
-            {included && <><Button size="xs" variant="subtle" aria-label={t("common.move_name_up", { name: p.label })} disabled={disabled || at === 0} data-action="surface.edit" data-target={node.key} onClick={() => move(p.value, -1)}>↑</Button><Button size="xs" variant="subtle" aria-label={t("common.move_name_down", { name: p.label })} disabled={disabled || at === order.length - 1} data-action="surface.edit" data-target={node.key} onClick={() => move(p.value, 1)}>↓</Button></>}
+            {included && <><Button size="xs" variant="subtle" aria-label={t("common.move_name_up", { name: p.label })} disabled={disabled || at === 0} data-action="surface.edit" data-target={node.key} onClick={() => move(p.value, -1)}><StudioIcon name="arrow" /></Button><Button size="xs" variant="subtle" aria-label={t("common.move_name_down", { name: p.label })} disabled={disabled || at === order.length - 1} data-action="surface.edit" data-target={node.key} onClick={() => move(p.value, 1)}><StudioIcon name="arrowDown" /></Button></>}
           </MantineGroup></Stack>
         </Paper>; })}
       </Stack>

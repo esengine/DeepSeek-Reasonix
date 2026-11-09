@@ -75,7 +75,7 @@ export function ExtensionCard({ ext, onInvoke, onSubmit }: Props) {
   return (
     <div className="call" data-k="extension">
       <div className="g">
-        <Sym glyph="◈" />
+        <Sym icon="plug" />
       </div>
       <div className="c">
         <div className="hl">

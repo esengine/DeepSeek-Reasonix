@@ -1,3 +1,4 @@
+import { StudioIcon } from "./StudioIcon";
 import { useBranchSession } from "./useBranchSession";
 import { CompositionNewContext } from "./CompositionNewContext";
 import { keepSame } from "./stable";
@@ -722,9 +723,7 @@ export function App({ hub }: { hub: HubPort }) {
             })}
             {runtimes.length === 0 && (
               <div className="panes-empty">
-                <span className="mk" aria-hidden="true">
-                  ⌘
-                </span>
+                <span className="mk" aria-hidden="true"><StudioIcon name="chat" /></span>
                 <p className="t">{t("app.no_session_open")}</p>
                 {!treeRead ? null : tree.length === 0 ? (
                   <>

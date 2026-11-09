@@ -8,7 +8,7 @@ const props = { at: null, onGo: vi.fn(), onFiles: vi.fn(), onHome: vi.fn(), onRa
 
 afterEach(cleanup);
 
-const sectionMark = (section: Section) => render(<svg>{ICON[section]}</svg>).container.querySelector("svg")?.innerHTML;
+const sectionMark = (section: Section) => render(<>{ICON[section]}</>).container.querySelector("svg")?.innerHTML;
 
 describe("the icon rail draws the mark of the section it opens", () => {
   it.each([
@@ -18,7 +18,7 @@ describe("the icon rail draws the mark of the section it opens", () => {
     ["记忆", "memory"],
     ["远程", "remote"],
     ["账号", "account"],
-    ["设置", "advanced"],
+    ["设置", "common"],
   ] as const)("%s shows the %s section mark", (label, section) => {
     const { container } = render(<Nav {...props} />);
     const btn = container.querySelector(`button[aria-label="${label}"]`);

@@ -24,7 +24,7 @@ export const RememberCard = memo(function RememberCard({
   };
   return (
     <NoteCard
-      glyph="◇"
+      icon="bookmark"
       gone={forgotten}
       lead={t(forgotten ? "chat.forgotten" : "chat.remembered")}
       strong={m.title}

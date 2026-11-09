@@ -2,9 +2,9 @@
   display: inline-flex; align-items: center; gap: 3px; padding: 0 5px; border: 1px solid var(--border); border-radius: 999px; background: transparent; cursor: pointer;
   color: var(--muted); font: var(--w-reg) var(--fs-micro)/1.5 var(--mono);
 }
-.chrome-context-parts .chrome-context-more::after { content: "›"; transition: transform var(--t-line); }
+.chrome-context-parts .chrome-context-more .studio-icon { width: 12px; height: 12px; transition: transform var(--t-line); }
 .chrome-context-parts .chrome-context-more[aria-expanded="true"] { color: var(--text); background: var(--overlay); }
-.chrome-context-parts .chrome-context-more[aria-expanded="true"]::after { transform: rotate(90deg); }
+.chrome-context-parts .chrome-context-more[aria-expanded="true"] .studio-icon { transform: rotate(90deg); }
 .chrome-context-parts .chrome-context-more:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 .chrome-context-items { list-style: none; margin: 6px 0 0; padding: 0 0 0 8px; border-left: 1px solid var(--border); display: grid; grid-template-columns: minmax(0, 1fr); gap: 3px; }
 .chrome-context-items li { min-width: 0; display: flex; align-items: center; gap: 8px; color: var(--muted); font: var(--w-reg) var(--fs-micro)/1.4 var(--ui); }

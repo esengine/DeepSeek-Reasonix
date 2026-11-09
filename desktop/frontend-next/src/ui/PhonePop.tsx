@@ -1,3 +1,4 @@
+import { StudioIcon } from "./StudioIcon";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { t } from "../i18n";
 import { reason } from "../i18n/kernel";
@@ -73,12 +74,7 @@ export function PhonePop({ hub }: { hub: HubPort }) {
         title={online > 0 ? t("remote.device_access_n_online", { n: online }) : t("remote.device_access")}
         onClick={() => setOpen((v) => !v)}
       >
-        <svg viewBox="0 0 16 16" aria-hidden="true">
-          <rect x="2.5" y="2.5" width="4" height="4" rx=".6" />
-          <rect x="9.5" y="2.5" width="4" height="4" rx=".6" />
-          <rect x="2.5" y="9.5" width="4" height="4" rx=".6" />
-          <path d="M9.5 9.5h1.6v1.6M13.5 9.5v.01M9.5 13.5h.01M12 12h1.5v1.5H12Z" />
-        </svg>
+        <StudioIcon name="qr" />
         {online > 0 && <b className="pc-count">{online}</b>}
       </TooltipButton>
       {open && <PhoneCard share={share} failure={failure} />}

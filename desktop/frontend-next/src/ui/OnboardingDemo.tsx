@@ -1,3 +1,4 @@
+import { StudioIcon } from "./StudioIcon";
 import { useEffect, useState } from "react";
 import { t } from "../i18n";
 import { RMark } from "./RMark";
@@ -28,7 +29,7 @@ export function OnboardingDemo() {
         <p className="d think" style={at(1)}><RMark className="rmark demo-spin" />{t("onboarding.demo_thinking")}</p>
         <p className="d tool" style={at(3)}><b>{t("onboarding.demo_read")}</b><code>scripts/export.py</code><small>48</small></p>
         <p className="d tool" style={at(4)}><b>{t("onboarding.demo_edit")}</b><code>scripts/export.py</code><small className="add">+12 −3</small></p>
-        <p className="d tool" style={at(5)}><b>{t("onboarding.demo_run")}</b><code>pytest</code><small className="ok">12 ✓</small></p>
+        <p className="d tool" style={at(5)}><b>{t("onboarding.demo_run")}</b><code>pytest</code><small className="ok">12 <StudioIcon name="check" /></small></p>
         <p className="d done" style={at(6)}>{t("onboarding.demo_done")}</p>
       </div>
     </div>

@@ -7,12 +7,12 @@ export function GuardianCard({ g }: { g: Guardian }) {
   const risk = g.risk_level ?? "unknown";
   const riskLabel = risk === "low" ? t("chat.low_risk") : risk === "medium" ? t("chat.medium_risk") : risk === "high" ? t("common.high_risk") : risk === "critical" ? t("chat.critical_risk") : t("chat.risk_unknown");
   if (g.outcome === "allow" && (risk === "low" || risk === "unknown")) {
-    return <LineRow glyph="⊛" level="ok" title={`${t("chat.guardian_review")} · ${t("chat.allowed")}`} subject={g.subject} subjectTitle={g.subject} meta={riskLabel} detail={g.rationale || undefined} />;
+    return <LineRow icon="shieldCheck" level="ok" title={`${t("chat.guardian_review")} · ${t("chat.allowed")}`} subject={g.subject} subjectTitle={g.subject} meta={riskLabel} detail={g.rationale || undefined} />;
   }
   const bars = risk === "low" ? 1 : risk === "medium" ? 2 : risk === "unknown" ? 0 : 3;
   const verdict = g.outcome === "deny" ? t("chat.blocked") : g.outcome === "allow" ? t("chat.allowed") : g.outcome;
   return (
-    <NoteCard glyph="⊛" level={g.outcome === "deny" ? "err" : "warn"}
+    <NoteCard icon="shield" level={g.outcome === "deny" ? "err" : "warn"}
       lead={<>{t("chat.guardian_review")} · <span className="note-verdict">{verdict}</span></>}
       tail={<>
         <span className="note-risk">{riskLabel}</span>

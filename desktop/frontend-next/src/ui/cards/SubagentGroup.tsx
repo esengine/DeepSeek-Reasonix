@@ -59,7 +59,7 @@ export const nameOf = (x: Task) => x.tool.profile?.name || "task";
 
 export const AgentAvatar = ({ name }: { name: string }) => (
   <span className="agent-avatar" data-hue={agentHue(name)} aria-hidden="true">
-    <svg viewBox="0 0 16 16"><path d="M3.5 12.5l6-6M9.5 3l.8 2.2 2.2.8-2.2.8-.8 2.2-.8-2.2L6.5 6l2.2-.8z" /></svg>
+    <StudioIcon name="agent" />
   </span>
 );
 
@@ -135,7 +135,7 @@ function AgentRow({ task, status, onStop }: { task: Task; status: DelegateStatus
         {open && task.tool.id && (
           <button type="button" className="agent-open" data-action="agent.open" data-target={task.id} aria-label={t("subagent.open")} title={t("subagent.open")}
             onClick={() => void open(task.tool.id!)}>
-            <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2" y="3" width="12" height="10" rx="1.5" /><path d="M10 3v10" /></svg>
+            <StudioIcon name="panelRight" />
           </button>
         )}
       </div>

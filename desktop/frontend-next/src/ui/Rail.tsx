@@ -105,7 +105,7 @@ function fractions(marks: RailMark[], total: number, root: HTMLElement, inner: H
 }
 
 const StarGlyph = () => (
-  <svg className="srail-star" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2.2l1.7 3.6 3.9.5-2.9 2.7.8 3.9L8 11l-3.5 1.9.8-3.9-2.9-2.7 3.9-.5z" /></svg>
+  <StudioIcon name="sparkle" className="srail-star" />
 );
 
 export function Rail({ marks, total, scroll, flow, onJump, bound, scope, earlier = 0, onLoadEarlier }: Props) {

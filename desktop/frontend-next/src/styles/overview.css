@@ -93,8 +93,6 @@
 .chrome-context-foot .compact-now > .btn { height: 24px; padding: 0 10px; border: 1px solid transparent; border-radius: var(--r-pill); background: transparent; color: var(--muted); font: var(--w-reg) var(--fs-meta)/1 var(--ui); }
 .chrome-context-foot .compact-now > .btn:hover { background: var(--overlay); color: var(--text); }
 .chrome-context-card .chrome-context-more { display: inline-flex; align-items: center; gap: 5px; height: auto; padding: 0; border: 0; background: none; cursor: pointer; }
-.chrome-context-card .chrome-context-more::after { content: ""; width: 5px; height: 5px; border-top: 1.45px solid var(--faint); border-right: 1.45px solid var(--faint); transform: rotate(45deg); }
-.chrome-context-card .chrome-context-more[aria-expanded="true"]::after { transform: rotate(135deg); }
 .chrome-context-card:not(.studio-overview-card) > .chrome-context-items { margin: 2px 14px 4px; padding: 2px 0 2px 10px; gap: 2px; }
 @media (pointer: coarse) {
   .chrome-context-card:not(.studio-overview-card) > .chrome-context-parts > div { height: 36px; }

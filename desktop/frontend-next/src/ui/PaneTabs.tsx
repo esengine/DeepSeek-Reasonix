@@ -1,3 +1,4 @@
+import { StudioIcon } from "./StudioIcon";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { t } from "../i18n";
 import type { RuntimeView } from "../port/hub";
@@ -182,7 +183,7 @@ export function PaneTabs({ tabs, active, showRoot, onFocus, onClose, onRename }:
           {showRoot && <span className="ptab-ws">{rt.name}</span>}
           {/* Which machine is running this. Panes from two hosts sit side by
               side, and a command lands wherever the focused tab points. */}
-          {rt.host && <span className="ptab-host">{rt.host}</span>}
+          {rt.host && <span className="ptab-host"><StudioIcon name="server" />{rt.host}</span>}
           <PeerThreadMark path={rt.sessionPath} />
           <button
             className="ptab-x"
@@ -195,7 +196,7 @@ export function PaneTabs({ tabs, active, showRoot, onFocus, onClose, onRename }:
               close([rt.id], "one", rt.id);
             }}
           >
-            ×
+            <StudioIcon name="close" />
           </button>
 
         </div>

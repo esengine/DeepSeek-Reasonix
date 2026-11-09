@@ -1,3 +1,4 @@
+import { StudioIcon } from "./StudioIcon";
 import { useEffect, useState } from "react";
 import { t } from "../i18n";
 import { host } from "../port/host";
@@ -42,9 +43,7 @@ export function WindowControls() {
   return (
     <div className="winctl" role="group" aria-label={t("common.window")}>
       <button className="wc" data-action="window.minimize" onClick={() => host().minimiseWindow()} aria-label={t("app.minimize")}>
-        <svg viewBox="0 0 12 12" aria-hidden="true">
-          <path d="M2 6h8" />
-        </svg>
+        <StudioIcon name="minus" />
       </button>
       <button
         className="wc"
@@ -52,21 +51,10 @@ export function WindowControls() {
         onClick={() => host().toggleMaximiseWindow()}
         aria-label={t(max ? "app.restore" : "app.maximize")}
       >
-        <svg viewBox="0 0 12 12" aria-hidden="true">
-          {max ? (
-            <>
-              <path d="M3.4 3.4V2.2h6.4v6.4H8.6" />
-              <path d="M2.2 3.4h6.4v6.4H2.2Z" />
-            </>
-          ) : (
-            <path d="M2.4 2.4h7.2v7.2H2.4Z" />
-          )}
-        </svg>
+        <StudioIcon name={max ? "copy" : "stop"} />
       </button>
       <button className="wc close" data-action="window.close" onClick={() => host().closeWindow()} aria-label={t("common.close")}>
-        <svg viewBox="0 0 12 12" aria-hidden="true">
-          <path d="M2.6 2.6l6.8 6.8M9.4 2.6l-6.8 6.8" />
-        </svg>
+        <StudioIcon name="close" />
       </button>
     </div>
   );

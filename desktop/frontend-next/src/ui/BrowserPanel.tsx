@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 import { ArrowLeft, ArrowRight, ExternalLink, Globe, RotateCw } from "lucide-react";
 import { t } from "../i18n";
 import { reason } from "../i18n/kernel";
@@ -29,20 +29,14 @@ function normalise(value: string): string | null {
   }
 }
 
-function startPage(scheme: "light" | "dark"): string {
-  const light = scheme === "light";
-  const page = light ? "#f6f7f4" : "#171817";
-  const text = light ? "#242622" : "#e9eae5";
-  const muted = light ? "#747970" : "#90958d";
-  const surface = light ? "#ffffff" : "#1c1d1b";
-  const border = light ? "#dfe1db" : "#2c2f2b";
-  return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>
-    :root{color-scheme:${scheme};font-family:Inter,"Noto Sans SC",system-ui,sans-serif;background:${page};color:${text}}
-    *{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;padding:32px;background:${page}}
-    main{width:min(520px,100%);text-align:center}.mark{width:42px;height:42px;margin:0 auto 18px;display:grid;place-items:center;border:1px solid ${border};border-radius:12px;background:${surface};color:#7188c4;font-size:22px}
-    h1{margin:0 0 8px;font-size:18px;font-weight:620;letter-spacing:-.02em}p{margin:0;color:${muted};font-size:13px;line-height:1.7}
-    .hint{margin-top:22px;padding:11px 14px;border:1px solid ${border};border-radius:9px;background:${surface};color:${muted};font-size:12px;text-align:left}
-  </style></head><body><main><div class="mark">◎</div><h1>${t("common.built_in_browser")}</h1><p>${t("workbench.enter_an_address_above_to")}</p><div class="hint">${t("workbench.some_sites_do_not_allow")}</div></main></body></html>`;
+function BrowserStartPage({ scheme }: { scheme: "light" | "dark" }) {
+  return <div className="studio-browser-frame studio-browser-start" title={t("workbench.reasonix_built_in_browser")} style={{ colorScheme: scheme }}>
+    <div><Globe className="browser-start-mark" size={26} aria-hidden="true" />
+      <h1>{t("common.built_in_browser")}</h1>
+      <p>{t("workbench.enter_an_address_above_to")}</p>
+      <p className="browser-start-hint">{t("workbench.some_sites_do_not_allow")}</p>
+    </div>
+  </div>;
 }
 
 interface ManualProps {
@@ -64,7 +58,6 @@ export function ManualBrowserPanel({ id, hidden, onAddress, onExternal, scheme }
   const [loading, setLoading] = useState(false);
   const current = history[index] ?? START;
   const internal = current === START;
-  const srcDoc = useMemo(() => startPage(scheme), [scheme]);
   useEffect(() => {
     onAddress(id, internal ? "" : new URL(current).hostname);
   }, [id, current, internal, onAddress]);
@@ -129,17 +122,16 @@ export function ManualBrowserPanel({ id, hidden, onAddress, onExternal, scheme }
         </button>
       </form>
       {invalid && <p className="studio-browser-error" role="alert">{t("workbench.enter_a_valid_http_or")}</p>}
-      <iframe
+      {internal ? <BrowserStartPage scheme={scheme} /> : <iframe
         key={`${current}:${reload}`}
         className="studio-browser-frame"
         title={t("workbench.reasonix_built_in_browser")}
-        src={internal ? undefined : current}
-        srcDoc={internal ? srcDoc : undefined}
+        src={current}
         sandbox="allow-scripts allow-forms allow-popups"
         referrerPolicy="no-referrer"
         onLoad={() => setLoading(false)}
         onError={() => setLoading(false)}
-      />
+      />}
       {/* Not a hint at an icon somewhere else: a site that refuses to be framed
           shows the shell's own "refused to connect", and the way out has to be
           beside it. */}

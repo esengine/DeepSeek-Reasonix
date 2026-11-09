@@ -39,7 +39,7 @@ export function ElicitURLCard({ item, onAnswer }: ElicitProps) {
 
   return (
     <div className="call" data-k="ask" data-prompt={sealed ? "settled" : "pending"}>
-      <div className="g"><Sym glyph="?" /></div>
+      <div className="g"><Sym icon="external" /></div>
       <div className="c">
         <div className="hl"><span className="nm">{t("chat.mcp_server_name_is_asking_2", { name: origin.source })}</span></div>
         <div className="out">

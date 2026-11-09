@@ -1,7 +1,7 @@
 import { t } from "../../i18n";
 import { pct, tokens } from "../../i18n/format";
 import type { Metrics } from "../../state/session";
-import { Warn } from "../glyphs";
+import { StudioIcon } from "../StudioIcon";
 
 /** How much of the prompt the endpoint did not have to re-read.
  *
@@ -33,7 +33,7 @@ export function Cache({ metrics }: { metrics: Metrics }) {
           do anything about. Unchanged is the ordinary case and says nothing. */}
       {(moved || body) && (
         <p className="cachemoved" title={metrics.prefixReasons.join(" · ") || undefined}>
-          <i aria-hidden="true"><Warn /></i>
+          <StudioIcon name="warning" />
           {moved ? t("panels.prefix_changed") : t("panels.body_changed")}
         </p>
       )}

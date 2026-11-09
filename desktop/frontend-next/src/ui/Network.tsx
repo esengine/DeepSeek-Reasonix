@@ -1,3 +1,4 @@
+import { StudioIcon } from "./StudioIcon";
 import { useEffect, useRef, useState } from "react";
 import { t } from "../i18n";
 import type { AgentPort, NetworkProbe, NetworkSettings } from "../port/port";
@@ -203,7 +204,7 @@ function NetworkInput({ port, host }: { port: AgentPort; host: string }) {
         <div className="probes" role="region" aria-label={t("models.test_results_for_saved_settings")}>
           {probes.map((p, i) => (
             <div className="probe" key={i} data-ok={p.ok ? "" : undefined}>
-              <i className="mk">{p.ok ? "✓" : "×"}</i>
+              <i className="mk"><StudioIcon name={p.ok ? "check" : "close"} /></i>
               <span className="lb">{STEP_LABEL[p.step] ? t(STEP_LABEL[p.step]) : p.step}</span>
               <span className="dt">{say(p.code ? { code: p.code, params: p.params } : null, p.detail)}</span>
               <span className="ms">{p.durationMs ? `${p.durationMs}ms` : ""}</span>

@@ -31,9 +31,9 @@ export function modelMenu(models: ModelEntry[], order: readonly string[] = [], c
   const accounts = orderAccounts(groupVendors(models), order);
   const out: MenuItem[] = [];
   for (const [i, a] of accounts.entries()) {
-    const mono = monogram(a.label, a.key);
+    const providerIcon = providerMark(a.key);
     const mark = a.kinds.flatMap((k) => a.byKind[k]).map((m) => m.serviceMark ?? m.mark).find(Boolean);
-    out.push({ value: `__account:${a.key}`, label: a.label, right: a.host, header: true, divide: i > 0, mono, mark });
+    out.push({ value: `__account:${a.key}`, label: a.label, right: a.host, header: true, divide: i > 0, providerIcon, mark });
     for (const kind of a.kinds) {
       for (const m of a.byKind[kind]) {
         out.push({
@@ -43,7 +43,7 @@ export function modelMenu(models: ModelEntry[], order: readonly string[] = [], c
           status: modelHealthStatus(health[m.provider]),
           meta: t(KIND_LABEL[kind] ?? kind),
           badge: m.vision ? t("common.reads_images") : undefined,
-          mono,
+          providerIcon,
           mark: m.mark,
         });
       }
@@ -71,13 +71,11 @@ export function modelMenu(models: ModelEntry[], order: readonly string[] = [], c
 
 const TONES = 5;
 
-// A letter chip stands in for a vendor mark: the same provider always draws the
-// same letter and tone, where no declared vendor has artwork.
-export function monogram(label: string, key: string): { letter: string; tone: number } {
-  const letter = [...label.trim()].find((c) => /[\p{L}\p{N}]/u.test(c))?.toUpperCase() ?? "?";
+// Custom providers share a service icon and a stable account colour.
+export function providerMark(key: string): { tone: number } {
   let h = 0;
   for (const c of key) h = (h * 31 + c.charCodeAt(0)) >>> 0;
-  return { letter, tone: h % TONES };
+  return { tone: h % TONES };
 }
 
 /** The headings a menu offers to narrow by, in the order they appear. */

@@ -1,3 +1,4 @@
+import { StudioIcon } from "./StudioIcon";
 import { useState } from "react";
 import { t } from "../i18n";
 import type { CapabilityScope } from "../port/port";
@@ -27,7 +28,7 @@ export function ScopePill({
     <span className="scopeanchor">
       <button type="button" className="spill who" data-action="ext.scope" aria-expanded={open} onClick={() => setOpen(!open)}>
         {scope.label || scope.name}
-        <i className="cv" aria-hidden>▾</i>
+        <i className="cv" aria-hidden><StudioIcon name="down" /></i>
       </button>
       {open && (
         <ScopePicker

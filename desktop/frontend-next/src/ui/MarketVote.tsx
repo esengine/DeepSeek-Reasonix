@@ -1,3 +1,4 @@
+import { StudioIcon } from "./StudioIcon";
 import { useEffect, useRef, useState } from "react";
 import { t } from "../i18n";
 import { ACCOUNT_SIGNIN_DISABLED, reason } from "../i18n/kernel";
@@ -93,7 +94,7 @@ export function MarketVote({ port, pkg, onSignIn }: { port: AgentPort; pkg: Mark
           title={mine === 1 ? t("ext.withdraw_upvote") : t("ext.upvote")}
           onClick={() => void cast(1)}
         >
-          <span aria-hidden="true">▲</span> {t("ext.upvote")} <span className="n">{up}</span>
+          <span aria-hidden="true"><StudioIcon name="thumbsUp" /></span> {t("ext.upvote")} <span className="n">{up}</span>
         </button>
         <button
           className="act"
@@ -104,7 +105,7 @@ export function MarketVote({ port, pkg, onSignIn }: { port: AgentPort; pkg: Mark
           title={mine === -1 ? t("ext.withdraw_downvote") : t("ext.downvote")}
           onClick={() => void cast(-1)}
         >
-          <span aria-hidden="true">▼</span> {t("ext.downvote")} <span className="n">{down}</span>
+          <span aria-hidden="true"><StudioIcon name="thumbsDown" /></span> {t("ext.downvote")} <span className="n">{down}</span>
         </button>
       </div>
       {vote && !signedIn && !off && (

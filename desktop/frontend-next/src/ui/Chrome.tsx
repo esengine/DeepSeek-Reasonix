@@ -1,3 +1,4 @@
+import { StudioIcon } from "./StudioIcon";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { t } from "../i18n";
 import { host as hostBridge } from "../port/host";
@@ -93,7 +94,7 @@ export function Chrome({ port, status, workspace: ws, title, steer, account, hos
             disabled={!canOpenProject}
             onClick={openProject}
           >
-            <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M2.5 4.5h4l1.2 1.4h5.8v6.6h-11z" /></svg>
+            <StudioIcon name="folder" />
           </button>
           <span className="crumb-proj" title={root}>
             {project}
@@ -126,7 +127,7 @@ export function Chrome({ port, status, workspace: ws, title, steer, account, hos
       <div className="r" ref={group}>
         {gathered && (
           <button ref={trigger} className="thbtn r-more" data-action="chrome.more" aria-haspopup="true" aria-controls="chrome-fold" aria-expanded={more} aria-label={t("common.more")} onClick={() => setMore((v) => !v)}>
-            <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 8h.01M8 8h.01M12.5 8h.01" /></svg>
+            <StudioIcon name="more" />
           </button>
         )}
         <div className="r-fold" id="chrome-fold" data-open={more ? "" : undefined}>
@@ -140,7 +141,7 @@ export function Chrome({ port, status, workspace: ws, title, steer, account, hos
             aria-keyshortcuts={ariaChord("f")}
             title={t("common.find_in_this_conversation")} shortcut={chord("F")}
           >
-            <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M7.2 3.1a4.1 4.1 0 1 0 0 8.2 4.1 4.1 0 0 0 0-8.2M10.3 10.3 13 13" /></svg>
+            <StudioIcon name="search" />
           </TooltipButton>
         )}
         {hub && onError && <PhonePop hub={hub} />}
@@ -152,9 +153,9 @@ export function Chrome({ port, status, workspace: ws, title, steer, account, hos
           title={theme === "dark" ? t("app.switch_to_light_theme") : t("app.switch_to_dark_theme")}
         >
           {theme === "dark" ? (
-            <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M12.9 9.7A5.3 5.3 0 0 1 6.3 3.1a5.3 5.3 0 1 0 6.6 6.6Z" /></svg>
+            <StudioIcon name="sun" />
           ) : (
-            <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="2.7" /><path d="M8 1.7v1.4M8 12.9v1.4M1.7 8h1.4M12.9 8h1.4M3.5 3.5l1 1M11.5 11.5l1 1M3.5 12.5l1-1M11.5 4.5l1-1" /></svg>
+            <StudioIcon name="moon" />
           )}
         </TooltipButton>
         {port && <ViewSwitch view={view} rows={rows} surfaces={surfaces} onView={onView} />}

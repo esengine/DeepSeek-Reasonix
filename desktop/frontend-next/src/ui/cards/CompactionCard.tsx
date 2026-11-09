@@ -1,3 +1,4 @@
+import { StudioIcon } from "../StudioIcon";
 import { useState } from "react";
 import type { Compaction } from "../../port/wire";
 import { useStartsOpen } from "../../state/foldpref";
@@ -34,7 +35,7 @@ function Coverage({ c }: { c: Compaction }) {
   return (
     <div className="comp-l">
       <div className="row">
-        <span className="k">✓</span>
+        <span className="k"><StudioIcon name="check" /></span>
         <span>
           {missing === 0 ? (
             <>{tx("chat.all_n_changes_made_here", { n: <b>{required}</b> })}</>
@@ -46,7 +47,7 @@ function Coverage({ c }: { c: Compaction }) {
       </div>
       {missing > 0 && (
         <div className="row">
-          <span className="x">×</span>
+          <span className="x"><StudioIcon name="close" /></span>
           <span>
             {tx("chat.n_more_are_index_entries", { n: <b>{missing}</b> })}
           </span>
@@ -109,7 +110,7 @@ export function CompactionCard({ c, done }: { c: Compaction; done: boolean }) {
   return (
     <div className="call" data-k="host" data-light="">
       <div className="g">
-        <Sym glyph="⊘" />
+        <Sym icon="collapseAll" />
       </div>
       <div className="c">
         <div className="hl">

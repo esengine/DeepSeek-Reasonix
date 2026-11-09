@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
+import { createElement, useCallback, useEffect, useId, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { ArrowUp } from "lucide-react";
 import { useFolded } from "./usefold";
 import { StopButton } from "./StopButton";
@@ -28,7 +28,8 @@ import { useFitHeight } from "./fitHeight";
 import { onComposerHintChange, showsComposerHint, useRunningMessageIntent, useSendShortcut } from "../state/prefs";
 import { runningSendIntent, sendAria, sendHint, sendsOnKey } from "./sendkey";
 import { countLines, pasteIsLong, planTone, planVerb } from "./intake";
-import { kindOf, nameOf, previewURL } from "./chipfile";
+import { nameOf, previewURL } from "./chipfile";
+import { fileAppearance } from "./document/FileTypeIcon";
 import { useIntake } from "./useIntake";
 import type { Dropped } from "./filedrop";
 import type { Quote } from "./cards/SayCard";
@@ -480,7 +481,7 @@ export function Composer({ port, status, running, queued = false, quote, restore
                       <span aria-hidden="true" style={c.url ? { backgroundImage: `url(${c.url})` } : undefined} />
                     </ImagePreview>
                   ) : (
-                    <span className="glyph" aria-hidden="true">{kindOf(c.a?.path ?? c.name)}</span>
+                    <span className="glyph" aria-hidden="true">{createElement(fileAppearance(c.a?.path ?? c.name).icon, { size: 20, strokeWidth: 1.8 })}</span>
                   )}
                   <span className="meta">
                     <span className="nm" title={c.a?.path ?? c.name}>{c.name}</span>
@@ -504,7 +505,7 @@ export function Composer({ port, status, running, queued = false, quote, restore
                 </>
               ) : c.k === "session" ? (
                 <>
-                  <span className="glyph" aria-hidden="true">{"#"}</span>
+                  <span className="glyph" aria-hidden="true"><StudioIcon name="history" /></span>
                   <span className="meta">
                     <span className="nm" title={c.title}>{c.title}</span>
                     <span className="sz">{t("composer.past_conversation_read_only_reference")}</span>
@@ -512,7 +513,7 @@ export function Composer({ port, status, running, queued = false, quote, restore
                 </>
               ) : (
                 <>
-                  <span className="glyph" aria-hidden="true">{c.k === "quote" ? "❝" : "TXT"}</span>
+                  <span className="glyph" aria-hidden="true"><StudioIcon name={c.k === "quote" ? "quote" : "file"} /></span>
                   <span className="meta">
                     <span className="nm" title={c.body}>{chipName(c)}</span>
                     <button
@@ -533,7 +534,7 @@ export function Composer({ port, status, running, queued = false, quote, restore
                 aria-label={t("common.remove_name", { name: chipName(c) })}
                 onClick={() => discard(c)}
               >
-                ×
+                <StudioIcon name="close" />
               </button>
             </li>
           ))}
@@ -553,7 +554,7 @@ export function Composer({ port, status, running, queued = false, quote, restore
       {queueStrip}
       <div className="fmain">
         <span className="prompt" aria-hidden="true">
-          ›
+          <StudioIcon name="chevron" />
         </span>
         <textarea
           data-action-keydown="session.send" data-window-keys=""
@@ -710,7 +711,7 @@ export function Composer({ port, status, running, queued = false, quote, restore
               { value: "plan", label: "Plan", desc: t("composer.plan_steps_before_changing_files") },
             ]}
             onPick={(value) => change("plan", () => port.setPlanMode(value === "plan"))}
-            label={<><StudioIcon name="agent" /><span className="studio-sr-label">{t("common.plan")}</span><span>{status?.plan ? "Plan" : "Agent"}</span><StudioIcon name="down" /></>}
+            label={<><StudioIcon name={status?.plan ? "tasks" : "agent"} /><span className="studio-sr-label">{t("common.plan")}</span><span>{status?.plan ? "Plan" : "Agent"}</span><StudioIcon name="down" /></>}
           />
         </div>
         {git?.repo && (worktree.sources || status?.workspaceRoot) ? <WorktreeChip port={port} workspace={workspace} onChanged={onChanged} onSwitched={onTreeChanged} onError={onError} changeCount={countElsewhere ? 0 : changeCount} sources={worktree.sources ?? { available: false, sourceRoot: status?.workspaceRoot ?? "", sources: [] }} canCreate={fresh && !!worktree.sources?.available} selection={worktree.selection} branch={git.branch} busy={submitting || running} onSelect={worktree.setSelection} refresh={worktree.refresh} /> : <BranchChip port={port} git={git} changeCount={changeCount} countElsewhere={countElsewhere} onChanged={onChanged} onSwitched={onTreeChanged} onError={onError} />}
@@ -764,7 +765,7 @@ export function Composer({ port, status, running, queued = false, quote, restore
         </div>
         {phone && (
           <button type="button" className="mode plain turn-more" data-action="composer.more-tools" aria-expanded={toolsOpen} aria-label={t("composer.more_tools")} onClick={() => setToolsOpen((on) => !on)}>
-            <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 8h.01M8 8h.01M12.5 8h.01" /></svg>
+            <StudioIcon name="more" />
           </button>
         )}
         </div>

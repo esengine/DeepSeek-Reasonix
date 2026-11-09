@@ -1,3 +1,4 @@
+import { StudioIcon } from "./StudioIcon";
 import { useMemo, useState } from "react";
 import { t } from "../i18n";
 import type { ProviderModelCheck, ProviderModelCheckReason, ProviderModelCheckStatus } from "../port/port";
@@ -181,7 +182,7 @@ export function ModelChoice({
           real matches is how you add a model when you meant to pick one. */}
       {naming && (
         <button className="mnew" onClick={add}>
-          <span className="k">+</span>
+          <span className="k"><StudioIcon name="plus" /></span>
           <span className="tx">
             <span className="lb">{t("composer.add_unlisted_model_name", { name: q.trim() })}</span>
             <span className="ds">{t("composer.saves_the_exact_model_id")}</span>

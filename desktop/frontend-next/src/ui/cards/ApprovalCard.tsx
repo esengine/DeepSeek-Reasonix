@@ -137,7 +137,7 @@ export function ApprovalCard({ item, onApprove, onFullAccess, onPlan }: Props) {
     // 另一个是它要动你的文件。授权借「写」的类别 —— 它本来就是一次写权限。
     <div className="call" data-k="write" data-approval={sealed ? item.verdict : "pending"} data-prompt={sealed ? "settled" : "pending"}>
       <div className="g">
-        <Sym glyph="⊛" />
+        <Sym icon="shield" />
       </div>
       <div className="c">
         <div className="hl">

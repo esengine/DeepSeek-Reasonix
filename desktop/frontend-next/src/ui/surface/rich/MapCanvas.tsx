@@ -1,3 +1,4 @@
+import { StudioIcon } from "../../StudioIcon";
 import { useEffect, useRef, useState } from "react";
 import Map, { Layer, Marker, NavigationControl, Source, type MapRef } from "react-map-gl/maplibre";
 import { Alert, Button } from "@mantine/core";
@@ -31,7 +32,7 @@ export default function MapCanvas({ places, order, active, focusVersion, focus }
     <Map key={attempt} ref={ref} initialViewState={{ longitude: coordinates[0]?.[0] ?? 0, latitude: coordinates[0]?.[1] ?? 0, zoom: 11 }} mapStyle={style} onLoad={() => { setReady(true); setError(false); }} onError={() => setError(true)} attributionControl={{ compact: false }}>
       <NavigationControl position="top-right" showCompass={false} />
       {selected.length > 1 && <Source id="visit-order" type="geojson" data={{ type: "Feature", properties: {}, geometry: { type: "LineString", coordinates: selected } }}><Layer id="visit-order-line" type="line" paint={{ "line-color": "#0d9488", "line-width": 3, "line-dasharray": [2, 2] }} /></Source>}
-      {places.map(p => <Marker key={p.value} longitude={p.location!.longitude} latitude={p.location!.latitude} anchor="center"><Button className="rich-map-pin" radius="xl" color={active === p.value ? "dark" : "teal"} size="compact-sm" aria-label={p.label} data-action="surface.explore" onClick={() => focus(p.value)}>{order.includes(p.value) ? order.indexOf(p.value) + 1 : "+"}</Button></Marker>)}
+      {places.map(p => <Marker key={p.value} longitude={p.location!.longitude} latitude={p.location!.latitude} anchor="center"><Button className="rich-map-pin" radius="xl" color={active === p.value ? "dark" : "teal"} size="compact-sm" aria-label={p.label} data-action="surface.explore" onClick={() => focus(p.value)}>{order.includes(p.value) ? order.indexOf(p.value) + 1 : <StudioIcon name="pin" />}</Button></Marker>)}
     </Map>
     <Button className="rich-map-overview" size="xs" variant="default" disabled={!ready || !coordinates.length} data-action="surface.explore" onClick={overview}>{t("chat.show_all_places")}</Button>
     {error && <Alert className="rich-map-status" color="yellow" role="status">{t("chat.some_map_content_could_not")} <Button size="xs" variant="subtle" data-action="surface.explore" onClick={() => { setReady(false); setError(false); setAttempt(v => v + 1); }}>{t("common.retry")}</Button></Alert>}

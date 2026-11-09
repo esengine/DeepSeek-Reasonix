@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useStartsOpen } from "../../state/foldpref";
 import type { Tool } from "../../port/wire";
 import { argOf, splitPath } from "../args";
-import { Sym, glyphFor } from "../Sym";
+import { Sym, iconFor } from "../Sym";
 import { Cost } from "../Cost";
 import { Hits, Peek, Term, hitRows, parseHits, parseListing, parseRows, PATH } from "./ToolOutput";
 import { toolErrorDetail, toolFailed, toolOutputEchoed, toolRefusalReason } from "./outcome";
@@ -114,7 +114,7 @@ export function ReadsCard({ tools }: { tools: Tool[] }) {
   return (
     <div className="call" data-state={failed ? "failed" : "done"}>
       <div className="g">
-        <Sym glyph={glyphFor("read_file")} />
+        <Sym icon={iconFor("read_file")} />
       </div>
       <div className="c">
         <details className="tool-disclosure reads-disclosure" open={expanded} onToggle={(event) => event.currentTarget.open !== expanded && setExpanded(event.currentTarget.open)}>

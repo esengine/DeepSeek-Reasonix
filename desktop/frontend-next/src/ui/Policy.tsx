@@ -54,7 +54,7 @@ export function Policy({ port, status, onChanged, onBoundary }: Props) {
         <span className="ic" aria-hidden="true">
           {apv === "yolo"
             ? <i className="polwarn"><StudioIcon name="warning" /></i>
-            : <svg viewBox="0 0 16 16"><path d="M8 2.2 13 4v3.5c0 3-1.8 5.1-5 6.3-3.2-1.2-5-3.3-5-6.3V4l5-1.8Z" /></svg>}
+            : <StudioIcon name="shield" />}
         </span>
         <span className={apv === "yolo" ? "lb polrisk" : "lb"} data-display={label}>{label}</span>
         <StudioIcon name="down" className="studio-control-chevron" />
@@ -76,7 +76,7 @@ export function Policy({ port, status, onChanged, onBoundary }: Props) {
                 onClick={() => apply(value)}
               >
                 <span><b>{t(name)}</b><small>{t(note)}</small></span>
-                {apv === value && <span className="studio-permission-check" aria-hidden="true">✓</span>}
+                {apv === value && <StudioIcon name="check" className="studio-permission-check" />}
               </button>
             </div>
           ))}
@@ -85,7 +85,7 @@ export function Policy({ port, status, onChanged, onBoundary }: Props) {
         <div className="studio-policy-note">{t("safety.approvals_decide_when_to_ask")}</div>
         <button className="studio-policy-boundary" data-action="settings.section" data-value="tools:sandbox" onClick={onBoundary} disabled={!onBoundary}>
           <span><b>{t("safety.sandbox_and_runtime_boundary")}</b><small>{t("safety.view_current_isolation_and_network")}</small></span>
-          <span aria-hidden="true">›</span>
+          <span aria-hidden="true"><StudioIcon name="chevron" /></span>
         </button>
       </div>
     </div>

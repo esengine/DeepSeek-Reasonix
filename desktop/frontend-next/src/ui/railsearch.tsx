@@ -1,3 +1,4 @@
+import { StudioIcon } from "./StudioIcon";
 import { type ReactNode, createContext, useContext, useEffect, useRef, useState } from "react";
 import { t } from "../i18n";
 import { chord } from "./keys";
@@ -30,9 +31,7 @@ export function RailSearch({ children, resetKey }: { children: ReactNode; resetK
   return (
     <>
       <div className="wsfind" data-query={q ? "" : undefined}>
-        <svg viewBox="0 0 16 16" aria-hidden="true">
-          <path d="M7.2 3.1a4.1 4.1 0 1 0 0 8.2 4.1 4.1 0 0 0 0-8.2M10.3 10.3 13 13" />
-        </svg>
+        <StudioIcon name="search" />
         <input
           ref={find}
           type="search"
@@ -44,7 +43,7 @@ export function RailSearch({ children, resetKey }: { children: ReactNode; resetK
         />
         <kbd hidden={!!q}>{chord("K")}</kbd>
         <button className="clr" hidden={!q} onClick={() => setQ("")} aria-label={t("common.clear")}>
-          ×
+          <StudioIcon name="close" />
         </button>
       </div>
       <RailQuery.Provider value={q}>{children}</RailQuery.Provider>

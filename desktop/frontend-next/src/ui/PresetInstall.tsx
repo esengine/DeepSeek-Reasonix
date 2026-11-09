@@ -1,3 +1,4 @@
+import { StudioIcon } from "./StudioIcon";
 import { useRef, useState } from "react";
 import { t } from "../i18n";
 import { reason } from "../i18n/kernel";
@@ -42,7 +43,7 @@ export function PresetInstall({ port, preset, onDone, onCancel, onBack }: {
           <strong>{preset.label}</strong>
           <p>{t("persona.the_kernel_creates_the_model")}</p>
         </div>
-        <button className="addp-close" data-action="provider.preset-cancel" onClick={onCancel} aria-label={t("common.cancel")}>×</button>
+        <button className="addp-close" data-action="provider.preset-cancel" onClick={onCancel} aria-label={t("common.cancel")}><StudioIcon name="close" /></button>
       </div>
       <div className="fields">
         <label className="grow">

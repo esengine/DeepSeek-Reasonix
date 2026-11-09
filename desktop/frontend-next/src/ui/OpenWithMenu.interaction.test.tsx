@@ -31,6 +31,8 @@ it("lists the programs installed on this machine and opens the project in the ch
   await userEvent.click(screen.getByRole("button", { name: "用其他程序打开项目" }));
   await waitFor(() => expect(screen.getByRole("menuitem", { name: "用 VS Code 打开" })).toBeTruthy());
   expect(screen.getByRole("menuitem", { name: "用 终端 打开" })).toBeTruthy();
+  expect(screen.getByRole("menuitem", { name: "用 终端 打开" }).querySelector(".lucide-terminal")).not.toBeNull();
+  expect(screen.getByRole("menuitem", { name: "用 VS Code 打开" }).querySelector(".lucide-code-xml")).not.toBeNull();
   expect(screen.queryByRole("menuitem", { name: /Sublime/ })).toBeNull();
   await userEvent.click(screen.getByRole("menuitem", { name: "用 终端 打开" }));
   expect(openWith).toHaveBeenCalledExactlyOnceWith("/w", "terminal");
