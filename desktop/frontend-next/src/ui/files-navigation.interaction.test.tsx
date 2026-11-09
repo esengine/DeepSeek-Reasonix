@@ -56,8 +56,9 @@ it.each(["rail", "sidebar", "palette"])("opens only the focused pane's files fro
   const { ports } = await mount();
   const openFiles = async () => {
     if (entry === "palette") return palette("文件");
+    if (entry === "sidebar") await userEvent.click(screen.getByRole("button", { name: "侧栏入口" }));
     const scope = document.querySelector<HTMLElement>(entry === "rail" ? ".nav" : ".studio-quicknav")!;
-    await userEvent.click(within(scope).getByRole("button", { name: "文件" }));
+    await userEvent.click(within(scope).getByRole(entry === "rail" ? "button" : "menuitem", { name: "文件" }));
   };
   await openFiles();
   await waitFor(() => expect(filesShown()).toBe(true));

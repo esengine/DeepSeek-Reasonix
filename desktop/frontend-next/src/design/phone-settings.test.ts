@@ -29,13 +29,6 @@ describe("the settings sheet on a phone", () => {
     expect(rule(S + " .prefs-main")).toMatch(/grid-column:\s*1/);
   });
 
-  it("puts the close button in the title row, at the right", () => {
-    const actions = rule(S + " .prefs-actions");
-    expect(actions).toMatch(/grid-column:\s*1/);
-    expect(actions).toMatch(/grid-row:\s*1/);
-    expect(actions).toMatch(/justify-self:\s*end/);
-  });
-
   it("turns the category list into a strip that scrolls sideways without a scrollbar", () => {
     const nav = rule(S + " .prefs-nav");
     expect(nav).toMatch(/display:\s*flex/);

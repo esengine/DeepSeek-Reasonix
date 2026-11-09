@@ -1,22 +1,20 @@
 import { t } from "../i18n";
 import { SETTING_AT, type SettingScope } from "./prefsnav";
 import type { ReactNode } from "react";
-import { SettingDeep } from "./SettingDeep";
 
 // id is required, and that is the whole enforcement: a settings block cannot
 // be written without naming itself, and a name the catalogue does not carry
 // fails the gate. So "which setting is this, and when does changing it take
 // effect" has no default and no way to be left unanswered.
 export function Group({
-  id, title, hint, now, action, pill, inline, children,
+  id, title, hint, now, action, inline, children,
 }: {
-  id: string; title: string; hint?: string; now?: string; action?: ReactNode; pill?: string; inline?: boolean; children?: ReactNode;
+  id: string; title: string; hint?: string; now?: string; action?: ReactNode; inline?: boolean; children?: ReactNode;
 }) {
   return (
-    <SettingDeep id={id} title={title} now={now} hint={hint} act={pill}>
     <section className="grp" id={`set-${id}`} data-setting={id} data-inline={inline ? "" : undefined}>
       <div className="grp-hd">
-        <h3>{title}</h3>
+        <h4>{title}</h4>
         <ScopeTag id={id} />
         {now && <span className="now">{now}</span>}
         {action}
@@ -28,7 +26,6 @@ export function Group({
           as three alarms. */}
       <ApplyNote id={id} />
     </section>
-    </SettingDeep>
   );
 }
 

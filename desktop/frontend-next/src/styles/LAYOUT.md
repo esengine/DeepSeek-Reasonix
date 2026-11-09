@@ -63,6 +63,13 @@ and selected states, while long titles truncate within the remaining width.
   hierarchy to weight alone. `.side .lbl` is listed there for specificity: the
   right column's same-named rule comes later in the file.
 
+## Select alignment
+
+Styleable native selects center their value on the cross axis. Their fixed
+control height and centered background arrow must share the same text center,
+including settings rows and enlarged interface fonts. The browser still owns
+the picker and keyboard navigation.
+
 ## Wallpaper and sky
 
 - `body::before` is the theme's picture, when a pack ships one. It sits behind
@@ -97,6 +104,9 @@ and selected states, while long titles truncate within the remaining width.
 
 ## Title bar and chrome
 
+- Navigation selection uses the theme's tinted surface and readable accent
+  ink, with a side marker and a light inset border. Theme packs use the same
+  treatment to distinguish page position from solid primary-action buttons.
 - `-webkit-app-region` is Chromium's drag property. Inside the shell this row
   *is* the title bar, so it has to be the drag handle, and every control on it
   opts back out. Membership is what the markup says is interactive, not a list of the
@@ -218,6 +228,9 @@ and selected states, while long titles truncate within the remaining width.
 
 ## Composer shelf
 
+- Send and stop use 18px Lucide icons inside their circular hit targets. Stop
+  keeps its filled square on every screen size; a tinted surface distinguishes
+  it without an outline competing with the symbol.
 - Model choices reserve the first line for the model name. Protocol and image
   capability share the second line; the capability badge and connection status
   keep their width, while long names and endpoints truncate inside the menu.
@@ -856,80 +869,34 @@ what exists.
   mixed text. The "get a key" entry sits at the label's right end with tracking
   zeroed, because the label's .06em is for Latin small labels.
 
-## The settings sheet
+## Full-screen settings
 
-- One title bar exists — `.chrome` — and it owns the window buttons and the drag
-  region; this layer starts below it, so the window buttons still work while
-  settings is open.
-- The backdrop dims and softens but stays thin: the sheet over it is glass, and
-  what shows through glass has to be light.
-- A floating layer fades in rather than sliding: a full-bleed blurred backdrop
-  shows its edge the moment it moves. The sheet is conditionally rendered, so it
-  had an entrance and no way out — it simply stopped existing. A view transition
-  gives it both ends. Only the named element takes part; without naming the root
-  explicitly, every swap also cross-fades the whole window.
-- The change preview uses the same pair — a dimmed, blurred backdrop and a
-  raised surface starting below the title bar — for the same reason, including
-  the same view transition. The diff inside it drops the top margin it carries
-  for use inside a card, where it is one element among several; here it is the
-  only content.
-- A very faint gilt line under the header says this is the window's own thing,
-  not content.
-- The header's expand/restore and close buttons share a 32px hit-region height,
-  matching the search control's minimum height. Inline-flex centres SVG and text
-  content independently of font fallback; native window controls retain their own sizing.
-- The search entry sits beside the title. That position used to hold one
-  explanation addressed to two of the three tiers; that sentence now lives on
-  each settings block (`.apply`). Results are laid under the header without
-  repainting settings itself: looking for something should not take away the
-  page you are reading.
-- Search results give the setting name a full-width first row. Section and
-  scope/apply metadata share a wrapping second row; neither can consume the
-  name's width. Results retain their content height inside the scrolling list.
-- What changing a setting costs is a fact, not a warning: one colour for all
-  three tiers, only lighter than body text. What deserves colour is a present
-  state such as "cannot be changed while a turn is running".
-- A search landing flashes once: it is navigation feedback, not a changed
-  setting.
-- The nav column is 224px because of the Chinese names: "Tools and permissions"
-  needs 138px at that width while a row leaves the name 99.6px. The extra 16px
-  does not close the gap but decides how many characters of the value survive
-  beside it. It is named `.navsec`, not `.navgrp`: the rail already owns that
-  name for its columns of buttons.
-- The nav doubles as a readout: the current value hangs at the right, so opening
-  settings shows at a glance what this session runs under — which was the only
-  reason the separate status bar existed.
-- The value gives up its width first. Chinese names fit this column and English
-  ones do not, and a row that truncates the name says nothing. The name's basis
-  is its content width rather than 0: at 0 the row never "overflows", the name
-  simply takes what is left and is clipped, and the value is never asked to
-  yield. The value's shrink factor is 99, not 1: with both shrinkable the browser
-  splits the overflow in proportion to their bases and takes a slice off the name
-  too — 38px off "工具与权限" in the English build.
-- A bar props the selected row up from the left. In a column of equal pills a
-  fill alone gives out on one side or the other.
-- `.nv` is real information, not decoration: `--ghost` at 10.5px measures 2:1 and
-  cannot be read.
-- The settings column hugs the nav rather than centring: with only a left rail,
-  centring suspends the content as an island. 760px is a reading measure for
-  prose; the extensions page is a table of five columns and is the one page
-  widened, or its descriptions are clipped.
-- Changing section is one navigation: what changes is the column, not each block
-  arriving separately. Four blocks each flying in is four announcements of "here
-  is something new" when nothing happened — you walked to another page. The
-  section mark is the section's mark, not its state: it appears on every page, so
-  tinting it amber says every page needs you.
-- A state is said in the vocabulary of the separation it modifies: with no line
-  to tint, hover lifts the fill and focus rings.
-- The advanced fold hides three complete settings blocks, not a note, so its
-  summary is drawn at a settings row's weight. Collapsed, `.ds` says whether
-  anything inside has been changed: hiding a setting that is in force leaves the
-  page disagreeing with the window.
-- The page heading says where you are; block headings stay strong enough to scan
-  the individual decisions. A command named in a note is set in the interface's
-  own mono, because a bare `<code>` inherits the browser's default family.
+- Settings fills the application window and owns a draggable header with a
+  labelled return action and native window controls. The header remains outside
+  the settings scroller and search results, inside its focus boundary.
+- Desktop navigation stays 240px wide. Content uses the remaining width with
+  fixed 24px side gutters; every section card fills one column without a cap.
+  Phone navigation becomes a horizontal strip with 14px content gutters.
+- Categories keep their editors expanded. Pill navigation scrolls below the
+  sticky index without replacing editors or discarding drafts. Leaving a
+  category retains the existing unsaved-change guard.
+- Page, card and group headings use distinct sizes; groups use h4 beneath card
+  h3 headings. Descriptions wrap and related controls share a card.
+- `settings-fullscreen.mjs` checks every category in both schemes and widths,
+  including enlarged text; `settings-page-column.mjs` checks pill landing.
+
+- Search overlays the content column while preserving its editors. Results use
+  a full-width name followed by wrapping category, scope and effect metadata.
+- Scope and effect are facts with neutral styling. Landing briefly marks the
+  located setting; changing category resets only the content scroller.
+- Navigation labels keep their content width before secondary counts yield.
+  Search aliases never become separate settings or controls.
 
 ## Settings rows
+
+Log paths and account notes wrap within their rows, including long unbroken
+paths at enlarged text sizes. Their content never relies on the card gutters
+to absorb horizontal overflow.
 
 - One option per row, shared with the ask card as one control: two copies drift
   apart. `.prow`'s only differences are its own disabled and danger states.
@@ -1600,7 +1567,7 @@ A sub-agent row, by the list's own width:
 
 ## Dialogs centre on the window
 
-- A veil (settings, feedback, a full screenshot, a checkpoint preview, a
+- A veil (feedback, a full screenshot, a checkpoint preview, a
   sub-agent transcript) starts below the title bar so the bar stays usable.
 - Centred in that box alone, a dialog would sit half a bar below the window's
   middle, which reads as off balance against the whole window.
@@ -1608,14 +1575,13 @@ A sub-agent row, by the list's own width:
   bar, so the box it centres in is symmetric about the window's middle. A border
   rather than padding because padding on these veils is set per breakpoint, and
   percentage heights inside then leave room for it on their own.
-- The phone layout (`data-fold~="scene"`) shows settings full screen, so it is
-  excluded.
+- The phone layout (`data-fold~="scene"`) is excluded. Settings owns a full
+  screen at every width and is outside the dialog-centering selector.
 
-## Settings and feedback veils
+## Feedback veil
 
-- `.prefs` and `.fbk-veil` use the same flat, 93% page-colour scrim in both
-  themes, not a blurred backdrop. Settings stays visually separate from live
-  content without filtering that content on every frame.
+- `.fbk-veil` uses a flat, 93% page-colour scrim in both themes without
+  filtering the live content on every frame.
 - A backdrop filter over the whole window is redone every frame while anything
   beneath it moves; a running turn's spinners are enough.
 - The scrim is opaque enough that what shows through reads as dimmed, which is
@@ -1759,3 +1725,12 @@ A sub-agent row, by the list's own width:
 - Appearance → Conversation display offers “Show collapsed plan progress,” off by default and persisted on this machine. Changing it immediately updates mounted plan cards.
 - A nonempty collapsed plan draws the expanded plan's `.prog2` track below its summary, using completed steps over total steps from `stepDone`. Pending and running steps do not count as complete.
 - Opening the card replaces the optional track with the existing expanded progress. Goal-only, empty and hidden cards have no progress track; collapse, Escape, outside dismissal and focus return remain unchanged.
+
+## Sidebar tool card
+
+- The footer keeps Settings and Feedback as labelled rows aligned at the left.
+  Enabled shortcuts appear in a card with library icons and names, preserving
+  their saved order and visibility. Hiding every shortcut removes the chevron.
+- Hover waits briefly before opening and closing so the pointer can cross to
+  the card. Click and keyboard activation also work; Escape restores focus.
+  The portaled card follows its anchor and stays inside the viewport.

@@ -18,10 +18,9 @@ describe("the settings search results", () => {
     expect(found).toMatch(/width:\s*auto/);
   });
 
-  it("cover the whole column, leaving the header row's height empty and the close button above them", () => {
+  it("cover the whole column, leaving room above the results", () => {
     expect(found).toMatch(/top:\s*0/);
     expect(found).toMatch(/padding:\s*58px /);
     expect(studio).toMatch(/\.prefs-hd \{ min-height: 58px/);
-    expect(rule(':root:not([data-fold~="phone"]) .prefs-actions')).toMatch(/z-index:\s*6/);
   });
 });

@@ -66,6 +66,7 @@ select[data-size="sm"] { height: 24px; padding: 0 26px 0 8px; font-size: var(--f
 
 @supports (appearance: base-select) {
   select:not([multiple]), select:not([multiple])::picker(select) { appearance: base-select; }
+  select:not([multiple]) { align-items: center; }
   select:not([multiple])::picker-icon { display: none; }
   select:not([multiple])::picker(select) {
     box-sizing: border-box; margin-block: 4px; padding: 4px; max-height: min(320px, 50vh);

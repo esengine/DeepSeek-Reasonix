@@ -16,6 +16,7 @@ try {
     await ctx.addInitScript(() => { try { localStorage.setItem("rx-nav-rail", "off"); } catch {} });
     const page = await ctx.newPage();
     await page.goto(BASE, { waitUntil: "networkidle" });
+    await page.locator(".studio-tools").hover();
     await page.waitForSelector(".studio-quicknav > button");
     await page.mouse.move(1270, 890);
     const looks = await page.evaluate(() => [...document.querySelectorAll(".studio-quicknav > button")].map((b) => {

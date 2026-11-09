@@ -37,7 +37,7 @@ for (const scheme of ["light", "dark"]) {
     await page.evaluate(() => document.querySelector('[data-action="chrome.settings"]')?.click());
     await page.waitForSelector(".prefs-nav button");
     await page.locator(".prefs-nav button", { hasText: "外观" }).first().click();
-    await page.locator('[data-action="settings.open-page"][data-target="size"]').click();
+    await page.locator('[data-action="settings.page-index"][data-target="size"]').click();
     await page.locator('[data-action="appearance.text-size"]', { hasText: new RegExp(`^${name}$`) }).click();
     await page.waitForTimeout(200);
     if (shotDir && scale === 1.3) await page.screenshot({ path: `${shotDir}/${scheme}-settings-1.3.png` });

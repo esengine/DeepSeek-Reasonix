@@ -46,7 +46,7 @@ function rendered(): { ids: string[]; unnamed: string[] } {
         else unnamed.push(`${path}:${n.loc?.start.line}  <Group> with no literal id`);
         return;
       }
-      if (n.type === "JSXOpeningElement" && (name(n) === "SettingRow" || name(n) === "SettingDeep")) {
+      if (n.type === "JSXOpeningElement" && name(n) === "SettingRow") {
         const id = literal(attr(n, "id"));
         if (id) ids.push(id);
         return;

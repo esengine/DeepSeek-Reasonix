@@ -95,7 +95,7 @@ it.each(["zh", "en"])("keeps foundations visible and previews their own scheme i
   expect(blue.closest("details")).toBeNull();
   expect(green.closest("details")).toBeNull();
   const sky = document.querySelector('.pal[data-value="tide"]')!;
-  expect(sky.closest("details")?.open).toBe(false);
+  expect(sky.closest("details")?.open).toBe(true);
   const art = blue.querySelector(".pal-art") as HTMLElement;
   expect(art.style.getPropertyValue("--pal-page")).toBe("#F5F7FA");
   await userEvent.click(green);

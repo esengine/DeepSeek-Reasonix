@@ -63,10 +63,13 @@ describe("the composer's tool row on a phone", () => {
 });
 
 describe("the stop button", () => {
-  it("carries the board's pause mark as well as the square, and the stylesheet picks one", () => {
+  it.each(["", PHONE])("keeps the same stop and send symbols when the layout is %s", (fold) => {
+    document.documentElement.dataset.fold = fold;
     const box = draw(true);
-    const stop = box.querySelector(".btn.stop")!;
-    expect(stop.querySelector(".ic-stop")).not.toBeNull();
-    expect(stop.querySelector(".ic-pause")).not.toBeNull();
+    const stop = screen.getByRole("button", { name: "停下" });
+    expect(stop.getAttribute("data-action")).toBe("session.stop");
+    expect(stop.querySelectorAll("svg")).toHaveLength(1);
+    expect(stop.querySelector(".lucide-square")).not.toBeNull();
+    expect(box.querySelector('.btn.send .lucide-arrow-up')).not.toBeNull();
   });
 });

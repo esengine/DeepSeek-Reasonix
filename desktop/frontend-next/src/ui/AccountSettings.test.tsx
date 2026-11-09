@@ -1,23 +1,20 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, expect, it, vi } from "vitest";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { afterEach, expect, it } from "vitest";
 import "./testkit";
 import { MockPort } from "../port/mock";
 import type { AccountState, AgentPort } from "../port/port";
 import { AccountSettings } from "./AccountSettings";
-import { SettingDeepContext } from "./SettingDeep";
 
 afterEach(cleanup);
 
 function draw(state: AccountState | null) {
-  const go = vi.fn();
   const port = new MockPort() as unknown as AgentPort;
   render(
-    <SettingDeepContext.Provider value={{ pages: true, open: null, section: "账号与关于", go }}>
+    <>
       <AccountSettings port={port} homePort={port} state={state} unread="" reload={() => {}} />
-    </SettingDeepContext.Provider>,
+    </>,
   );
-  return go;
 }
 
 it("is account, version and diagnostics, and about: one row per setting", () => {
@@ -27,16 +24,16 @@ it("is account, version and diagnostics, and about: one row per setting", () => 
 });
 
 it("offers sign-in when signed out and the account when signed in", () => {
-  const go = draw({ signedIn: false });
-  fireEvent.click(screen.getByRole("button", { name: "登录" }));
-  expect(go).toHaveBeenLastCalledWith("account");
+  draw({ signedIn: false });
+  expect(document.querySelector('[data-action="account.sign-in"]')).toBeTruthy();
   cleanup();
   draw({ signedIn: true, user: { handle: "demo", email: "d@example.com", label: "demo" } });
-  expect(screen.getByRole("button", { name: "账号信息" })).toBeTruthy();
+  expect(screen.getByText("d@example.com")).toBeTruthy();
+  expect(document.querySelector('[data-action="account.sign-out"]')).toBeTruthy();
 });
 
-it("opens versions and logs from their pills", () => {
-  const go = draw({ signedIn: false });
-  fireEvent.click(screen.getByRole("button", { name: "版本与更新" }));
-  expect(go).toHaveBeenLastCalledWith("versions");
+it("shows versions and diagnostics inline", async () => {
+  draw({ signedIn: false });
+  await waitFor(() => expect(document.querySelector("#set-versions .vnow")).toBeTruthy());
+  expect(document.querySelector('#set-logs .grp-items')).toBeTruthy();
 });

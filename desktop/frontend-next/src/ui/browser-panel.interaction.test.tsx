@@ -172,8 +172,14 @@ describe("which page the shell draws, and where", () => {
 
   it("sends the person's controls and typed address to the page on screen", async () => {
     await panel({ tabs, shown: true });
-    await userEvent.click(screen.getByRole("button", { name: "后退" }));
-    expect(bridge.controlBrowserView).toHaveBeenCalledWith("view-a", "back");
+    for (const [label, action, icon] of [["后退", "back", "arrow-left"], ["前进", "forward", "arrow-right"], ["重新加载", "reload", "rotate-cw"]]) {
+      const button = screen.getByRole("button", { name: label });
+      expect(button.querySelector(`.lucide-${icon}`)).not.toBeNull();
+      expect(button.title).toBe(label);
+      await userEvent.click(button);
+      expect(bridge.controlBrowserView).toHaveBeenLastCalledWith("view-a", action);
+    }
+    expect(screen.getByRole("button", { name: "用默认浏览器打开此页" }).querySelector(".lucide-external-link")).not.toBeNull();
     const field = screen.getByRole("textbox", { name: "网址" });
     await userEvent.clear(field);
     await userEvent.type(field, "localhost:3000{Enter}");

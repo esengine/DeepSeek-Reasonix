@@ -21,7 +21,7 @@ export function UploadUsage({ port }: { port: Pick<AgentPort, "uploadUsage"> }) 
   }, [port]);
   const today = report?.daily[report.daily.length - 1]?.bytes ?? 0;
   return (
-    <Group id="upload-usage" pill={t("safety.details")}
+    <Group id="upload-usage"
       title={t("usage.upload_volume")}
       hint={t("settings.size_of_requests_sent")}
     >

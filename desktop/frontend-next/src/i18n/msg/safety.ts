@@ -123,15 +123,13 @@ export const SAFETY: Messages = {
   "safety.writing_files_every_write_tool": { zh: "写文件（全部写入工具）", en: "writing files (every write tool)" },
   "safety.ask_before_writing_or_running": { zh: "写文件、跑命令前要不要先问", en: "Whether to ask before writing files or running commands" },
   "safety.allow_and_deny_by_command": { zh: "按命令、路径写死的允许和拒绝；拒绝规则永远优先", en: "Allow and deny by command or path; a deny rule always wins" },
-  "safety.edit_rules_n": { zh: "编辑规则（{n} 条）", en: "Edit rules ({n})" },
+
   "safety.ask_before_copied_text": { zh: "照抄网页或工具结果里的文字去调用工具前先问你", en: "Ask before a call that copies text from a web page or tool result" },
-  "safety.which_tools_the_model_sees": { zh: "模型能看到哪些工具", en: "Which tools the model can see" },
-  "safety.view_and_adjust_n": { zh: "查看与调整（{n}）", en: "View and adjust ({n})" },
+
   "safety.commands_write_only_here": { zh: "命令只能写工作区、临时目录和工具缓存", en: "Commands can only write to the workspace, temp folders and tool caches" },
   "safety.which_program_runs_a_command": { zh: "跑命令用哪个程序", en: "Which program runs a command" },
   "safety.when_two_sessions_edit_one": { zh: "两个会话同时改一个项目时怎么处理", en: "What happens when two sessions edit one project" },
   "safety.web": { zh: "联网", en: "Web" },
-  "safety.search_and_fetch_when_needed": { zh: "需要时搜索网页、抓取页面内容", en: "Search the web and fetch pages when needed" },
-  "safety.details": { zh: "详细设置", en: "Details" },
+
 "safety.what_outside_text_covers": { zh: "调用逐字复制了网页或工具结果里的文字时，Auto 和 YOLO 也先问你。只认用户配置；已授权的 MCP 服务器、改写过或编码过的文字不在其内。无人可问时（无头 YOLO），这类调用会被拒绝而不是执行。修改会重建运行时，任务运行期间无法变更。默认关闭。", en: "When a call copies text word for word from a web page or a tool result, Auto and YOLO ask you first. Only your user config counts; servers you have authorised, and text that was reworded or encoded, are not covered. When nobody can be asked (headless YOLO) such a call is refused instead of run. Changing it rebuilds the runtime and cannot be done while a task runs. Off by default." },
 };

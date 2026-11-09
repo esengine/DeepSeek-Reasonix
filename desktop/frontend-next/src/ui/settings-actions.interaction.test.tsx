@@ -22,19 +22,17 @@ function draw(onClose = vi.fn()) {
   return onClose;
 }
 
-it("has one control in its corner, the one that closes it", async () => {
+it("returns to the workspace through the labelled full-screen header", async () => {
   const onClose = draw();
-  const buttons = document.querySelectorAll(".prefs-actions button");
-  expect(buttons).toHaveLength(1);
-  expect(screen.queryByRole("button", { name: "放大设置窗口" })).toBeNull();
-  expect(document.querySelector(".prefs-sheet")?.hasAttribute("data-wide")).toBe(false);
-  await userEvent.click(buttons[0]!);
-  await vi.waitFor(() => expect(onClose).toHaveBeenCalled());
+  const back = screen.getByRole("button", { name: "关闭 Esc" });
+  expect(back.textContent).toContain("返回工作区");
+  expect(back.closest(".prefs-windowbar")).toBeTruthy();
+  await userEvent.click(back);
+  await vi.waitFor(() => expect(onClose).toHaveBeenCalledExactlyOnceWith());
 });
 
-it("blurs the title bar behind it too, without taking its clicks", () => {
+it("owns a full-screen surface and a title bar instead of an outer veil", () => {
   draw();
-  const strip = document.querySelector(".prefs-strip");
-  expect(strip?.getAttribute("aria-hidden")).toBe("true");
-  expect(strip?.nextElementSibling?.classList.contains("prefs")).toBe(true);
+  expect(document.querySelector(".prefs.prefs-screen > .prefs-windowbar")).toBeTruthy();
+  expect(document.querySelector(".prefs-strip")).toBeNull();
 });

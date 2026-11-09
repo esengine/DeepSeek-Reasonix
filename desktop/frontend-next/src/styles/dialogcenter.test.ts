@@ -4,5 +4,6 @@ const CSS = import.meta.glob("./dialogcenter.css", { query: "?raw", import: "def
 const css = CSS["./dialogcenter.css"]!;
 
 it("keeps the transparent bottom border that centres a dialog under the title bar", () => {
-  expect(css).toMatch(/:is\(\.prefs, \.fbk-veil, \.image-preview, \.cpv, \.agent-tx-scrim\)\s*\{\s*border-bottom:\s*var\(--chrome-h, 39px\) solid transparent;/);
+  expect(css).not.toContain(".prefs");
+  expect(css).toMatch(/:is\(\.fbk-veil, \.image-preview, \.cpv, \.agent-tx-scrim\)\s*\{\s*border-bottom:\s*var\(--chrome-h, 39px\) solid transparent;/);
 });

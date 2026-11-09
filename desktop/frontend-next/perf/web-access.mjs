@@ -23,7 +23,7 @@ for (const scheme of ["light", "dark"]) {
     await page.evaluate(() => document.querySelector('[data-action="chrome.settings"]')?.click());
     await page.waitForSelector('[data-action="settings.section"][data-value="tools"]');
     await page.evaluate(() => document.querySelector('[data-action="settings.section"][data-value="tools"]')?.click());
-    await page.locator('[data-action="settings.open-page"][data-target="web-access"]').click();
+    await page.locator('[data-action="settings.page-index"][data-target="web-access"]').click();
     await page.waitForSelector("#set-web-access");
     const r = await page.evaluate(() => {
       const g = document.querySelector("#set-web-access");

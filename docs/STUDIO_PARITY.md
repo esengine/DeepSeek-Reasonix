@@ -72,6 +72,7 @@ Checked against `studio` at `d779d89bc` on 2026-10-08.
 | Feature | Status | Studio location or tracking |
 | --- | --- | --- |
 | Command palette | Have | `ui/Palette.tsx` |
+| Full-screen settings | Have differently | `ui/Settings.tsx`: fixed desktop navigation, full-width single-column cards, expanded category editors and pill navigation. |
 | Completion sound | Missing | #11876; no audio call in `desktop/frontend-next/src` or `desktop/electron/src` |
 | Soft Aurora colour style | Missing | #11680; the kernel still accepts `theme_style="aurora"` |
 | Theme gallery and import | Have differently | `ui/Appearance.tsx`, theme packs in `docs/THEME_PACK.md` |
@@ -102,6 +103,6 @@ Checked against `studio` at `d779d89bc` on 2026-10-08.
 | Per-model display aliases | Have | Model service settings and chat picker; [configuration and scope](MODEL_DISPLAY_ALIASES.md); #11774 |
 | Model connection health | Have | Opt-in status chips in the existing grouped picker; [scope and limits](MODEL_CONNECTION_HEALTH.md). 默认关闭，保留账户分组与接口域名。 |
 | Icon rail with three display modes | Have | #12377, #12428; sidebar footer entries appear only when icon navigation is hidden (#12478) |
-| Usage, feedback, account and settings footer / 用量、反馈、账号与设置底部入口 | Have differently | `ui/Nav.tsx` when navigation is visible; `ui/Sidebar.tsx` otherwise, including the narrow-window drawer. 导航可见时使用图标栏入口，隐藏时保留侧栏入口 (#12478) |
+| Usage, feedback, account and settings footer / 用量、反馈、账号与设置底部入口 | Have differently | `ui/Nav.tsx` when navigation is visible; `ui/SidebarTools.tsx` otherwise: labelled Settings and Feedback rows, with enabled shortcuts in an icon-and-name card available by hover, click or keyboard, including the narrow-window drawer. Saved entry order and visibility are preserved. |
 | Completed-unread marker on sessions | Have | #12218 |
 | Workbench browser-tab menu / 工作台浏览器标签菜单 | Have differently | `ui/WorkbenchPanel.tsx` and `ui/BrowserTabMenu.tsx`: close one, others, right or all through the controller; files are excluded from bulk closing. 控制器关闭页面，批量操作保留文件 (#12067, #12348, #11645) |

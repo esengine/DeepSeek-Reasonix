@@ -59,9 +59,14 @@ it("keeps the current category's scroll and unsaved input when it is selected ag
 });
 
 function anchorScrolling() {
-  return vi.spyOn(Element.prototype, "scrollIntoView").mockImplementation(function (this: Element) {
-    const panel = this.closest<HTMLElement>('[role="tabpanel"]');
-    if (panel) panel.scrollTop = 420;
+  const rect = Element.prototype.getBoundingClientRect;
+  vi.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(function (this: Element) {
+    if (this.matches("[data-setting]")) return new DOMRect(0, 500 - (this.closest(".prefs-main")?.scrollTop ?? 0), 600, 100);
+    if (this.matches(".page-index")) return new DOMRect(0, 0, 600, 64);
+    return rect.call(this);
+  });
+  return vi.spyOn(Element.prototype, "scrollTo").mockImplementation(function (this: Element, options: number | ScrollToOptions) {
+    this.scrollTop = typeof options === "object" ? options.top ?? 0 : 0;
   });
 }
 
@@ -72,7 +77,9 @@ it("keeps a search result's anchor after switching away from a scrolled category
   await userEvent.type(screen.getByRole("textbox", { name: "搜索设置" }), "柔和");
   await userEvent.click(await screen.findByRole("option", { name: /文字对比度/ }));
   const target = document.querySelector<HTMLElement>('[data-setting="contrast"]')!;
-  expect(scroll.mock.contexts).toContain(target);
+  expect(target.hasAttribute("data-landed")).toBe(true);
+  expect(scroll.mock.contexts).toContain(screen.getByRole("tabpanel"));
+  expect(scroll).toHaveBeenCalledWith(expect.objectContaining({ top: 420 }));
   expect(screen.getByRole("tabpanel").scrollTop).toBe(420);
 });
 
@@ -81,7 +88,9 @@ it("lands on an initial anchor and scrolls it into view", async () => {
   draw("appearance:contrast");
   await screen.findByRole("tab", { name: /^外观/, selected: true });
   const target = document.querySelector<HTMLElement>('[data-setting="contrast"]')!;
-  expect(scroll.mock.contexts).toContain(target);
+  expect(target.hasAttribute("data-landed")).toBe(true);
+  expect(scroll.mock.contexts).toContain(screen.getByRole("tabpanel"));
+  expect(scroll).toHaveBeenCalledWith(expect.objectContaining({ top: 420 }));
   expect(screen.getByRole("tabpanel").scrollTop).toBe(420);
 });
 
@@ -98,7 +107,9 @@ it("waits for a delayed setting before starting the landing feedback lifetime", 
   await act(async () => { finish(saved); });
   const target = document.querySelector<HTMLElement>('[data-setting="trace-export"]')!;
   expect(target.getAttribute("data-landed")).toBe("");
-  expect(scroll.mock.contexts).toContain(target);
+  expect(target.hasAttribute("data-landed")).toBe(true);
+  expect(scroll.mock.contexts).toContain(screen.getByRole("tabpanel"));
+  expect(scroll).toHaveBeenCalledWith(expect.objectContaining({ top: 420 }));
 });
 
 it("lands on a searched setting that arrives after navigation", async () => {
@@ -113,7 +124,9 @@ it("lands on a searched setting that arrives after navigation", async () => {
   await act(async () => { finish(saved); });
   const target = document.querySelector<HTMLElement>('[data-setting="trace-export"]')!;
   expect(target.getAttribute("data-landed")).toBe("");
-  expect(scroll.mock.contexts).toContain(target);
+  expect(target.hasAttribute("data-landed")).toBe(true);
+  expect(scroll.mock.contexts).toContain(screen.getByRole("tabpanel"));
+  expect(scroll).toHaveBeenCalledWith(expect.objectContaining({ top: 420 }));
 });
 
 it("cancels a pending landing when the user chooses another category", async () => {

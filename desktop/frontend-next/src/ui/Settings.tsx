@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { ArrowLeft } from "lucide-react";
 import { StudioIcon } from "./StudioIcon";
+import { WindowControls, zoomOnTitleBar } from "./WindowControls";
 import { useModalFocus } from "./useModalFocus";
 import { SettingsLeaveContext, useSettingsLeave } from "./SettingsLeave";
 import { t } from "../i18n";
@@ -11,7 +13,7 @@ import { PageIndex } from "./PageIndex";
 import { useSettingLanding } from "./useSettingLanding";
 import { bytes, tokens as fmtTokens } from "../i18n/format";
 import { STORAGE_TALLY_DELAY, cachedStorageTotal, storageTotal } from "./storageTally";
-import { SECTION_NAME, SETTING_AT, pageFor, pageHome } from "./prefsnav";
+import { SECTION_NAME, SETTING_AT, pageHome } from "./prefsnav";
 import { SettingsNav, SettingsTitle } from "./SettingsNav";
 import { SettingsPageStyle, SoloStyle } from "./SettingsPageStyle";
 import { firstPage, pageOf } from "./settingPages";
@@ -39,7 +41,6 @@ import { SkillGroups } from "./SkillRow";
 import { ConfigTrouble } from "./ConfigTrouble";
 import { ModHost } from "./ModHost";
 import { DataSettings } from "./DataSettings";
-import { SettingDeepContext } from "./SettingDeep";
 import { activeKind, groupVendors } from "./Models";
 import { useModelCatalog } from "./useModelCatalog";
 import { useRoles } from "./useRoles";
@@ -61,8 +62,6 @@ const ELSEWHERE: string[] = [];
 // The user's question is "is it there and does it work", so the state is the
 // label. A failed server keeps its error on the row that names it.
 const NET_MODE: Record<string, string> = { auto: "look.follow_the_system", env: "settings.environment_variables", custom: "about.manual", off: "models.direct" };
-
-const TWO_COLUMN: readonly Section[] = ["common", "session", "tools", "ext", "display", "controls", "appearance", "storage"];
 
 const homeFor = (section: Section, anchor: string): Section => {
   const entry = SETTING_AT(anchor);
@@ -95,7 +94,6 @@ export function Settings({ hub, onError, port, networkPort, localWorkspacePort, 
   // 当前这一页，而为了搜索把每一页都挂起来会让隐藏页面开始发请求。
   const [query, setQuery] = useState("");
   const [landed, setLanded] = useState(openedAnchor);
-  const [deepAt, setDeep] = useState<string | null>(() => pageFor(openedAnchor));
   // Opened from the composer's effort menu: the running source's editor opens
   // on its reasoning fields. The model ref's first segment is the source name.
   const declare = openedAnchor === "effort-declare" ? status?.modelRef?.split("/")[0] : undefined;
@@ -134,7 +132,6 @@ export function Settings({ hub, onError, port, networkPort, localWorkspacePort, 
   const [ruleCount, setRuleCount] = useState(0);
   const root = useRef<HTMLDivElement>(null);
   useModalFocus(root);
-  const veiled = useRef(false);
   const reloadExt = useCallback(() => {
     const refresh = ++extRefresh.current;
     const current = () => extRefresh.current === refresh;
@@ -323,30 +320,32 @@ export function Settings({ hub, onError, port, networkPort, localWorkspacePort, 
   };
   const go = (requested: Section, anchor: string) => {
     const section = homeFor(requested, anchor);
-    navigation.leave(() => {
+    const land = () => {
       setAt(section);
-      setDeep(pageFor(anchor));
       const target = pageOf(section, anchor);
       if (target) setPages((p) => ({ ...p, [section]: target }));
       setQuery("");
       setLanded(anchor);
       if (section === "ext") setExtTab(anchor === "market" ? "market" : "installed");
-    });
+    };
+    if (section === at && anchor !== "persona") land();
+    else navigation.leave(land);
   };
   useSettingLanding(root, landed, at, setLanded);
 
   return (
-    <SettingsLeaveContext.Provider value={navigation.register}><div className="prefs-strip" aria-hidden="true" /><div
-      className="prefs"
+    <SettingsLeaveContext.Provider value={navigation.register}><div
+      className="prefs prefs-screen" role="dialog" aria-modal="true" aria-labelledby="prefs-title"
       ref={root}
       tabIndex={-1}
-      onMouseDown={(e) => { veiled.current = e.target === e.currentTarget; }}
-      // Both ends of the press have to land on the veil. A drag that started
-      // inside the sheet and let go outside is a selection, not a dismissal.
-      onMouseUp={(e) => { if (veiled.current && e.target === e.currentTarget && !updatingPkg.applying) close(); }}
-      data-action-mouseup="settings.close"
     >
-      <div className="prefs-sheet" role="dialog" aria-modal="true" aria-labelledby="prefs-title" data-solo={soloSection}>
+      <header className="prefs-windowbar" onDoubleClick={zoomOnTitleBar}>
+        <button className="prefs-back" type="button" data-action="settings.close" disabled={updatingPkg.applying} onClick={close} aria-label={`${t("common.close")} Esc`} title={`${t("common.close")} Esc`}>
+          <ArrowLeft size={16} />{t("settings.back_to_workspace")}
+        </button>
+        <WindowControls />
+      </header>
+      <div className="prefs-sheet" data-solo={soloSection}>
       <div className="prefs-hd">
         <h1 id="prefs-title">{t(solo ? SOLO_TITLE[soloSection] : "common.settings")}</h1>
         {/* 原来这里挂着一句「改动立刻生效；需要重建运行时的……」。它对三档里的
@@ -371,11 +370,6 @@ export function Settings({ hub, onError, port, networkPort, localWorkspacePort, 
             }
           }}
         />
-        <div className="prefs-actions">
-        <button className="prefs-icon" type="button" data-action="settings.close" disabled={updatingPkg.applying} onClick={close} aria-label={`${t("common.close")} Esc`} title={`${t("common.close")} Esc`}>
-          <StudioIcon name="close" />
-        </button>
-        </div>
         {found !== null && (
           <div className="prefs-found" role="listbox" aria-label={t("settings.search_settings")}>
             {found.length === 0 ? (
@@ -410,12 +404,12 @@ export function Settings({ hub, onError, port, networkPort, localWorkspacePort, 
         )}
       </div>
       <div className="prefs-body">
-        {!solo && <SettingsNav at={at} values={nav} shown={shown} danger={danger} disabled={updatingPkg.applying} onSelect={(section) => { if (section !== at || deepAt) navigation.leave(() => { setLanded(""); setDeep(null); setAt(section); }); }} page={pageNow} onPage={(section, page) => navigation.leave(() => { setLanded(""); setPages((p) => ({ ...p, [section]: page })); })} />}
+        {!solo && <SettingsNav at={at} values={nav} shown={shown} danger={danger} disabled={updatingPkg.applying} onSelect={(section) => { if (section !== at) navigation.leave(() => { setLanded(""); setAt(section); }); }} page={pageNow} onPage={(section, page) => navigation.leave(() => { setLanded(""); setPages((p) => ({ ...p, [section]: page })); })} />}
 
         <div className="prefs-main" key={at} role="tabpanel" aria-labelledby={pageNow ? `prefs-${at}-${pageNow}` : `prefs-${at}`} data-sec={at}>
           <ConfigTrouble port={port} onRepaired={onChanged} />
           {!solo && <SettingsTitle at={at} />}
-          {!solo && !deepAt && <PageIndex items={pageItems} onGo={(entry) => go(entry.section, entry.anchor)} />}
+          {!solo && <PageIndex items={pageItems} onGo={(entry) => go(entry.section, entry.anchor)} />}
           <Boundary
             fallback={
               <div className="find" data-lvl="err" role="alert">
@@ -426,8 +420,7 @@ export function Settings({ hub, onError, port, networkPort, localWorkspacePort, 
           >
           {/* Keyed on the section: replacing this column is the navigation,
               and it is the one thing here whose mount really is the cause. */}
-          <SettingDeepContext.Provider value={{ pages: !solo, open: deepAt, section: t(SECTION_NAME[at] ?? at), go: (id) => navigation.leave(() => { setLanded(""); setDeep(id); }) }}>
-          <div className="prefs-col" key={`${at}:${deepAt ?? ""}`} data-cols={TWO_COLUMN.includes(at) && !deepAt && !solo ? 2 : undefined} data-deep={deepAt ?? undefined}>
+          <div className="prefs-col" key={at}>
           {solo ? <SoloStyle section={soloSection} /> : <SettingsPageStyle section={at} page={pageNow} />}
           {/* Every refused write on every page lands in one state, so it is
               said in one place. Copied onto the pages somebody remembered, it
@@ -439,7 +432,7 @@ export function Settings({ hub, onError, port, networkPort, localWorkspacePort, 
               <span className="why">{note.text}</span>
             </div>
           )}
-          {at === "session" && <AgentSettings port={port} hub={hub} persona={landed === "persona"} onChanged={onChanged} />}
+          {at === "session" && <AgentSettings port={port} hub={hub} persona={landed === "persona"} onPersona={() => go("session", "persona")} onChanged={onChanged} />}
 
           {at === "model" && (
             <ModelSettings port={port} onChanged={onChanged} onFailed={setFailed}
@@ -573,7 +566,7 @@ export function Settings({ hub, onError, port, networkPort, localWorkspacePort, 
           {at === "account" && <AccountSettings port={port} homePort={homePort} state={acct} unread={accountUnread} reload={reloadAccount} />}
           {at === "storage" && (
             <DataSettings port={port} homePort={homePort} localPort={localPort} hub={hub} workspace={workspaceRoot ?? (homePort === port ? status?.workspaceRoot ?? "" : "")} cwd={status?.cwd} busy={busy}
-              signedIn={!!acct?.signedIn && !!acct.user} memories={memCount} onIsolate={() => run("isolate", () => port.isolateWorkspace())} onChanged={onChanged} onRecovered={() => { onChanged(); onSessionsRecovered?.(); }} />
+              signedIn={!!acct?.signedIn && !!acct.user} onIsolate={() => run("isolate", () => port.isolateWorkspace())} onChanged={onChanged} onRecovered={() => { onChanged(); onSessionsRecovered?.(); }} />
           )}
 
           {at === "common" && <CommonSettings port={port} homePort={homePort} theme={theme} onTheme={onTheme} look={look} onLook={onLook} />}
@@ -593,7 +586,6 @@ export function Settings({ hub, onError, port, networkPort, localWorkspacePort, 
             </Group>
           )}
           </div>
-          </SettingDeepContext.Provider>
         </Boundary>
         </div>
       </div>

@@ -466,8 +466,8 @@ function NotesBody({ markdown }: { markdown: string }) {
   return (
     <>
       <div className="vnotes-lang seg" role="group" aria-label={t("about.language_of_the_notes")}>
-        <button data-action="versions.notes-lang" data-value="first" aria-pressed={shown === "first"} onClick={() => setShown("first")}>{NOTES_LANGUAGE_NAMES.first}</button>
-        <button data-action="versions.notes-lang" data-value="english" aria-pressed={shown === "english"} onClick={() => setShown("english")}>{NOTES_LANGUAGE_NAMES.english}</button>
+        <button data-action="versions.notes-lang" data-value="first" aria-pressed={shown === "first"} onClick={() => setShown("first")}>{t(NOTES_LANGUAGE_NAMES.first)}</button>
+        <button data-action="versions.notes-lang" data-value="english" aria-pressed={shown === "english"} onClick={() => setShown("english")}>{t(NOTES_LANGUAGE_NAMES.english)}</button>
       </div>
       <LazyMarkdown text={shown === "english" ? english : first} images={false} />
     </>

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useId, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
+import { ArrowUp } from "lucide-react";
 import { useFolded } from "./usefold";
 import { StopButton } from "./StopButton";
 import { createPortal } from "react-dom";
@@ -780,9 +781,7 @@ export function Composer({ port, status, running, queued = false, quote, restore
             onClick={send}
           >
             <span className="ic" aria-hidden="true">
-              <svg viewBox="0 0 16 16">
-                <path d="M8 12.8V3.4M4.2 7.2 8 3.4l3.8 3.8" />
-              </svg>
+              <ArrowUp />
             </span>
             <span>{t(submitting ? "common.sending" : running ? runningIntent === "followup" ? "composer.queue" : "common.steer" : "common.send")}</span>
           </button>

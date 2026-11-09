@@ -19,7 +19,7 @@ try {
     await page.waitForSelector(".app", { timeout: 20000 });
     await page.getByRole("button", { name: "设置", exact: true }).click();
     await page.locator('[role="tab"][title="模型"]').click();
-    await page.locator('[data-action="settings.open-page"][data-target="providers"]').click();
+    await page.locator('[data-action="settings.page-index"][data-target="providers"]').click();
     await page.getByText("myrelay", { exact: true }).first().click();
     await page.getByText("从服务商读取可用模型").first().click();
     await page.waitForSelector(".mrows .mline");

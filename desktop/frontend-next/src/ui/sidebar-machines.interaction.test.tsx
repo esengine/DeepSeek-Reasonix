@@ -38,7 +38,8 @@ it("without the icon rail has one way into the remote settings, and it opens tha
   draw(false, onSettings);
   expect(remoteEntries()).toHaveLength(1);
   expect(screen.queryByRole("button", { name: /连接与机器/ })).toBeNull();
-  await userEvent.click(remoteEntries()[0] as HTMLElement);
+  await userEvent.click(screen.getByRole("button", { name: "侧栏入口" }));
+  await userEvent.click(screen.getByRole("menuitem", { name: "远程" }));
   expect(onSettings).toHaveBeenCalledWith("remote");
 });
 
@@ -53,9 +54,9 @@ it("shows the shortcut of new session and search beside their label", () => {
 it("says how many remote machines are online beside the remote entry, and nothing when none is", () => {
   draw(false, vi.fn(), [{ name: "gpu", status: "connected" }, { name: "dev", status: "idle" }]);
   expect(remoteEntries()[0].getAttribute("aria-label")).toBe("远程 · 1 台在线");
-  expect(remoteEntries()[0].querySelector('.qdot[data-tone="ok"]')).not.toBeNull();
+  expect(remoteEntries()[0].querySelector("small")?.textContent).toBe("1 台在线");
   cleanup();
   draw(false, vi.fn(), [{ name: "dev", status: "idle" }]);
   expect(remoteEntries()[0].getAttribute("aria-label")).toBe("远程");
-  expect(remoteEntries()[0].querySelector(".qdot")).toBeNull();
+  expect(remoteEntries()[0].querySelector("small")).toBeNull();
 });

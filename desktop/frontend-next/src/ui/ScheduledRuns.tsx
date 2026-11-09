@@ -28,7 +28,7 @@ const SKIP: Record<string, string> = { missed: "panels.missed_its_time", budget_
  *  shown back as a preview with the most it can spend, and only that preview's
  *  own confirmation creates it. A report is the model's text: it is labelled as
  *  such and drawn as plain text, never as markup. */
-export function ScheduledRuns({ port, hint, pill }: { port: AgentPort; hint?: string; pill?: string }) {
+export function ScheduledRuns({ port, hint }: { port: AgentPort; hint?: string }) {
   const [board, setBoard] = useState<ScheduleBoard | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -76,7 +76,7 @@ export function ScheduledRuns({ port, hint, pill }: { port: AgentPort; hint?: st
   );
   if (!board) {
     return unreadable ? (
-      <Group id="scheduled-runs" title={t("panels.scheduled_runs")} hint={hint ?? t("panels.runs_tasks_read_only_at")} pill={pill}>
+      <Group id="scheduled-runs" title={t("panels.scheduled_runs")} hint={hint ?? t("panels.runs_tasks_read_only_at")}>
         <div className="box">{unreadable}</div>
       </Group>
     ) : null;
@@ -87,7 +87,7 @@ export function ScheduledRuns({ port, hint, pill }: { port: AgentPort; hint?: st
   const draft = (patch: Partial<ScheduleDraft>) => setForm((f) => (f ? { ...f, ...patch } : f));
 
   return (
-    <Group id="scheduled-runs" title={t("panels.scheduled_runs")} hint={hint ?? t("panels.runs_tasks_read_only_at")} pill={pill}>
+    <Group id="scheduled-runs" title={t("panels.scheduled_runs")} hint={hint ?? t("panels.runs_tasks_read_only_at")}>
       <div className="box">
         {unreadable}
         <div className="lrow">

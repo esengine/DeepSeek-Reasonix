@@ -30,7 +30,6 @@
 [data-fold~="phone"] .flow .call[data-approval] .apv-ft .apv-more { display: block; order: 3; grid-column: 1 / -1; justify-self: start; min-height: 32px; padding: 0; border: 0; background: none; color: var(--link); font: var(--w-reg) var(--fs-meta)/1 var(--ui); cursor: pointer; }
 
 .turntools .turn-more { display: none; }
-.btn.stop .ic-pause { display: none; }
 [data-fold~="phone"] .compose .composecaps { display: none; }
 [data-fold~="phone"] .compose .turntools { flex-wrap: wrap; align-items: center; gap: 6px; row-gap: 8px; }
 [data-fold~="phone"] .compose .turntools > .studio-attach:first-child { box-sizing: border-box; width: 32px; height: 32px; padding: 0; border: 1px solid var(--border); border-radius: 50%; background: transparent; color: var(--muted); }
@@ -48,11 +47,8 @@
 [data-fold~="phone"] .compose .turntools[data-more] > :not(:first-child, .studio-model-group, .turn-more) { display: flex; }
 [data-fold~="phone"] .compose .go { align-self: flex-start; gap: 6px; }
 [data-fold~="phone"] .compose .go .btn.send, [data-fold~="phone"] .compose .go .btn.stop { box-sizing: border-box; width: 36px; height: 36px; min-width: 0; padding: 0; border: 0; border-radius: 50%; display: grid; place-items: center; }
-[data-fold~="phone"] .compose .go .btn.send { background: var(--accent); color: var(--accent-fg); }
+[data-fold~="phone"] .compose .go .btn.send:not(:disabled) { background: var(--accent); color: var(--accent-fg); }
 [data-fold~="phone"] .compose .go .btn.stop { background: var(--overlay); color: var(--text); }
 [data-fold~="phone"] .compose .go .btn > span:not(.ic) { display: none; }
-[data-fold~="phone"] .compose .go .btn svg { width: 15px; height: 15px; stroke-width: 1.45; }
-[data-fold~="phone"] .compose .btn.stop .ic-stop { display: none; }
-[data-fold~="phone"] .compose .btn.stop .ic-pause { display: inline; }
 [data-fold~="phone"] .compose .turntools > :first-child { order: 0; }
 [data-fold~="phone"] .compose .turntools[data-more]::after { content: ""; order: 3; flex: 0 0 100%; height: 0; }

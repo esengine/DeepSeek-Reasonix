@@ -159,7 +159,7 @@ it("still reaches settings with the rail off", async () => {
   await open();
   const footer = document.querySelector<HTMLElement>(".railfoot")!;
   expect(footer).not.toBeNull();
-  for (const name of ["用量", "发送反馈", "设置"]) {
+  for (const name of ["发送反馈", "设置"]) {
     expect(within(footer).getByRole("button", { name: new RegExp(`^${name}`) }), name).toBeTruthy();
   }
   await openAppearance();
@@ -173,7 +173,9 @@ it.each(["on", "off"])("reaches usage, account, and settings with the rail %s", 
   const account = mode === "on" ? [["账号", "account", "chrome.account"]] : [];
   if (mode === "off") expect(entries.querySelector('[data-action="chrome.account"]')).toBeNull();
   for (const [label, section, action] of [["用量", "storage"], ...account, ["设置", "session", "chrome.settings"]]) {
-    const button = within(entries).getByRole("button", { name: new RegExp(`^${label}`) });
+    const menuEntry = mode === "off" && label === "用量";
+    if (menuEntry) await userEvent.click(screen.getByRole("button", { name: "侧栏入口" }));
+    const button = within(menuEntry ? screen.getByRole("menu") : entries).getByRole(menuEntry ? "menuitem" : "button", { name: new RegExp(`^${label}`) });
     if (action) expect(entries.querySelector(`[data-action="${action}"]`)).toBe(button);
     await userEvent.click(button);
     expect((await screen.findByRole("tabpanel")).getAttribute("data-sec")).toBe(section);

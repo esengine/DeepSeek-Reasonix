@@ -37,6 +37,7 @@ globalThis.matchMedia ??= ((query: string) =>
 // error the file still passes with, which is exactly how a real one would go
 // unnoticed later.
 Element.prototype.scrollIntoView ??= function scrollIntoView() {};
+Element.prototype.scrollTo ??= function scrollTo() {};
 
 // jsdom has no viewport, so it has no intersections to report. The transcript
 // mounts a block when one is near, and without this it asks an observer that

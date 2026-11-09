@@ -1,9 +1,8 @@
 import { ApplyNote } from "./Group";
-import { SettingDeep, SettingDeepContext } from "./SettingDeep";
-import { useCallback, useContext, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from "react";
+import { useCallback, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from "react";
 import { effectsMode, onEffectsChange, setEffectsMode } from "../state/prefs";
 import type { AgentPort, Appearance as Look, ThemePack } from "../port/port";
-import { SIZE_STEPS, ZOOM_PRESETS } from "./zoom";
+import { ZOOM_PRESETS } from "./zoom";
 import { chord } from "./keys";
 import { host } from "../port/host";
 import { MONO_FAMILIES, TEXT_STEPS, UI_FAMILIES, installed, readSizeOf, readSteps } from "./look";
@@ -14,7 +13,7 @@ import { useCrop } from "./useCrop";
 import { WindowSection } from "./WindowSection";
 import { GraphicsSection } from "./GraphicsSection";
 import { SectionCard } from "./SectionCard";
-import { PillButton, SegChoice, SettingRow } from "./SettingRow";
+import { SegChoice, SettingRow } from "./SettingRow";
 import { Switch } from "./Switch";
 import { ThemeModeRow } from "./ThemeModeRow";
 import { ThemeImport } from "./ThemeImport";
@@ -80,7 +79,6 @@ export const WALLPAPER_ACCEPT = "image/png,image/jpeg,image/webp,image/avif,imag
 export function Appearance({ port, theme, onTheme, contrast, onContrast, weight, onWeight, reloadThemes, look, onLook }: Props) {
   const { packs, unread, load } = useThemeInventory(port);
   const effects = useSyncExternalStore(onEffectsChange, effectsMode);
-  const deep = useContext(SettingDeepContext);
 
   // Activating repaints through App's own theme effect, so this only refreshes
   // the list and asks App to re-read which pack is active.
@@ -178,7 +176,6 @@ export function Appearance({ port, theme, onTheme, contrast, onContrast, weight,
   const uiFonts = useMemo(() => installed(UI_FAMILIES), []);
   const monoFonts = useMemo(() => installed(MONO_FAMILIES), []);
 
-
   return (
     <>
       {(failed || unread) && (
@@ -188,11 +185,10 @@ export function Appearance({ port, theme, onTheme, contrast, onContrast, weight,
       )}
       <SectionCard title={t("settings.theme_card")}>
         <ThemeModeRow theme={theme} onTheme={onTheme} />
-        <SettingDeep id="scheme" title={t("settings.palette")} hint={t("settings.accent_and_overall_tone")}
-        act={packs.find((p) => p.active)?.name ?? t("common.default")}>
+
       <section className="grp" id="set-scheme" data-setting="scheme">
         <div className="grp-hd">
-          <h3>{t("look.interface_theme")}</h3>
+          <h4>{t("look.interface_theme")}</h4>
           <span className="now">{t("look.in_effect_now")}</span>
         </div>
         <p className="hint">{t("look.choose_the_workbench_surfaces_and")}</p>
@@ -202,7 +198,7 @@ export function Appearance({ port, theme, onTheme, contrast, onContrast, weight,
             {featured.map(cell)}
           </div>
           {illustrated.length > 0 && (
-            <details className="theme-more">
+            <details className="theme-more" open>
               <summary>
                 <span>
                   <b>{t("look.more_installed_themes")}</b>
@@ -232,12 +228,11 @@ export function Appearance({ port, theme, onTheme, contrast, onContrast, weight,
         </div>
         <ApplyNote id="scheme" />
       </section>
-      </SettingDeep>
 
-        <SettingDeep id="wallpaper" title={t("look.wallpaper")} hint={t("settings.chat_background_image_or_video")} act={t("settings.choose_wallpaper")}>
+
       <section className="grp" id="set-wallpaper" data-setting="wallpaper">
         <div className="grp-hd">
-          <h3>{t("look.wallpaper")}</h3>
+          <h4>{t("look.wallpaper")}</h4>
           {look.wallpaper && (
               <button className="now nowbtn" data-action="wallpaper.remove" onClick={dropPaper}>
               {t("common.remove")}
@@ -382,22 +377,16 @@ export function Appearance({ port, theme, onTheme, contrast, onContrast, weight,
 
 
 
-        </SettingDeep>
         <SettingRow id="effects" title={t("look.visual_effects")} desc={t("settings.frosted_glass_glow_effects")}>
           <Switch on={effects === "full"} label={t("look.visual_effects")} data-action="appearance.effects" data-value={effects}
             onClick={() => setEffectsMode(effects === "full" ? "reduced" : "full")} />
         </SettingRow>
-        {deep.pages && (
-          <SettingRow id="advanced-look" title={t("look.advanced_look")} desc={t("look.import_themes_custom_colours")}>
-            <PillButton action="settings.open-page" target="scheme" onClick={() => deep.go("scheme")}>{t("look.advanced_look")}</PillButton>
-          </SettingRow>
-        )}
       </SectionCard>
       <SectionCard title={t("settings.text_card")}>
-        <SettingDeep id="font" title={t("look.typeface")} hint={t("settings.interface_and_code_typeface")} act={t("settings.change")}>
+
           <section className="grp" id="set-font" data-setting="font">
             <div className="grp-hd">
-              <h3>{t("look.typeface")}</h3>
+              <h4>{t("look.typeface")}</h4>
             </div>
             <p className="hint">{t("look.enter_a_typeface_name_or")}</p>
             <div className="grp-items">
@@ -420,11 +409,10 @@ export function Appearance({ port, theme, onTheme, contrast, onContrast, weight,
             </div>
             <ApplyNote id="font" />
           </section>
-        </SettingDeep>
-        <SettingDeep id="size" title={t("look.size")} hint={t("settings.overall_text_size")} act={t("settings.adjust")} ctl={<SegChoice<string> label={t("look.interface_size")} value={String(look.zoom || 1)} action="appearance.zoom" onPick={(v) => set({ zoom: Number(v) })} options={SIZE_STEPS.map(([v, name]) => [String(v), t(name)] as const)} />}>
+
       <section className="grp" id="set-size" data-setting="size">
         <div className="grp-hd">
-          <h3>{t("look.size")}</h3>
+          <h4>{t("look.size")}</h4>
         </div>
         <p className="hint">{t("look.interface_scales_spacing_and_controls")}</p>
         {host().inShell() && <p className="hint">{t("look.keyboard_up_larger_down_smaller", { up: chord("+"), down: chord("-"), reset: chord("0") })}</p>}
@@ -508,7 +496,6 @@ export function Appearance({ port, theme, onTheme, contrast, onContrast, weight,
         <ApplyNote id="size" />
       </section>
 
-        </SettingDeep>
         <SettingRow id="weight" title={t("look.text_weight")} desc={t("settings.weight_of_text")}>
           <SegChoice<string> label={t("look.text_weight")} value={weight} action="appearance.weight" onPick={onWeight}
             options={WEIGHTS.map(([id, name]) => [id, t(name)] as const)} />
@@ -519,9 +506,9 @@ export function Appearance({ port, theme, onTheme, contrast, onContrast, weight,
         </SettingRow>
       </SectionCard>
       <SectionCard title={t("common.window")}>
-        <SettingDeep id="window" title={t("common.window")} hint={t("settings.remember_window_position_and_size")} act={t("settings.change")}>
+
           <WindowSection port={port} />
-        </SettingDeep>
+
         <GraphicsSection />
       </SectionCard>
     </>
@@ -552,6 +539,7 @@ function FontPick({
         <span className="tx">{label}</span>
         <input
           className="fontown"
+          aria-label={label}
           list={list}
           value={value}
           placeholder={options.length ? t("look.default_n_available_on_this", { n: options.length }) : t("common.default")}

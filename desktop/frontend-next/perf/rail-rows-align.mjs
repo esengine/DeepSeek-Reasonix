@@ -1,5 +1,3 @@
-// With the icon rail hidden, the sidebar's shortcut strip is one row of equal icon buttons on a single line,
-// and the rows around it (new session, search, feedback) draw their icon and label at the sidebar's own edge.
 import { chromium } from "playwright";
 
 const BASE = process.env.PERF_URL ?? "http://localhost:4399/perf.html?pref=zh&ws=1&sess=1&turns=1";
@@ -17,18 +15,19 @@ try {
     await ctx.addInitScript(() => { try { localStorage.setItem("rx-nav-rail", "off"); } catch {} });
     const page = await ctx.newPage();
     await page.goto(BASE, { waitUntil: "networkidle" });
+    await page.locator(".studio-tools").hover();
     await page.waitForSelector(".studio-quicknav > button");
     const strip = await page.evaluate(() => [...document.querySelectorAll(".studio-quicknav > button")].map((b) => {
       const r = b.getBoundingClientRect();
       const svg = b.querySelector("svg, .studio-icon").getBoundingClientRect();
-      return { w: r.width, h: r.height, cy: r.y + r.height / 2, icon: [svg.width, svg.height], iconCy: svg.y + svg.height / 2 };
+      return { w: r.width, h: r.height, left: r.left, cy: r.y + r.height / 2, icon: [svg.width, svg.height], iconCy: svg.y + svg.height / 2 };
     }));
     const spread = (key) => Math.max(...strip.map((s) => s[key])) - Math.min(...strip.map((s) => s[key]));
-    check(`${scheme}: the shortcut strip has several buttons`, strip.length >= 5, `${strip.length}`);
+    check(`${scheme}: the shortcut card has several entries`, strip.length >= 5, `${strip.length}`);
     check(`${scheme}: the shortcut buttons share one size`, spread("w") <= TOLERANCE && spread("h") <= TOLERANCE, JSON.stringify(strip.map((s) => [s.w, s.h])));
-    check(`${scheme}: the shortcut buttons and their icons sit on one horizontal line`, spread("cy") <= TOLERANCE && spread("iconCy") <= TOLERANCE, `${spread("cy")} / ${spread("iconCy")}`);
+    check(`${scheme}: the shortcut rows align and center their icons`, spread("left") <= TOLERANCE && strip.every((s) => Math.abs(s.cy - s.iconCy) <= TOLERANCE), JSON.stringify(strip.map((s) => [s.left, s.cy - s.iconCy])));
     check(`${scheme}: the shortcut icons share one size`, new Set(strip.map((s) => s.icon.join("x"))).size === 1, strip.map((s) => s.icon.join("x")).join(" "));
-    const rows = await page.evaluate(() => [".studio-new-task", ".studio-search", ".studio-feedback"].map((s) => {
+    const rows = await page.evaluate(() => [".studio-new-task", ".studio-search", ".studio-tools-row", ".studio-feedback"].map((s) => {
       const row = document.querySelector(s);
       if (!row) return null;
       const r = row.getBoundingClientRect();

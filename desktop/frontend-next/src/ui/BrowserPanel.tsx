@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
+import { ArrowLeft, ArrowRight, ExternalLink, Globe, RotateCw } from "lucide-react";
 import { t } from "../i18n";
 import { reason } from "../i18n/kernel";
 import type { AgentPort, BrowserTab } from "../port/port";
@@ -113,18 +114,18 @@ export function ManualBrowserPanel({ id, hidden, onAddress, onExternal, scheme }
     <section className="studio-browser" hidden={hidden} aria-label={t("workbench.built_in_browser")}>
       <form className="studio-browser-toolbar" onSubmit={submit} data-action-submit="browser.navigate">
         <button type="button" data-action="browser.back" onClick={() => move(index - 1)} disabled={index === 0} aria-label={t("workbench.back")} title={t("workbench.back")}>
-          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m9.5 3-5 5 5 5M5 8h7" /></svg>
+          <ArrowLeft size={16} />
         </button>
         <button type="button" data-action="browser.reload" onClick={() => setReload((value) => value + 1)} aria-label={t("common.re_freeze")} title={t("common.re_freeze")}>
-          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M12.7 6A5 5 0 1 0 13 9.5M12.7 6V2.8M12.7 6H9.5" /></svg>
+          <RotateCw size={16} />
         </button>
         <label className="studio-browser-address" data-invalid={invalid ? "" : undefined}>
-          <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="5.3" /><path d="M2.8 8h10.4M8 2.7c1.5 1.5 2.2 3.2 2.2 5.3S9.5 11.8 8 13.3C6.5 11.8 5.8 10.1 5.8 8S6.5 4.2 8 2.7Z" /></svg>
+          <Globe size={16} />
           <input data-action-change="browser.address" data-action-keydown="browser.navigate" value={input} onKeyDown={commitAddress} onChange={(event) => { setInput(event.target.value); setInvalid(false); }} aria-label={t("workbench.web_address")} spellCheck={false} autoCapitalize="off" />
         </label>
         <button type="submit" className="studio-browser-go" aria-label={t("workbench.open_page")}>{t("common.open")}</button>
         <button type="button" data-action="browser.external" onClick={() => !internal && onExternal(current)} disabled={internal} aria-label={t("workbench.open_in_external_browser")} title={t("workbench.open_in_external_browser")}>
-          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M9 3h4v4M13 3 7.5 8.5" /><path d="M7 4H3v9h9V9" /></svg>
+          <ExternalLink size={16} />
         </button>
       </form>
       {invalid && <p className="studio-browser-error" role="alert">{t("workbench.enter_a_valid_http_or")}</p>}
@@ -312,10 +313,10 @@ function AgentBrowserView({ tabs, shown, showTabs = true, onOpenDocument }: { ta
           ))}
         </div>}
         <div className="bnav">
-          <button className="bbtn" data-action="browser.control" data-target={current?.id} data-value="back" aria-label={t("workbench.back")} onClick={() => control("back")}>←</button>
-          <button className="bbtn" data-action="browser.control" data-target={current?.id} data-value="forward" aria-label={t("workbench.forward")} onClick={() => control("forward")}>→</button>
-          <button className="bbtn" data-action="browser.control" data-target={current?.id} data-value="reload" aria-label={t("common.reload")} onClick={() => control("reload")}>↻</button>
-          <button className="bbtn" data-action="browser.external" disabled={!documentPath && !/^https?:\/\//i.test(current?.url ?? "")} aria-label={documentPath ? t("workbench.open_this_file_with_the") : t("workbench.open_this_page_in_the")} title={documentPath ? t("workbench.open_this_file_with_the") : t("workbench.open_this_page_in_the")} onClick={() => (documentPath ? openDocument() : current && void host().openExternal(current.url))}>↗</button>
+          <button className="bbtn" data-action="browser.control" data-target={current?.id} data-value="back" aria-label={t("workbench.back")} title={t("workbench.back")} onClick={() => control("back")}><ArrowLeft size={16} /></button>
+          <button className="bbtn" data-action="browser.control" data-target={current?.id} data-value="forward" aria-label={t("workbench.forward")} title={t("workbench.forward")} onClick={() => control("forward")}><ArrowRight size={16} /></button>
+          <button className="bbtn" data-action="browser.control" data-target={current?.id} data-value="reload" aria-label={t("common.reload")} title={t("common.reload")} onClick={() => control("reload")}><RotateCw size={16} /></button>
+          <button className="bbtn" data-action="browser.external" disabled={!documentPath && !/^https?:\/\//i.test(current?.url ?? "")} aria-label={documentPath ? t("workbench.open_this_file_with_the") : t("workbench.open_this_page_in_the")} title={documentPath ? t("workbench.open_this_file_with_the") : t("workbench.open_this_page_in_the")} onClick={() => (documentPath ? openDocument() : current && void host().openExternal(current.url))}><ExternalLink size={16} /></button>
           <form className="baddr" data-action="browser.navigate" data-target={current?.id} onSubmit={go}>
             <input data-action="browser.navigate" data-target={current?.id} value={address} spellCheck={false} aria-label={t("workbench.address")} onChange={(event) => { setAddress(event.target.value); setRefused(""); }} />
           </form>
