@@ -1,3 +1,4 @@
+import { StudioIcon } from "./StudioIcon";
 import { useEffect, useRef, useState } from "react";
 import { t } from "../i18n";
 import { reason } from "../i18n/kernel";
@@ -224,7 +225,7 @@ export function Onboarding({ port, setup, onDone, onSkip, project }: Props) {
               <ol aria-label={t("onboarding.set_up_reasonix")}>
                 {steps.map(([id, label], i) => (
                   <li key={id} data-state={i < at ? "done" : i === at ? "current" : "todo"} aria-current={i === at ? "step" : undefined}>
-                    <i>{i < at ? "✓" : i + 1}</i><span>{t(label)}</span>
+                    <i>{i < at ? <StudioIcon name="check" /> : i + 1}</i><span>{t(label)}</span>
                   </li>
                 ))}
               </ol>
@@ -298,7 +299,7 @@ export function Onboarding({ port, setup, onDone, onSkip, project }: Props) {
               </div>
               {connected && found && (
                 <div className="onb-found" role="status" data-enter="">
-                  <span className="tick">✓</span>
+                  <span className="tick"><StudioIcon name="check" /></span>
                   <span>{t("onboarding.connected_to_name_n_models", { name: t(pick), n: found.models.length })}</span>
                 </div>
               )}
@@ -306,7 +307,7 @@ export function Onboarding({ port, setup, onDone, onSkip, project }: Props) {
                 <button className="btn onb-go" data-primary data-state={connected ? "ok" : busy ? "busy" : undefined} disabled={busy || !url.trim() || !key.trim()}
                   aria-label={busy ? t("onboarding.checking_the_key") : undefined} onClick={() => void connect()}>
                   {connected
-                    ? <svg className="onb-check" viewBox="0 0 16 16" aria-hidden="true"><path pathLength={100} d="M3.5 8.5l3 3 6-7" /></svg>
+                    ? <StudioIcon name="check" className="onb-check" />
                     : busy ? <RMark className="rmark onb-spin" /> : t("onboarding.connect")}
                 </button>
                 <button type="button" className="onb-skip" data-action="onboarding.back" disabled={busy} onClick={() => go("welcome", true)}>{t("common.back")}</button>
@@ -322,7 +323,7 @@ export function Onboarding({ port, setup, onDone, onSkip, project }: Props) {
           {step === "model" && found && (
             <>
               <div className="onb-found" role="status">
-                <span className="tick">✓</span>
+                <span className="tick"><StudioIcon name="check" /></span>
                 <span>{t("onboarding.connected_to_name_n_models", { name: t(pick), n: found.models.length })}</span>
               </div>
               {completed !== "" && completed === url.trim() && <p className="probe-ok" role="status">{t("common.address_completed_to_url", { url: completed })}</p>}

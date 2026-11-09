@@ -76,7 +76,7 @@
 .onb-demo .d.tool code { color: var(--faint); font: var(--w-reg) var(--fs-micro) var(--mono); }
 .onb-demo .d.tool small { margin-left: auto; color: var(--faint); font: var(--w-reg) var(--fs-micro) var(--mono); }
 .onb-demo .d.tool small.add { color: var(--add); }
-.onb-demo .d.tool small.ok { color: var(--ok-ink); }
+.onb-demo .d.tool small.ok { display: inline-flex; align-items: center; gap: 4px; color: var(--ok-ink); }
 .onb-demo .d.done { margin-top: 4px; padding-top: 10px; border-top: 1px solid var(--hair); color: var(--ok-ink); }
 .onb-demo .demo-spin { color: var(--net); }
 .onb-demo .demo-spin path { animation: demo-draw 1.2s ease-in-out infinite; }
@@ -106,7 +106,7 @@
 .onb-flow .onb-go .onb-spin { width: 16px; height: 16px; color: currentColor; opacity: 1; }
 .onb-flow .onb-go .onb-spin path { animation: demo-draw 1.1s ease-in-out infinite; }
 .onb-flow .onb-go .onb-check { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
-.onb-flow .onb-go .onb-check path { stroke-dasharray: 100; stroke-dashoffset: 100; animation: demo-draw 300ms ease-out forwards; }
+.onb-flow .onb-go .onb-check path { stroke-dasharray: 32; stroke-dashoffset: 32; animation: demo-draw 300ms ease-out forwards; }
 .onb-flow .onb-found[data-enter] { animation: onb-banner-in 260ms var(--ease-out) both; }
 @keyframes onb-banner-in { from { opacity: 0; transform: translateY(-8px); } }
 @media (prefers-reduced-motion: reduce) {

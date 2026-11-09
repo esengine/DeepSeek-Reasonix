@@ -11,6 +11,7 @@ describe("BrowserPanel", () => {
     const user = userEvent.setup();
     const external = vi.fn();
     render(<BrowserPanel id="b0" scheme="light" onAddress={vi.fn()} onExternal={external} />);
+    expect(screen.getByTitle("Reasonix 内置 Browser").querySelector(".lucide-globe")).not.toBeNull();
 
     const address = screen.getByRole("textbox", { name: "网页地址" });
     await user.clear(address);

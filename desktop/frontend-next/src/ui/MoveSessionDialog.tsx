@@ -54,17 +54,17 @@ export function MoveSessionDialog({ session, label, projects, busy, error, note,
               <section data-part="travels">
                 <h3>{t("session.travels")}</h3>
                 <ul>
-                  <li>{t("session.the_conversation_itself")}</li>
-                  <li>{t("session.the_title_pin_and_archive")}</li>
-                  <li>{t("session.paths_recorded_in_the_conversation")}</li>
+                  <li><StudioIcon name="check" />{t("session.the_conversation_itself")}</li>
+                  <li><StudioIcon name="check" />{t("session.the_title_pin_and_archive")}</li>
+                  <li><StudioIcon name="check" />{t("session.paths_recorded_in_the_conversation")}</li>
                 </ul>
               </section>
               <section data-part="stays">
                 <h3>{t("session.stays_behind")}</h3>
                 <ul>
-                  <li>{t("session.checkpoints_rewind_snapshots")}</li>
-                  <li>{t("session.background_task_logs")}</li>
-                  <li>{t("session.queued_messages")}</li>
+                  <li><StudioIcon name="close" />{t("session.checkpoints_rewind_snapshots")}</li>
+                  <li><StudioIcon name="close" />{t("session.background_task_logs")}</li>
+                  <li><StudioIcon name="close" />{t("session.queued_messages")}</li>
                 </ul>
               </section>
             </div>

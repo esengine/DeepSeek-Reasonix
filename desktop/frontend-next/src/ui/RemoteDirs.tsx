@@ -1,3 +1,4 @@
+import { StudioIcon } from "./StudioIcon";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useModalFocus } from "./useModalFocus";
 import { createPortal } from "react-dom";
@@ -34,9 +35,7 @@ export function DirRows({
       <div className="picklist" aria-label={t("remote.subfolders")} data-busy={busy ? "" : undefined}>
         {(listing?.folders ?? []).map((folder) => (
           <button key={folder.path} className="pickrow" onClick={() => onGo(folder.path)}>
-            <svg viewBox="0 0 16 16" aria-hidden="true">
-              <path d="M2.2 12.4V4.1h4l1.3 1.6h6.3v6.7z" />
-            </svg>
+            <StudioIcon name="folder" />
             <span dir="ltr">{folder.name}</span>
           </button>
         ))}
@@ -148,9 +147,7 @@ export function RemoteDirs({ hub, host, start, onPick, onClose }: Props) {
             aria-label={t("remote.up_one_level")}
             onClick={() => void go(listing?.parent ?? "")}
           >
-            <svg viewBox="0 0 16 16" aria-hidden="true">
-              <path d="M8 12.3V3.7M4.2 7.5 8 3.7l3.8 3.8" />
-            </svg>
+            <StudioIcon name="arrow" />
           </button>
           <input
             ref={box}

@@ -1,3 +1,4 @@
+import { StudioIcon, type StudioIconName } from "./StudioIcon";
 import { useEffect, useState } from "react";
 import { t } from "../i18n";
 import { reason } from "../i18n/kernel";
@@ -5,7 +6,7 @@ import type { AgentPort, SkillUpdateChange, SkillUpdatePlan } from "../port/port
 import { HttpError } from "../port/http_error";
 
 const STALE = "skills.update_plan_stale";
-const SIGN: Record<SkillUpdateChange["kind"], string> = { added: "+", changed: "~", removed: "−" };
+const ICON: Record<SkillUpdateChange["kind"], StudioIconName> = { added: "plus", changed: "edit", removed: "trash" };
 
 // The plan an update of an installed skill would carry out, read before the
 // person agrees. A script is a change they have to have opened; one the plan
@@ -57,7 +58,7 @@ export function SkillUpdate({ port, name, onClose, onDone }: { port: AgentPort; 
   const file = (c: SkillUpdateChange) => (
     <details className="cand" key={c.path} onToggle={(e) => { if ((e.currentTarget as HTMLDetailsElement).open) setOpened((s) => new Set(s).add(c.path)); }}>
       <summary className="cand-hd">
-        <span className="nm">{SIGN[c.kind]} {c.path}</span>
+        <StudioIcon name={ICON[c.kind]} /><span className="nm">{c.path}</span>
         <span className="meta">{t(c.kind === "added" ? "ext.added" : c.kind === "removed" ? "common.delete" : "ext.changed")}</span>
       </summary>
       {c.truncated ? <div className="why">{t("ext.this_file_is_too_large", { path: plan.source })}</div>

@@ -1,4 +1,4 @@
-import { GearMark } from "./GearMark";
+import { StudioIcon } from "./StudioIcon";
 import type { ReactNode } from "react";
 import { MODS_SHOWN } from "./modsgate";
 import { t } from "../i18n";
@@ -9,60 +9,27 @@ import { rankTerms, type SettingTerms } from "./settingRank";
  *  itself because it is a table, not a screen — the screen reads it. */
 export type Section = "common" | "display" | "controls" | "session" | "persona" | "model" | "providers" | "tools" | "peers" | "hooks" | "ext" | "network" | "remote" | "memory" | "usage" | "storage" | "account" | "versions" | "appearance" | "advanced";
 
-// Drawn on the same 16-unit grid at 1.45 stroke as the rest of this screen's
-// marks. The rail in Nav.tsx draws a section's entry from this table, so one
-// destination carries one mark wherever it is shown.
 export const ICON: Record<Section, ReactNode> = {
-  display: <><rect x="2" y="3" width="12" height="10" rx="1.5"/><path d="M6 3v10"/></>,
-  controls: <><rect x="2" y="3" width="12" height="10" rx="1.5"/><path d="M10 3v10"/></>,
-  common: GearMark,
-  session: <><path d="M2.5 3.5h11v7h-6l-3 2.5v-2.5h-2z"/></>,
-  persona: (
-    <>
-      <rect x="2.2" y="3.4" width="11.6" height="9.2" rx="1.4" />
-      <circle cx="5.8" cy="7.2" r="1.3" />
-      <path d="M8.6 6.2h3.2M8.6 8.4h3.2M3.9 11.4c.5-1.1 1.5-1.7 2.7-1.7s2.2.6 2.7 1.7" />
-    </>
-  ),
-  model: <><path d="M3.5 12.5l6-6M9.5 3l.8 2.2 2.2.8-2.2.8-.8 2.2-.8-2.2L6.5 6l2.2-.8z"/></>,
-  providers: (
-    <>
-      <rect x="2.4" y="2.6" width="11.2" height="4.2" rx="1.2" />
-      <rect x="2.4" y="9.2" width="11.2" height="4.2" rx="1.2" />
-      <path d="M5 4.7h3.4M5 11.3h3.4M11 4.7h.01M11 11.3h.01" />
-    </>
-  ),
-  // Two conversations with a line between them.
-  peers: (
-    <>
-      <rect x="2.2" y="2.8" width="6" height="4.6" rx="1.2" />
-      <rect x="7.8" y="8.6" width="6" height="4.6" rx="1.2" />
-      <path d="M5.2 7.4v1.6a1 1 0 0 0 1 1h1.6" />
-    </>
-  ),
-  tools: <><path d="M8 2l5 2v4c0 3-2.3 5-5 6-2.7-1-5-3-5-6V4z"/></>,
-  hooks: (
-    <>
-      <path d="M4.4 2.6v6.2a3.2 3.2 0 0 0 6.4 0V6.2" />
-      <circle cx="10.8" cy="4.4" r="1.6" />
-    </>
-  ),
-  ext: <><path d="M6 2.5v3M10 2.5v3M4.5 5.5h7v2a3.5 3.5 0 01-7 0zM8 11v2.5"/></>,
-  network: <><rect x="2.5" y="2.5" width="4" height="4"/><rect x="9.5" y="2.5" width="4" height="4"/><rect x="2.5" y="9.5" width="4" height="4"/><path d="M9.5 9.5h1.5v1.5M13.5 13.5H12M9.5 13.5v-1"/></>,
-  remote: (
-    <>
-      <rect x="2.2" y="2.6" width="11.6" height="4.4" rx="1.3" />
-      <rect x="2.2" y="9" width="11.6" height="4.4" rx="1.3" />
-      <path d="M4.8 4.8h.01M4.8 11.2h.01" />
-    </>
-  ),
-  storage: <><rect x="2.5" y="3" width="11" height="4" rx="1"/><rect x="2.5" y="9" width="11" height="4" rx="1"/></>,
-  memory: <path d="M8 4.4c-1.4-1.3-4.6-1-4.6 1.9 0 2.4 2.6 4.4 4.6 6 2-1.6 4.6-3.6 4.6-6 0-2.9-3.2-3.2-4.6-1.9Z" />,
-  usage: <path d="M2.6 12.4V9M6.2 12.4V5.4M9.8 12.4V7.2M13.4 12.4V3.4" />,
-  account: <><circle cx="8" cy="5.5" r="2.6"/><path d="M3 13.5c.7-2.6 2.6-3.8 5-3.8s4.3 1.2 5 3.8"/></>,
-  versions: <path d="M8 2.4v7.4M5.2 7.2 8 10l2.8-2.8M3 12.8h10" />,
-  appearance: <><circle cx="8" cy="8" r="2.6"/><path d="M8 1.5v1.5M8 13v1.5M1.5 8H3M13 8h1.5M3.4 3.4l1 1M11.6 11.6l1 1M3.4 12.6l1-1M11.6 4.4l1-1"/></>,
-  advanced: <path d="M3 5h5.2M11.2 5H13M3 11h2.2M8.2 11H13M9.4 3.4v3.2M6.4 9.4v3.2" />,
+  display: <StudioIcon name="monitor" />,
+  controls: <StudioIcon name="keyboard" />,
+  common: <StudioIcon name="settings" />,
+  session: <StudioIcon name="chat" />,
+  persona: <StudioIcon name="user" />,
+  model: <StudioIcon name="brain" />,
+  providers: <StudioIcon name="server" />,
+  peers: <StudioIcon name="network" />,
+  tools: <StudioIcon name="shield" />,
+  hooks: <StudioIcon name="bolt" />,
+  ext: <StudioIcon name="plug" />,
+  network: <StudioIcon name="globe" />,
+  remote: <StudioIcon name="server" />,
+  storage: <StudioIcon name="storage" />,
+  memory: <StudioIcon name="bookmark" />,
+  usage: <StudioIcon name="chart" />,
+  account: <StudioIcon name="user" />,
+  versions: <StudioIcon name="download" />,
+  appearance: <StudioIcon name="palette" />,
+  advanced: <StudioIcon name="sliders" />,
 };
 
 // Grouped by the question each answers, in the order they get asked: what this

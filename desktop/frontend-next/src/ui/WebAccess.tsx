@@ -1,3 +1,4 @@
+import { StudioIcon } from "./StudioIcon";
 import { useCallback, useEffect, useState } from "react";
 import { t } from "../i18n";
 import { reason } from "../i18n/kernel";
@@ -117,9 +118,9 @@ export function WebAccess({ port }: { port: AgentPort }) {
                 {enabled && (
                   <span className="acts">
                     <button className="act" data-action="web-access.move" data-value="up" disabled={locked || idx === 0} aria-label={t("common.move_name_up", { name: said(kind, id) })}
-                      onClick={() => void order(on.map((x, i) => (i === idx - 1 ? id : i === idx ? on[idx - 1] : x)))}>↑</button>
+                      onClick={() => void order(on.map((x, i) => (i === idx - 1 ? id : i === idx ? on[idx - 1] : x)))}><StudioIcon name="arrow" /></button>
                     <button className="act" data-action="web-access.move" data-value="down" disabled={locked || idx === on.length - 1} aria-label={t("common.move_name_down", { name: said(kind, id) })}
-                      onClick={() => void order(on.map((x, i) => (i === idx + 1 ? id : i === idx ? on[idx + 1] : x)))}>↓</button>
+                      onClick={() => void order(on.map((x, i) => (i === idx + 1 ? id : i === idx ? on[idx + 1] : x)))}><StudioIcon name="arrowDown" /></button>
                   </span>
                 )}
                 <Switch data-action="web-access.backend" data-value={id} on={enabled} busy={locked}

@@ -98,7 +98,7 @@ export function UserCard({
   return (
     <div className="call" data-k="me" data-pending={item.pending ? "" : undefined}>
       <div className="g">
-        <span className="sym">{t("chat.you")}</span>
+        <span className="sym"><StudioIcon name="user" /><span className="sr-only">{t("chat.you")}</span></span>
       </div>
       <div className="c">
         {(item.steer || source) && <div className="hl user-hl">

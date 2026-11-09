@@ -1,3 +1,4 @@
+import { StudioIcon } from "../StudioIcon";
 import { Fragment, useState } from "react";
 import { t } from "../../i18n";
 import { reason } from "../../i18n/kernel";
@@ -292,7 +293,7 @@ export function DiffView({ diff, path, named, onPrepare, onCommit }: Props) {
             {sec.rows.map((l, i) =>
               "skipped" in l ? (
                 <div className="dhunk" key={i}>
-                  <span>⋯</span>
+                  <span><StudioIcon name="more" /></span>
                   <span>{t("chat.n_lines_skipped", { n: l.skipped })}</span>
                 </div>
               ) : (

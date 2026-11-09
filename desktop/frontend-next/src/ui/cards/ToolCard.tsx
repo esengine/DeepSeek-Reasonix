@@ -6,7 +6,7 @@ import { nestLabel, ranLabel } from "../delegation";
 import type { ExtensionSurface, Tool } from "../../port/wire";
 import type { RewindPlan, RewindResult } from "../../port/port";
 import { categoryOf, labelFor, mcpOrigin, runLabelFor } from "../icons";
-import { Sym, glyphFor } from "../Sym";
+import { Sym, iconFor } from "../Sym";
 import { activityVerb } from "../activityEarlier";
 import { GOAL_STATUS, argOf, goalUpdate, shortArgs } from "../args";
 import { Cost } from "../Cost";
@@ -210,7 +210,7 @@ export function ToolCard({
     <>
       {/* 名字是给人读的，id 是给人查的。标签只在它说了名字没说的事时才占地方
           （见 tagFor），所以精确的那个字符串挂在这里，一直够得着。 */}
-      {activity && <span className="kind" aria-hidden="true"><Sym glyph={glyphFor(shown)} /></span>}
+      {activity && <span className="kind" aria-hidden="true"><Sym icon={iconFor(shown)} /></span>}
       <span className={running ? "nm shim" : "nm"} title={shown}>{head}</span>
       {who && <span className="who" title={t("chat.a_subagent_running_under_the", { name: who })}>{who}</span>}
       {from && <span className="src" title={t("chat.a_tool_provided_by_the", { name: from.server })}>{from.server}</span>}
@@ -367,7 +367,7 @@ export function ToolCard({
       data-shake={shaking ? "" : undefined}
     >
       <div className="g">
-        <Sym glyph={glyphFor(shown)} done={settling.pop && !bad} />
+        <Sym icon={iconFor(shown)} done={settling.pop && !bad} />
       </div>
       <div className="c">
         {hasBody ? (
@@ -447,7 +447,7 @@ export function NestedCall({ tool, whole = false, read }: { tool: StateTool; who
   return (
     <div className="call" data-call={tool.id || undefined} data-k={KINDED.has(categoryOf(shown)) ? categoryOf(shown) : undefined}>
       <div className="g">
-        <Sym glyph={glyphFor(shown)} />
+        <Sym icon={iconFor(shown)} />
       </div>
       <div className="c">
         <div className="hl">
@@ -493,7 +493,7 @@ function Steps({ tool }: { tool: Tool }) {
     <div className="steps">
       {steps.map((st, i) => (
         <div className="s" key={i} data-done={stepDone(st) ? "" : undefined} data-now={i === now ? "" : undefined}>
-          <span className="b">{stepDone(st) ? "✓" : i + 1}</span>
+          <span className="b">{stepDone(st) ? <StudioIcon name="check" /> : i + 1}</span>
           <span className="t">
             <span className="ln">{st.text}</span>
           </span>

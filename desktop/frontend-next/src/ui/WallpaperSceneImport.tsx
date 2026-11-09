@@ -1,3 +1,4 @@
+import { StudioIcon } from "./StudioIcon";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { AgentPort, Appearance } from "../port/port";
 import type { Wallpaper } from "../port/look";
@@ -64,9 +65,7 @@ export function WallpaperSceneImport({ port, look, onLook, setPaper, onError }: 
       />
       <button className="paperpick" data-action="wallpaper.scene" data-busy={busy ? "" : undefined} onClick={() => folder.current?.click()}>
         <span className="plus" aria-hidden="true">
-          <svg viewBox="0 0 16 16">
-            <path d="M8 3.7v8.6M3.7 8h8.6" />
-          </svg>
+          <StudioIcon name="upload" />
         </span>
         {t("look.import_wallpaper_engine")}
       </button>

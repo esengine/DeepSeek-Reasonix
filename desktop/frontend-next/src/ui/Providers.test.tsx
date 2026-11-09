@@ -186,11 +186,12 @@ it("two entries at the very same address both stay in the list", async () => {
   expect(rows()).toHaveLength(2);
 });
 
-it("draws a declared vendor's mark on a service row and a letter chip where nothing is declared", async () => {
+it("draws a declared vendor's mark on a service row and a service icon where nothing is declared", async () => {
   draw([{ ...entry("router", "https://router.example"), mark: "openrouter" }, entry("mine", "https://mine.example")]);
   await screen.findAllByText("mine.example");
   const [router, mine] = rows();
   expect(router.querySelector('.vendor-mark[data-mark="openrouter"]')).toBeTruthy();
   expect(mine.querySelector(".vendor-mark")).toBeNull();
-  expect(mine.querySelector(".mi-mono")?.textContent).toBe("M");
+  expect(mine.querySelector(".mi-mono .lucide-server")).not.toBeNull();
+  expect(mine.querySelector(".mi-mono")?.textContent).toBe("");
 });

@@ -274,7 +274,7 @@ export function Providers({ port, onChanged, onFailed, protocol, onProtocol, act
                     }
                   }}
                   onClick={() => leave(() => { setAdding(false); setPicked(a.key); }, a.key !== selected)}>
-                  <ServiceMark mark={Object.values(a.byKind).find((e) => e.mark)?.mark} label={a.label} id={a.key} />
+                  <ServiceMark mark={Object.values(a.byKind).find((e) => e.mark)?.mark} id={a.key} />
                   <span className="tx">
                     <span className="nm">{a.label}</span>
                     <Clip className="ds">{a.host}</Clip>

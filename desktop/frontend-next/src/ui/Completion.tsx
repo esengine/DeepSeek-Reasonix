@@ -1,3 +1,4 @@
+import { StudioIcon } from "./StudioIcon";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { t } from "../i18n";
 import type { AgentPort, Completion, CompletionItem } from "../port/port";
@@ -291,7 +292,7 @@ export function CompletionMenu({ id, items, active, kind, query, kb, onPick, onH
                   {before}
                   {hit && <b className="hit">{hit}</b>}
                   {after}
-                  {it.descend && <i className="ah" aria-hidden="true">›</i>}
+                  {it.descend && <i className="ah" aria-hidden="true"><StudioIcon name="chevron" /></i>}
                 </span>
                 {it.hint && <span className="ds">{it.hint}</span>}
                 {it.args?.map((a) => (

@@ -1,3 +1,4 @@
+import { StudioIcon } from "./StudioIcon";
 import { Fragment, useEffect, useRef } from "react";
 import { t } from "../i18n";
 import { ICON, NAV, SECTION_DESC, SETTINGS, pageHome, type Section } from "./prefsnav";
@@ -52,7 +53,7 @@ export function SettingsNav({ at, values, shown, danger, disabled, onSelect, pag
                 data-action="settings.section" data-value={id}
                 tabIndex={at === id && pagesOf(id).length === 0 ? 0 : -1} data-open={at === id && pagesOf(id).length > 0 ? "" : undefined}
                 aria-selected={at === id && pagesOf(id).length === 0} disabled={disabled} onClick={() => onSelect(id)}>
-                <svg viewBox="0 0 16 16" aria-hidden="true">{ICON[id]}</svg>
+                {ICON[id]}
                 {id === "account" && <UpdateDot />}
                 <span className="nm">{t(name)}</span>
                 <span className="nv" title={values[id] || undefined} data-danger={danger(id) ? "" : undefined}>
@@ -83,7 +84,7 @@ export function SettingsTitle({ at }: { at: Section }) {
   const desc = SECTION_DESC[at];
   return (
     <div className="prefs-pagetitle">
-      {group?.[0] && <span className="group">{t(group[0])}</span>}
+      {group?.[0] && <span className="group">{t(group[0])}<StudioIcon name="chevron" /></span>}
       <h2>{t(name)}</h2>
       {(desc || count > 0) && (
         <span className="desc">

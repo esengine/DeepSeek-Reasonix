@@ -1,3 +1,4 @@
+import { StudioIcon } from "./StudioIcon";
 import { useState } from "react";
 import { t } from "../i18n";
 import type { ContextBreakdown, McpEntry } from "../port/port";
@@ -39,7 +40,7 @@ export function ContextSummaryCard({ context, mcp, percent, onManage, compact: a
             <div key={key}>
               <i data-part={key} /><span>{label}</span>
               {holdersOf(key).length > 0
-                ? <button type="button" className="chrome-context-more" data-action="context.largest" data-value={key} aria-expanded={listed === key} aria-label={t("composer.show_the_largest_items_in", { name: label })} onClick={() => setListed(listed === key ? null : key)}>{compact(value)}</button>
+                ? <button type="button" className="chrome-context-more" data-action="context.largest" data-value={key} aria-expanded={listed === key} aria-label={t("composer.show_the_largest_items_in", { name: label })} onClick={() => setListed(listed === key ? null : key)}>{compact(value)}<StudioIcon name="chevron" /></button>
                 : <b>{compact(value)}</b>}
             </div>
           ))}</div>

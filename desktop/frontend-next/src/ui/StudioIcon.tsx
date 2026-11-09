@@ -1,89 +1,49 @@
 import type { SVGProps } from "react";
+import {
+  Activity, Archive, ArrowDown, ArrowRight, ArrowUp, Ban, BarChart3, BookOpen, Bookmark, Bot, Brain,
+  Check, ChevronDown, ChevronRight, ChevronUp, Circle, CircleCheck, CircleDashed, CircleHelp,
+  CirclePlay, CircleX, Clock, CodeXml, Coins, Copy, Download, Eclipse, Ellipsis, Eraser,
+  ExternalLink, Eye, EyeOff, FileCode, FilePenLine, FileSearch, FileText, Folder, FolderInput,
+  FolderOpen, Galaxy, GitBranch, GitFork, Globe, HardDrive, History, Image, Info, Keyboard,
+  Layers, LayoutGrid, Link, List, ListChecks, LoaderCircle, Lock, Maximize2, Menu, MessageCircle,
+  MessageSquare, MessageSquareText, Minimize2, Minus, Monitor, Moon, Network, NotebookPen, Package,
+  Palette, PanelLeft, PanelLeftClose, PanelLeftOpen, PanelRight, Pause, Pencil, Pin, Play, Plug,
+  Plus, QrCode, Quote, Regex, Repeat, RotateCcw, RotateCw, Search, Send, Server, Settings, Shield,
+  ShieldCheck, SlidersHorizontal, Smartphone, Sparkle, Sparkles, Square, SquareCheck, Star, Sun,
+  Target, Terminal, ThumbsDown, ThumbsUp, Trash2, TriangleAlert, Type, Upload, UserRound,
+  Volume2, VolumeX, Wallet, Wrench, X, ZoomIn, ZoomOut, Zap,
+} from "lucide-react";
 
-// Exact outline geometry used by the Reasonix Studio prototype.
-const PATHS = {
-  folder: "M3 7V5h6l3 3h9v12H3V7z",
-  reveal: "M3 19V5h6l3 3h9v3M3 19l3-8h17l-3 8H3z",
-  file: "M14 3H5v18h14V8l-5-5v5h5M8 12h8M8 16h5",
-  image: "M6 4.5h12a2.25 2.25 0 0 1 2.25 2.25v10.5A2.25 2.25 0 0 1 18 19.5H6a2.25 2.25 0 0 1-2.25-2.25V6.75A2.25 2.25 0 0 1 6 4.5zM9 7.95a1.8 1.8 0 1 0 0 3.6 1.8 1.8 0 0 0 0-3.6zM20.25 16.5 15 11.25 6 19.5",
-  send: "M3.75 12 20.25 4.5l-4.5 15.75-3.75-6.75z",
-  fail: "M12 3.75a8.25 8.25 0 1 1 0 16.5 8.25 8.25 0 0 1 0-16.5zM8.7 8.7l6.6 6.6M15.3 8.7l-6.6 6.6",
-  search: "M15 15l6 6M17 10a7 7 0 1 1-14 0 7 7 0 0 1 14 0",
-  chevron: "m9 5 7 7-7 7",
-  down: "m6 9 6 6 6-6",
-  minus: "M5 12h14",
-  brain: "M9 4.8a3 3 0 0 0-3.9 3.45A3.3 3.3 0 0 0 4.5 14.1a3.3 3.3 0 0 0 3.9 4.65A2.85 2.85 0 0 0 12 18V6.45A2.85 2.85 0 0 0 9 4.8zM15 4.8a3 3 0 0 1 3.9 3.45 3.3 3.3 0 0 1 .6 5.85 3.3 3.3 0 0 1-3.9 4.65A2.85 2.85 0 0 1 12 18",
-  plus: "M12 5v14M5 12h14",
-  arrow: "M12 20V4m-6 6 6-6 6 6",
-  close: "m6 6 12 12M6 18 18 6",
-  expand: "M14 4h6v6M10 20H4v-6M20 4l-7 7M4 20l7-7",
-  collapseAll: "M18 10h-4v-4M20 4l-6 6M6 14h4v4M10 14l-6 6",
-  expandAll: "M16 20h4v-4M14 14l6 6M8 4H4v4M4 4l6 6",
-  check: "m5 12 4 4L19 6",
-  globe: "M3 12h18M12 3c-5 5-5 13 0 18 5-5 5-13 0-18M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0",
-  code: "m8 6-6 6 6 6m8-12 6 6-6 6M14 3l-4 18",
-  settings: "M4 7h16M4 17h16M9 4v6M16 14v6",
-  sliders: "M4 6h16M4 12h16M4 18h16M8 3v6M16 9v6M10 15v6",
-  more: "M5 12h.01M12 12h.01M19 12h.01",
-  menu: "M4 6h16M4 12h16M4 18h16",
-  panel: "M4 5h16v14H4V5zM9 5v14",
-  lock: "M6.75 10.5V7.5a5.25 5.25 0 0 1 10.5 0v3M5.25 10.5h13.5v10.5H5.25z",
-  shield: "m12 3 8 3v6c0 5-8 9-8 9s-8-4-8-9V6l8-3zM8 12l3 3 5-6",
-  branch: "M6 5a2 2 0 1 0 0-4 2 2 0 0 0 0 4Zm0 0v12m12-8a2 2 0 1 0 0-4 2 2 0 0 0 0 4Zm0 0a6 6 0 0 1-6 6H6m0 8a2 2 0 1 0 0-4 2 2 0 0 0 0 4Z",
-  fork: "M3 12h5c2 0 3-1 4-2l8-7m-6 0h6v6M8 12c2 0 3 1 4 2l8 7m-6 0h6v-6",
-  layers: "m12 3 10 5-10 5L2 8l10-5zM2 12l10 5 10-5M2 16l10 5 10-5",
-  spark: "m12 3 2.5 6.5L21 12l-6.5 2.5L12 21l-2.5-6.5L3 12l6.5-2.5L12 3z",
-  agent: "M11 3l1.7 4.3L17 9l-4.3 1.7L11 15l-1.7-4.3L5 9l4.3-1.7L11 3zM19 14l.8 2.2L22 17l-2.2.8L19 20l-.8-2.2L16 17l2.2-.8L19 14zM4 3l.5 1.5L6 5l-1.5.5L4 7l-.5-1.5L2 5l1.5-.5L4 3z",
-  refresh: "M20 7a9 9 0 1 0 1 8M20 3v5h-5",
-  sparkle: "M12 3l2.7 6 6.3.6-4.8 4.2 1.5 6.3L12 16.8 6.3 20.1l1.5-6.3L3 9.6l6.3-.6z",
-  target: "M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0zM15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0z",
-  terminal: "M3 5h18v14H3V5zM7.5 10l3 2.5-3 2.5M12.5 15H16",
-  eraser: "M4.5 19.5h15M7.5 15l9-9M12 6l4.5 4.5",
-  clock: "M12 7v5l3 2M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0",
-  stop: "M6 6h12v12H6z",
-  play: "m8 4 12 8-12 8V4z",
-  pause: "M8 5v14M16 5v14",
-  bolt: "M13 3 5 13h6l-1 8 8-10h-6l1-8z",
-  coin: "M12 7v10M9.5 9.5c0-1 1.2-1.5 2.5-1.5s2.5.5 2.5 1.5-1.2 1.3-2.5 1.5-2.5.5-2.5 1.5 1.2 1.5 2.5 1.5 2.5-.5 2.5-1.5M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0",
-  info: "M12 11v5M12 8h.01M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0",
-  warning: "M12 3 2 21h20L12 3zM12 9v5M12 17h.01",
-  copy: "M8 8h13v13H8V8zM16 8V3H3v13h5",
-  quote: "M7 7H3v6h6V9m0-2v8a2 2 0 0 1-2 2H5m16-10h-4v6h6V9m0-2v8a2 2 0 0 1-2 2h-2",
-  external: "M14 3h7v7M21 3 11 13M10 3H3v18h18v-7",
-  plug: "M8 3v5m8-5v5M5 8h14v4a7 7 0 0 1-14 0V8M12 19v3",
-  download: "M12 3v12m-5-5 5 5 5-5M4 17v4h16v-4",
-  chat: "M4 5h16v10H9l-5 4V5z",
-  list: "M9 5h12M9 12h12M9 19h12M3 5h.01M3 12h.01M3 19h.01",
-  edit: "m4 16 12-12 4 4L8 20H4v-4zM13 7l4 4",
-  rewind: "M9 14 4 9l5-5M4 9h11a5 5 0 0 1 0 10h-4",
-  pin: "M9 3h6l-1 6 4 4H6l4-4-1-6zM12 13v8",
-  trash: "M4 7h16M9 7V4h6v3M7 7l1 14h8l1-14M10 11v6M14 11v6",
-  archive: "M4 4h16v5H4V4zm2 5v11h12V9M9 13h6",
-  server: "M3 3h18v7H3V3zM3 14h18v7H3v-7zM7 6h.01M7 17h.01",
-  link: "m10 13 4-4M9 16l-2 2a4 4 0 0 1-6-5l4-4a4 4 0 0 1 6 0M14 8l2-2a4 4 0 0 1 6 5l-4 4a4 4 0 0 1-6 0",
-  feedback: "M4 4h16v12h-8l-5 4v-4H4V4zM8 9h8M8 12h5",
-  wallet: "M3 6h17v15H3V6zM3 6l14-4v4M15 11h7v6h-7v-6zM18 14h.01",
-  eye: "M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12zM15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0",
-  eyeoff: "M3 3l18 18M10.6 5.1A10 10 0 0 1 12 5c6 0 10 7 10 7a17 17 0 0 1-3.2 3.9M6.6 6.6C3.9 8.4 2 12 2 12s4 7 10 7a9.6 9.6 0 0 0 5.4-1.6M9.9 9.9a3 3 0 0 0 4.2 4.2",
-  activity: "M22 12h-4l-3 9L9 3l-3 9H2",
+const ICONS = {
+  folder: Folder, reveal: FolderOpen, file: FileText, image: Image, send: Send, fail: CircleX,
+  search: Search, chevron: ChevronRight, down: ChevronDown, up: ChevronUp, minus: Minus,
+  brain: Brain, plus: Plus, arrow: ArrowUp, arrowDown: ArrowDown, arrowRight: ArrowRight,
+  close: X, expand: Maximize2, collapseAll: Minimize2, expandAll: Maximize2, check: Check,
+  globe: Globe, code: CodeXml, settings: Settings, sliders: SlidersHorizontal, more: Ellipsis,
+  menu: Menu, panel: PanelLeft, panelClose: PanelLeftClose, panelOpen: PanelLeftOpen,
+  panelRight: PanelRight, lock: Lock, shield: Shield, shieldCheck: ShieldCheck,
+  branch: GitBranch, fork: GitFork, layers: Layers, spark: Sparkle, agent: Bot,
+  refresh: RotateCw, sparkle: Star, target: Target, terminal: Terminal, eraser: Eraser,
+  clock: Clock, stop: Square, play: Play, pause: Pause, bolt: Zap, coin: Coins,
+  info: Info, warning: TriangleAlert, copy: Copy, quote: Quote, external: ExternalLink,
+  plug: Plug, download: Download, upload: Upload, chat: MessageSquare, list: List,
+  edit: Pencil, rewind: RotateCcw, pin: Pin, trash: Trash2, archive: Archive, server: Server,
+  link: Link, feedback: MessageSquareText, wallet: Wallet, eye: Eye, eyeoff: EyeOff,
+  activity: Activity, chart: BarChart3, book: BookOpen, bookmark: Bookmark, question: CircleHelp,
+  circle: Circle, circleDashed: CircleDashed, fading: Eclipse, complete: SquareCheck,
+  success: CircleCheck, running: CirclePlay, inactive: Circle, loading: LoaderCircle,
+  fileCode: FileCode, fileEdit: FilePenLine, fileSearch: FileSearch, moveFile: FolderInput,
+  history: History, storage: HardDrive, keyboard: Keyboard, grid: LayoutGrid, monitor: Monitor,
+  sun: Sun, moon: Moon, network: Network, notebook: NotebookPen, package: Package,
+  palette: Palette, repeat: Repeat, galaxy: Galaxy, phone: Smartphone, qr: QrCode, user: UserRound,
+  tasks: ListChecks, tools: Wrench, magic: Sparkles, comment: MessageCircle, matchCase: Type,
+  regex: Regex, thumbsUp: ThumbsUp, thumbsDown: ThumbsDown, volume: Volume2, muted: VolumeX,
+  zoomIn: ZoomIn, zoomOut: ZoomOut, disabled: Ban,
 } as const;
 
-export type StudioIconName = keyof typeof PATHS;
+export type StudioIconName = keyof typeof ICONS;
 
 export function StudioIcon({ name, className, ...props }: SVGProps<SVGSVGElement> & { name: StudioIconName }) {
-  return (
-    <svg
-      className={["studio-icon", className].filter(Boolean).join(" ")}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.5"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-      {...props}
-    >
-      <path d={PATHS[name]} />
-    </svg>
-  );
+  const Icon = ICONS[name];
+  return <Icon className={["studio-icon", className].filter(Boolean).join(" ")} size={16} strokeWidth={1.8} aria-hidden="true" focusable="false" {...props} />;
 }

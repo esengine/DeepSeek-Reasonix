@@ -1,3 +1,4 @@
+import { StudioIcon } from "./StudioIcon";
 import { useRef, useState } from "react";
 import type { AgentPort } from "../port/port";
 import { t } from "../i18n";
@@ -94,9 +95,7 @@ export function ThemeImport({ port, empty, onImported, onUse }: Props) {
       />
       <button className="paperpick" data-action="theme.import" data-busy={busy ? "" : undefined} disabled={busy} onClick={() => file.current?.click()}>
         <span className="plus" aria-hidden="true">
-          <svg viewBox="0 0 16 16">
-            <path d="M8 3.7v8.6M3.7 8h8.6" />
-          </svg>
+          <StudioIcon name="upload" />
         </span>
         {t(busy ? "common.importing" : "look.import_theme")}
       </button>

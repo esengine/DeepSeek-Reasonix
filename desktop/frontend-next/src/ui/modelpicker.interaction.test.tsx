@@ -62,14 +62,15 @@ describe("model picker", () => {
     expect(document.querySelectorAll(".studio-model-menu button.mi .mi-mono")).toHaveLength(16);
   });
 
-  it("gives a provider the same letter and tone every time it is drawn", () => {
+  it("gives a provider the same service icon and tone every time it is drawn", () => {
     mount(fleet(2));
-    const first = [...document.querySelectorAll<HTMLElement>(".mi.head .mi-mono")].map((n) => `${n.textContent}${n.dataset.tone}`);
+    const first = [...document.querySelectorAll<HTMLElement>(".mi.head .mi-mono")].map((n) => ({ icon: n.querySelector("svg")?.getAttribute("class"), tone: n.dataset.tone }));
     cleanup();
     mount(fleet(2));
-    const again = [...document.querySelectorAll<HTMLElement>(".mi.head .mi-mono")].map((n) => `${n.textContent}${n.dataset.tone}`);
+    const again = [...document.querySelectorAll<HTMLElement>(".mi.head .mi-mono")].map((n) => ({ icon: n.querySelector("svg")?.getAttribute("class"), tone: n.dataset.tone }));
     expect(again).toEqual(first);
-    expect(first[0]).toMatch(/^D\d$/);
+    expect(first[0].icon).toContain("lucide-server");
+    expect(first[0].tone).toMatch(/^[0-4]$/);
   });
 
   it("keeps a heading for a lone provider so the endpoint stays visible", () => {

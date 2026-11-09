@@ -1,3 +1,4 @@
+import { StudioIcon } from "../StudioIcon";
 import { lazy, Suspense, useEffect, useState, useSyncExternalStore } from "react";
 import { onOfficePreviewChange, previewsOffice } from "../../state/prefs";
 import type { AgentPort } from "../../port/port";
@@ -27,9 +28,9 @@ function Picture({ data, path, view }: { data: ArrayBuffer; path: string; view: 
   }, [data, path]);
   return <>
     <div className="document-controls">
-      <button data-action="document.zoom" data-target={path} onClick={() => setZoom(Math.max(0.25, zoom - 0.25))} aria-label={t("chat.zoom_out")}>−</button>
+      <button data-action="document.zoom" data-target={path} onClick={() => setZoom(Math.max(0.25, zoom - 0.25))} aria-label={t("chat.zoom_out")}><StudioIcon name="zoomOut" /></button>
       <button data-action="document.zoom" data-target={path} onClick={() => setZoom(1)}>{Math.round(zoom * 100)}%</button>
-      <button data-action="document.zoom" data-target={path} onClick={() => setZoom(Math.min(4, zoom + 0.25))} aria-label={t("chat.zoom_in")}>+</button>
+      <button data-action="document.zoom" data-target={path} onClick={() => setZoom(Math.min(4, zoom + 0.25))} aria-label={t("chat.zoom_in")}><StudioIcon name="zoomIn" /></button>
     </div>
     {failed ? <p role="alert">{t("chat.image_unavailable")}</p> : <div className="document-picture">
       {url && <img src={url} alt={path} style={{ width: `${zoom * 100}%`, maxWidth: "none" }} onError={() => setFailed(true)} />}

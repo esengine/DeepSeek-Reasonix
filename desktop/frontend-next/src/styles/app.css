@@ -160,7 +160,7 @@
     display: grid; place-items: center; width: 44px; border: 0; background: transparent;
     color: var(--faint); cursor: pointer; transition: background var(--m-line), color var(--m-line);
   }
-  .winctl .wc svg { width: 12px; height: 12px; fill: none; stroke: currentColor; stroke-width: 1.1 }
+  .winctl .wc svg { width: 12px; height: 12px; fill: none; stroke: currentColor; stroke-width: 2 }
   .winctl .wc:hover { background: var(--overlay); color: var(--text) }
   .winctl .wc.close:hover { background: var(--err); color: #fff }
   .winctl .wc:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px }
@@ -828,7 +828,6 @@
   .call[data-k="host"]  > .c .hl .nm { font-weight: var(--w-reg); color: var(--muted) }
 
   .call[data-k="say"] > .g .sym { background: none; box-shadow: none; color: var(--text) }
-  .call[data-k="say"] > .g .sym svg { fill: currentColor }
 
   .call[data-k="say"] > .g {
     background: linear-gradient(color-mix(in srgb, var(--border) 88%, transparent) 0 0)
@@ -1179,12 +1178,12 @@
   .comp details { margin-top: var(--y-close) }
   .comp-l { margin-top: 5px; display: flex; flex-direction: column; gap: 3px }
   .comp-l .row { display: flex; gap: 8px; font: var(--w-reg) var(--fs-meta) var(--mono); color: var(--faint) }
-  .comp-l .row .x { color: var(--del); flex: none; width: 10px }
-  .comp-l .row .k { color: var(--ok); flex: none; width: 10px; font-size: var(--fs-micro) }
+  .comp-l .row .x { color: var(--del); flex: none; width: 16px }
+  .comp-l .row .k { color: var(--ok); flex: none; width: 16px }
 
   .steps { margin-top: 6px; display: flex; flex-direction: column; gap: 4px }
   .steps .s { display: flex; align-items: baseline; gap: 9px; font-size: var(--fs-ui); color: var(--muted) }
-  .steps .s .b { font: var(--w-reg) var(--fs-micro)/1.5 var(--mono); width: 10px; flex: none; color: var(--ghost) }
+  .steps .s .b { display: inline-flex; align-items: center; justify-content: center; font: var(--w-reg) var(--fs-micro)/1.5 var(--mono); width: 16px; flex: none; color: var(--ghost) }
   .steps .s[data-done] { color: var(--faint) }
   .steps .s[data-done] .b { color: var(--ok) }
   .steps .s[data-now] { color: var(--text) }
@@ -1576,7 +1575,7 @@
 
   .policy .vl .polrisk { color: var(--err-ink); font-weight: var(--w-med) }
   .policy .vl .polwarn { margin-right: 4px; font-style: normal; display: inline-grid; vertical-align: -1.5px }
-  .policy .vl .polwarn svg, .cachemoved i svg {
+  .policy .vl .polwarn svg, .cachemoved > .studio-icon {
     width: 12px; height: 12px; fill: none; stroke: currentColor;
     stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round;
   }
@@ -1794,7 +1793,7 @@
     display: flex; align-items: baseline; gap: 5px; margin: 8px 0 0;
     font: var(--w-reg) var(--fs-meta) var(--ui); color: var(--warn-ink);
   }
-  .cachemoved i { font-style: normal; display: inline-grid; vertical-align: -1.5px }
+  .cachemoved > .studio-icon { align-self: center }
 
   .bar { display: flex; height: 3px; overflow: hidden; background: var(--hair); gap: 1px }
   .bar i { display: block; transition: flex-grow var(--t-live) var(--ease); position: relative }
@@ -2772,7 +2771,7 @@
   .addp-head strong { display: block; font: var(--w-semi) var(--fs-lead) var(--ui); color: var(--text) }
   .addp-head p { margin: 4px 0 0; font: var(--w-reg) var(--fs-meta)/1.5 var(--ui); color: var(--muted) }
   .addp-close {
-    flex: none; width: 28px; height: 28px; border: 0; border-radius: var(--r-xs);
+    flex: none; width: 28px; height: 28px; display: grid; place-items: center; border: 0; border-radius: var(--r-xs);
     background: transparent; color: var(--faint); font: var(--w-reg) var(--fs-title)/1 var(--ui); cursor: pointer;
   }
   .addp-close:hover { background: var(--overlay); color: var(--text) }
@@ -3297,7 +3296,7 @@
   .probes { margin-top: 14px; display: flex; flex-direction: column }
   .probe { display: flex; align-items: baseline; gap: 9px; flex-wrap: wrap; padding: 7px 0; border-top: 1px solid var(--hair) }
   .probe:last-of-type { border-bottom: 1px solid var(--hair) }
-  .probe .mk { flex: none; width: 14px; font-style: normal; color: var(--err) }
+  .probe .mk { flex: none; width: 16px; font-style: normal; color: var(--err) }
   .probe[data-ok] .mk { color: var(--ok) }
   .probe .lb { flex: none; min-width: 68px; font: var(--w-reg) var(--fs-ui) var(--ui); color: var(--muted) }
   .probe .dt { flex: 1; min-width: 0; font: var(--w-reg) var(--fs-ui) var(--mono); color: var(--text); word-break: break-all }
@@ -3822,7 +3821,7 @@
   }
   .movemenu button:hover { background: var(--float-hi); color: var(--text) }
   .movemenu button[aria-checked="true"] { color: var(--text) }
-  .movemenu button[aria-checked="true"]::after { content: " ·" }
+  .movemenu button[aria-checked="true"] { display: flex; align-items: center; justify-content: space-between; gap: 8px }
 
   .drawnby { margin-top: 6px; font: var(--w-reg) var(--fs-meta) var(--ui); color: var(--ghost) }
 
@@ -4046,7 +4045,8 @@
   .ptab-ws, .ptab-host { flex: 0 1 auto; min-width: 0; max-width: 40%; overflow: hidden; text-overflow: ellipsis }
   .ptab-ws { font: var(--w-reg) var(--fs-micro) var(--mono); color: var(--ghost) }
   .ptab-host { font: var(--w-reg) var(--fs-micro) var(--mono); color: var(--net) }
-  .ptab-host::before { content: "◦"; margin-right: 2px; opacity: .7 }
+  .ptab-host { display: inline-flex; align-items: center; gap: 3px }
+  .ptab-host .studio-icon { width: 12px; height: 12px; opacity: .7 }
   .ptab .pip { flex: none; background: var(--ghost) }
 
   .ptab[data-run="running"] .pip { background: var(--net); animation: m-pulse var(--t-live) ease-in-out infinite }
@@ -4209,8 +4209,9 @@
   .movess-cols h3 { margin: 0 0 4px; font: var(--w-med) var(--fs-meta) var(--ui); color: var(--text) }
   .movess-cols ul { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 3px }
   .movess-cols li { position: relative; padding-left: 16px; font: var(--w-reg) var(--fs-meta)/1.6 var(--ui); color: var(--muted) }
-  .movess-cols section[data-part="travels"] li::before { content: "✓"; position: absolute; left: 0; color: var(--ok-ink) }
-  .movess-cols section[data-part="stays"] li::before { content: "×"; position: absolute; left: 2px; color: var(--warn-ink) }
+  .movess-cols li .studio-icon { position: absolute; left: 0; top: 3px; width: 12px; height: 12px }
+  .movess-cols section[data-part="travels"] .studio-icon { color: var(--ok-ink) }
+  .movess-cols section[data-part="stays"] .studio-icon { color: var(--warn-ink) }
   .movess .picknote { margin: 10px 0 0 }
   .movess-act { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px }
   .movess-empty { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 14px 0 }
@@ -4329,6 +4330,7 @@
   .rmtcands { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin: 10px 0 2px }
   .rmtcands .cap { font: var(--w-reg) var(--fs-meta) var(--ui); color: var(--ghost) }
   .rmtcands .rmtcand {
+    display: inline-flex; align-items: center; gap: 4px;
     padding: 2px 9px; border: 1px dashed var(--border); border-radius: var(--r-pill);
     background: transparent; color: var(--faint); cursor: pointer;
     font: var(--w-reg) var(--fs-meta) var(--mono);
@@ -5185,7 +5187,7 @@
 .prefs-pagetitle .desc { display: inline-flex; gap: 0; color: var(--faint); font: var(--w-reg) var(--fs-meta)/1.5 var(--ui); }
 .prefs-pagetitle .desc .what + .count::before { content: "·"; margin: 0 6px; }
 .prefs-pagetitle .group { color: var(--faint); font: var(--w-reg) var(--fs-meta)/1.4 var(--ui); }
-.prefs-pagetitle .group::after { content: "›"; margin-left: 8px; }
+.prefs-pagetitle .group { display: inline-flex; align-items: center; gap: 8px; }
 .prefs-pagetitle h2 { margin: 0; color: var(--text); font: var(--w-semi) var(--fs-title)/1.3 var(--ui); }
 .prefs-card { margin-bottom: 16px; border: 1px solid var(--border); border-radius: var(--r-lg); background: var(--surface); overflow: hidden; }
 .prefs-card > header { padding: 16px 20px 12px; }

@@ -1,3 +1,4 @@
+import { StudioIcon } from "./StudioIcon";
 import { useCallback, useEffect, useState } from "react";
 import { t } from "../i18n";
 import type { Protocol, ProviderEntry, ProviderPreset, ProviderProbe } from "../port/port";
@@ -200,7 +201,7 @@ export function AddProvider({
           <strong>{t("models.add_a_model_source")}</strong>
           <p>{t("models.use_the_service_documentation_connection")}</p>
         </div>
-        <button className="addp-close" onClick={onCancel} disabled={busy || testing} aria-label={t("common.cancel")}>×</button>
+        <button className="addp-close" onClick={onCancel} disabled={busy || testing} aria-label={t("common.cancel")}><StudioIcon name="close" /></button>
       </div>
       {baseUrl.trim() === "" && <PresetGallery load={loadPresets} onPick={setPreset} disabled={busy || checkingModel !== ""} />}
       <div className="fields">

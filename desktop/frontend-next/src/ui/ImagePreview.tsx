@@ -129,7 +129,7 @@ function ImageViewer({
           title={t("chat.zoom_in")}
           onClick={() => zoom(1.25)}
         >
-          <StudioIcon name="plus" />
+          <StudioIcon name="zoomIn" />
         </button>
         <button
           type="button"
@@ -139,7 +139,7 @@ function ImageViewer({
           title={t("chat.zoom_out")}
           onClick={() => zoom(0.8)}
         >
-          <StudioIcon name="minus" />
+          <StudioIcon name="zoomOut" />
         </button>
         <button
           type="button"

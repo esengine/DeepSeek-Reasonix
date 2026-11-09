@@ -1,3 +1,4 @@
+import { StudioIcon, type StudioIconName } from "./StudioIcon";
 import { useEffect, useState, type KeyboardEvent } from "react";
 import { t } from "../i18n";
 import { reason, say } from "../i18n/kernel";
@@ -10,12 +11,12 @@ import { MODS_SHOWN } from "./modsgate";
 const BUDGET_MAX = 55000;
 
 // The words and the mark for each state: a state never rests on colour alone.
-const STATE: Record<ModState, { mark: string; word: string }> = {
-  inactive: { mark: "○", word: "ext.not_running" },
-  starting: { mark: "◐", word: "ext.starting" },
-  running: { mark: "●", word: "common.running" },
-  restarting: { mark: "↻", word: "ext.restarting" },
-  disabled: { mark: "⊘", word: "common.suspended" },
+const STATE: Record<ModState, { icon: StudioIconName; word: string }> = {
+  inactive: { icon: "inactive", word: "ext.not_running" },
+  starting: { icon: "loading", word: "ext.starting" },
+  running: { icon: "running", word: "common.running" },
+  restarting: { icon: "refresh", word: "ext.restarting" },
+  disabled: { icon: "disabled", word: "common.suspended" },
 };
 
 /** Claude Code mods: modules an installed package ships, run in a process of
@@ -104,7 +105,7 @@ function ModHostBlock({ port }: { port: AgentPort }) {
           <li key={m.plugin} data-state={m.state}>
             <div className="modhead">
               <b>{m.plugin}</b>
-              <span className="modstate"><span aria-hidden="true">{STATE[m.state].mark}</span> {t(STATE[m.state].word)}</span>
+              <span className="modstate"><StudioIcon name={STATE[m.state].icon} /> {t(STATE[m.state].word)}</span>
             </div>
             {m.code && <div className="ds">{say({ code: m.code, error: m.detail })}</div>}
             {m.restarts > 0 && <div className="ds">{t("ext.restarted_n_times", { n: m.restarts })}</div>}

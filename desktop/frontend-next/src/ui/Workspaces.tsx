@@ -13,7 +13,6 @@ import { useRailQuery } from "./railsearch";
 import { StudioIcon } from "./StudioIcon";
 import { TreeEmpty, TreeReading } from "./TreeReading";
 import { ListingProgress } from "./ListingProgress";
-import { Cross } from "./glyphs";
 import { copyText } from "./CopyButton";
 import { sessionInfoText } from "./sessionInfo";
 import { saveSessionFile } from "./sessionExport";
@@ -710,7 +709,7 @@ function WorkspacesView({ hub, tree, treeRead, answered = null, runtimes, active
                                   setConfirm(copy.path);
                                 }}
                               >
-                                <Cross />
+                                <StudioIcon name="trash" />
                               </button>
                             </div>
                           ),

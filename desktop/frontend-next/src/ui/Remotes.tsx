@@ -1,3 +1,4 @@
+import { StudioIcon } from "./StudioIcon";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { t } from "../i18n";
 import type { HubPort } from "../port/hub";
@@ -6,7 +7,6 @@ import { say } from "../i18n/kernel";
 import { toggleHiddenHost, useHiddenHosts } from "../state/remotehide";
 import { RemoteDirs } from "./RemoteDirs";
 import { useDismiss } from "./dismiss";
-import { StudioIcon } from "./StudioIcon";
 
 interface Props {
   hub: HubPort;
@@ -238,7 +238,7 @@ export function Remotes({ hub, onError }: Props) {
               title={t("remote.add_it_with_the_settings")}
               onClick={() => void save({ name: alias, useSSHConfig: true })}
             >
-              + {alias}
+              <StudioIcon name="plus" /> {alias}
             </button>
           ))}
           {candidates.length > 1 && (

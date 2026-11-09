@@ -57,8 +57,7 @@ it("keeps reporting every other failure as an error", async () => {
 
 it("draws the new-session button of a project row as a plus, as the Sess-Rows board does", () => {
   draw(async () => {});
-  const icon = document.querySelector(".wsrow .wsadd svg path");
-  expect(icon?.getAttribute("d")).toBe("M12 5v14M5 12h14");
+  expect(document.querySelector(".wsrow .wsadd svg.lucide-plus[aria-hidden=true]")).not.toBeNull();
 });
 
 it("draws a remote project's new-session button as a plus too", () => {
@@ -71,7 +70,7 @@ it("draws a remote project's new-session button as a plus too", () => {
     adder={{ busy: false, add: noop, addPath: noop } as never} onOpen={async () => {}} onOpenRemote={async () => {}} onFocusPane={noop}
     onClosePanes={async () => {}} onPause={noop} onArchive={async () => {}} onRename={noop} onCollapse={noop} wallet="" onSettings={noop}
     onFiles={noop} onView={noop} onFeedback={noop} feedbackUnread={0} onFind={noop} onError={noop} />);
-  const paths = [...document.querySelectorAll(".wsadd svg path")].map((p) => p.getAttribute("d"));
-  expect(paths.length).toBeGreaterThan(0);
-  expect(paths.every((d) => d === "M12 5v14M5 12h14")).toBe(true);
+  const icons = [...document.querySelectorAll(".wsadd svg")];
+  expect(icons.length).toBeGreaterThan(0);
+  expect(icons.every((icon) => icon.classList.contains("lucide-plus"))).toBe(true);
 });

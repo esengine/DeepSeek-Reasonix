@@ -7,10 +7,10 @@ import { StudioIcon } from "./StudioIcon";
 
 const LAST = "rx-open-with-last";
 
-function readLast(): { id: string; name: string; initial?: string } | null {
+function readLast(): { id: string; name: string } | null {
   try {
     const got = JSON.parse(localStorage.getItem(LAST) ?? "null") as unknown;
-    return got && typeof got === "object" && typeof (got as { id?: unknown }).id === "string" ? (got as { id: string; name: string; initial?: string }) : null;
+    return got && typeof got === "object" && typeof (got as { id?: unknown }).id === "string" ? (got as { id: string; name: string }) : null;
   } catch {
     return null;
   }
@@ -18,16 +18,15 @@ function readLast(): { id: string; name: string; initial?: string } | null {
 
 function keepLast(target: OpenWithTarget) {
   try {
-    localStorage.setItem(LAST, JSON.stringify({ id: target.id, name: openWithName(target), initial: target.name }));
+    localStorage.setItem(LAST, JSON.stringify({ id: target.id, name: openWithName(target) }));
   } catch {
     // A blocked store forgets the choice; the arrow still lists every program.
   }
 }
 
-// The kernel names a program but ships no picture of it, so each is drawn as
-// its initial on a tile coloured by the kernel's stable id.
-function Tile({ id, name }: { id: string; name: string }) {
-  return <span className="openwith-tile" aria-hidden="true" data-program={id}>{[...name][0]?.toUpperCase()}</span>;
+function Tile({ id }: { id: string }) {
+  const icon = id === "terminal" ? "terminal" : ["vscode", "cursor", "idea"].includes(id) ? "code" : "external";
+  return <span className="openwith-tile" aria-hidden="true" data-program={id}><StudioIcon name={icon} /></span>;
 }
 
 const revealWord = (platform: string) =>
@@ -74,7 +73,7 @@ export function OpenWithMenu({ hub, root, platform = "", onError }: {
         <button className="openwith-btn openwith-main" data-action="workspace.open-with" data-target={root} data-value={last.id}
           aria-label={t("common.open_with_name", { name: last.name })} title={t("common.open_with_name", { name: last.name })}
           onClick={() => hub.openWith(root, last.id).catch(onError)}>
-          <Tile id={last.id} name={last.initial ?? last.name} />
+          <Tile id={last.id} />
         </button>
       )}
       <button
@@ -103,7 +102,7 @@ export function OpenWithMenu({ hub, root, platform = "", onError }: {
               title={target.available ? undefined : blockedNote(target)}
               onClick={() => run(target)}
             >
-              <Tile id={target.id} name={target.name} />
+              <Tile id={target.id} />
               <span>{t("common.open_with_name", { name: openWithName(target) })}</span>
               {!target.available && <small>{t("common.inside_a_project_folder")}</small>}
             </button>

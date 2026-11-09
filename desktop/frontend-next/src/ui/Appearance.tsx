@@ -1,3 +1,4 @@
+import { StudioIcon } from "./StudioIcon";
 import { ApplyNote } from "./Group";
 import { useCallback, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from "react";
 import { effectsMode, onEffectsChange, setEffectsMode } from "../state/prefs";
@@ -254,9 +255,7 @@ export function Appearance({ port, theme, onTheme, contrast, onContrast, weight,
           />
           <button className="paperpick" data-busy={busy ? "" : undefined} onClick={() => file.current?.click()}>
             <span className="plus" aria-hidden="true">
-              <svg viewBox="0 0 16 16">
-                <path d="M8 3.7v8.6M3.7 8h8.6" />
-              </svg>
+              <StudioIcon name="plus" />
             </span>
             {t(look.wallpaper ? "look.choose_another" : "look.choose_an_image_or_video")}
           </button>

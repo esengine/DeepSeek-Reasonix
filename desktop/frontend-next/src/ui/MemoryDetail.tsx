@@ -73,7 +73,7 @@ export function MemoryDetail({ m, edit, setEdit, busy, galaxies, onSave, onConfi
             </Button>
             <Button variant="ghost" data-action="memory.cancel" data-target={m.name} onClick={() => setEdit(null)}>{t("common.cancel")}</Button>
             <Button variant="ghost" data-action="memory.forget" data-target={m.name} disabled={busy} onClick={onForget}>
-              {t(busy ? "…" : "common.archived_2")}
+              {busy && <Icon name="loading" size={15} />}{t("common.archived_2")}
             </Button>
             <span className="hint">{t("memory.saving_records_a_new_revision")}</span>
           </div>
@@ -120,8 +120,8 @@ export function MemoryDetail({ m, edit, setEdit, busy, galaxies, onSave, onConfi
           <Icon name="edit" size={13} />{t("common.edit")}
         </Button>
         <Button variant="ghost" iconOnly data-action="memory.forget" data-target={m.name} disabled={busy} onClick={onForget}
-          aria-label={t(busy ? "…" : "common.archived_2")} title={t("common.archived_2")}>
-          <Icon name="archive" size={15} />
+          aria-busy={busy} aria-label={t("common.archived_2")} title={t("common.archived_2")}>
+          <Icon name={busy ? "loading" : "archive"} size={15} />
         </Button>
       </div>
       {m.usedLastTurn && m.why && <p className="why-used">{t("memory.surfaced_last_turn_because_of", { why: m.why })}</p>}
@@ -161,7 +161,7 @@ export function History({ list, current, busy, onRestore }: {
           <span className="at">{m.updatedAt || m.createdAt}</span>
           <span className="ds" title={m.title}>{m.title}</span>
           <Button variant="ghost" data-action="memory.restore" data-target={m.name} disabled={busy} onClick={() => onRestore(m.revision ?? 1)}>
-            {t(busy ? "…" : "memory.restore_this_one")}
+            {busy && <Icon name="loading" size={15} />}{t("memory.restore_this_one")}
           </Button>
           <pre>{clipBody(m.body)}</pre>
         </div>

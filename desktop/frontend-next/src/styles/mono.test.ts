@@ -20,11 +20,6 @@ const SOURCES = import.meta.glob(["../**/*.tsx", "!../**/*.test.*"], {
 // welcome screen is the one deliberate exception — its STUDIO line and tagline
 // are set in the terminal's own face because that is the product's vernacular.
 const MARKS: Record<string, string> = {
-  x: "× — the close mark, sized to hold its cell beside ✓",
-  "ptab-x": "× — same mark on a pane tab",
-  ah: "› — the affordance arrow",
-  "mode-toggle": "Aa and .* — the glyphs of the search flags they switch, which are the flags' own notation",
-  prompt: "› — the composer's own prompt character",
   esc: "Esc — a keycap, which is lettering on a key rather than prose",
   "oobe-brand": "the lockup's STUDIO line, deliberately set in the terminal's face",
   "oobe-sub": "the lockup's tagline, set with it",
@@ -37,8 +32,8 @@ const MARKS: Record<string, string> = {
 // while the work is outstanding. Never widen this to land a change.
 const MIXED = new Set([
   "c", "cnt", "cost", "cur", "d", "delta", "dt", "fail", "k",
-  "lb", "meta", "mk", "n", "nm", "ntimes", "path", "pill", "pt", "r", "rmtcand", "rt",
-  "sc", "st", "sym", "sz", "tag", "u", "uspan", "v",
+  "lb", "meta", "n", "nm", "ntimes", "path", "pill", "pt", "r", "rmtcand", "rt",
+  "sc", "st", "sz", "tag", "u", "uspan", "v",
 ]);
 
 const TRANSLATORS = ["t", "tx", "plural"];

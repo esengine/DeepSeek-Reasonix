@@ -1,11 +1,12 @@
+import type { StudioIconName } from "../StudioIcon";
 import type { ReactNode } from "react";
 import { Sym } from "../Sym";
 
-/** The inline step of the transcript grammar: a bare status glyph, the title, the
+/** The inline step of the transcript grammar: a bare status icon, the title, the
  *  mono subject and the meta on one row over a hairline, with an optional detail
  *  line under it. No box, no icon square, no rail. */
-export function LineRow({ glyph, title, subject, subjectTitle, meta, action, detail, level, gone }: {
-  glyph: string;
+export function LineRow({ icon, title, subject, subjectTitle, meta, action, detail, level, gone }: {
+  icon: StudioIconName;
   title: ReactNode;
   subject?: ReactNode;
   subjectTitle?: string;
@@ -18,7 +19,7 @@ export function LineRow({ glyph, title, subject, subjectTitle, meta, action, det
   return (
     <div className="line-row" data-lvl={level} data-gone={gone ? "" : undefined}>
       <div className="lr-main">
-        <Sym glyph={glyph} />
+        <Sym icon={icon} />
         <span className="lr-nm">{title}</span>
         {subject && <span className="lr-arg" title={subjectTitle}>{subject}</span>}
         {meta && <span className="lr-meta">{meta}</span>}

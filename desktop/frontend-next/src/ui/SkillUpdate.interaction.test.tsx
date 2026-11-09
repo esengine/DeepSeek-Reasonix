@@ -38,7 +38,8 @@ it("will not update until every script has been opened, then applies the plan th
   await screen.findByText("更新 mine：来源文件夹有 2 处变化");
   expect(update().disabled).toBe(true);
   expect(screen.getByText("还有 1 个文件没有展开")).toBeTruthy();
-  await userEvent.click(screen.getByText(/~ scripts\/run.sh/));
+  expect(screen.getByText("scripts/run.sh").closest("summary")?.querySelector(".lucide-pencil")).not.toBeNull();
+  await userEvent.click(screen.getByText("scripts/run.sh"));
   expect(screen.getByText(/\+echo two/)).toBeTruthy();
   expect(update().disabled).toBe(false);
   await userEvent.click(update());
@@ -57,9 +58,9 @@ it("asks for a confirmation before overwriting local edits and sends it", async 
 
 it("says a file it cannot show must be read in the source folder, and holds until the person says they did", async () => {
   draw(plan({ changes: [{ path: "scripts/big.sh", kind: "added", code: true, truncated: true }] }));
-  await screen.findByText(/\+ scripts\/big.sh/);
+  await screen.findByText("scripts/big.sh");
   expect(update().disabled).toBe(true);
-  await userEvent.click(screen.getByText(/\+ scripts\/big.sh/));
+  await userEvent.click(screen.getByText("scripts/big.sh"));
   expect(screen.getByText(/文件太大，这里不显示内容/).textContent).toContain("/home/me/skills/mine");
   await userEvent.click(screen.getByRole("checkbox", { name: /无法显示，我已在来源文件夹里看过/ }));
   expect(update().disabled).toBe(false);

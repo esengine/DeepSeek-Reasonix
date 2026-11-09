@@ -99,6 +99,37 @@ try {
     await page.close();
     console.log(`PASS browser icons ${colorScheme}: legibility, alignment and action labels`);
   }
+  for (const colorScheme of ["light", "dark"]) for (const width of [1300, 390]) {
+    const page = await browser.newPage({ viewport: { width: 1300, height: 900 }, colorScheme, reducedMotion: "reduce" });
+    const errors = [];
+    page.on("pageerror", (error) => errors.push(error.message));
+    await page.goto(`${base}?pref=zh&ws=2&sess=6&turns=2`, { waitUntil: "networkidle" });
+    const label = `${colorScheme}/${width}/library`;
+    const toolIcons = page.locator(".sym svg");
+    assert.ok(await toolIcons.count() > 0, `${label}: transcript icons exist`);
+    assert.ok(await toolIcons.evaluateAll((icons) => icons.every((icon) => icon.classList.contains("lucide"))), `${label}: tool cards use library icons`);
+    await page.locator('.model-picker').click();
+    assert.ok(await page.locator(".studio-model-menu .mi-mono .lucide-server").count() > 0, `${label}: custom providers use service icons`);
+    assert.equal(await page.locator(".studio-model-menu .mi-mono").first().textContent(), "");
+    assert.ok(await page.locator(".studio-model-menu .menu-current.lucide-check").count() > 0, `${label}: selection uses a library check`);
+    await page.keyboard.press("Escape");
+    await page.locator('[data-action="chrome.settings"]').evaluate((button) => button.click());
+    await page.locator('.prefs-nav [data-value="controls"]').click();
+    await page.setViewportSize({ width, height: 900 });
+    const order = page.locator('[data-action="appearance.nav-entry-move"]');
+    await order.first().scrollIntoViewIfNeeded();
+    check(await order.evaluateAll(measure), `${label}/reorder`);
+    const down = order.locator('.lucide-arrow-down').first().locator('..');
+    const value = await down.getAttribute("data-value");
+    await down.focus();
+    await page.keyboard.press("Enter");
+    const moved = page.locator(`[data-action="appearance.nav-entry-move"][data-value="${value.replace(/:down$/, ":up")}"]`);
+    assert.equal(await moved.isEnabled(), true, `${label}: reordering remains keyboard operable`);
+    await page.locator("#set-naventries").screenshot({ path: `perf/shots/control-icons-library-${colorScheme}-${width}.png` });
+    assert.deepEqual(errors, []);
+    await page.close();
+    console.log(`PASS semantic icons ${label}: tools, providers, selection and keyboard reordering`);
+  }
 } finally {
   await browser.close();
 }

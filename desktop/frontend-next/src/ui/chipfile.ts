@@ -9,15 +9,6 @@ export function previewURL(blob: Blob): string | undefined {
   }
 }
 
-// A dropped file has no preview to stand behind: the host named it, it was
-// never read. Its kind fills the square, because a blank one reads as an image
-// that failed to load.
-export function kindOf(path: string): string {
-  const name = nameOf(path);
-  const dot = name.lastIndexOf(".");
-  return dot > 0 ? name.slice(dot + 1).toUpperCase().slice(0, 4) : "FILE";
-}
-
 export function nameOf(path: string): string {
   return path.split(/[\\/]/).pop() ?? path;
 }

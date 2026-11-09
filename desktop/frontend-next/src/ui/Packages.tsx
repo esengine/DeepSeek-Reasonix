@@ -1,3 +1,4 @@
+import { StudioIcon } from "./StudioIcon";
 import { useRef, useState } from "react";
 import { t } from "../i18n";
 import type { AgentPort, PluginExport, PluginItem, PluginPackage } from "../port/port";
@@ -289,28 +290,28 @@ function PackagePeek({ p }: { p: PluginPackage }) {
             know about, and it is also the part they cannot see from a name. */}
         {p.runtime && (
           <div className="row" data-run>
-            <span className="d">▸</span>
+            <span className="d"><StudioIcon name="chevron" /></span>
             <span>{t("ext.long_running_process")}</span>
             <span className="sc">{[p.runtime.command, ...(p.runtime.args ?? [])].join(" ")}</span>
           </div>
         )}
         {p.runtime?.tools?.map((name) => (
           <div className="row" data-run key={"tool:" + name}>
-            <span className="d">▸</span>
+            <span className="d"><StudioIcon name="chevron" /></span>
             <span>{t("common.tool")}</span>
             <span className="sc">{name}</span>
           </div>
         ))}
         {p.hooks?.map((h, index) => (
           <div className="row" data-run key={index}>
-            <span className="d">▸</span>
+            <span className="d"><StudioIcon name="chevron" /></span>
             <span>{h.event}</span>
             <span className="sc">{h.description || h.command || h.contextFile}</span>
           </div>
         ))}
         {p.mcpServers?.map((s) => (
           <div className="row" data-run key={s.name}>
-            <span className="d">▸</span>
+            <span className="d"><StudioIcon name="chevron" /></span>
             <span>{s.displayName || s.name}</span>
             <span className="sc">{s.description || s.command || s.url || s.transport}</span>
           </div>

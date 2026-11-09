@@ -5,9 +5,6 @@ import { ICON } from "./prefsnav";
 import { StudioIcon } from "./StudioIcon";
 import { UpdateDot } from "./UpdateDot";
 
-// Settings entries share their destination's mark with prefsnav.
-const CHAT = "M3.2 4.4a1.2 1.2 0 0 1 1.2-1.2h7.2a1.2 1.2 0 0 1 1.2 1.2v5a1.2 1.2 0 0 1-1.2 1.2H7.2L4.4 13v-2.4a1.2 1.2 0 0 1-1.2-1.2Z";
-
 // Every entry goes somewhere that exists. A rail of icons that open nothing is
 // the cheapest thing to draw and the most expensive thing to keep.
 const HOME: [Mark, string, string | null] = ["chat", "common.session", null];
@@ -46,9 +43,7 @@ export function Nav({ at, onGo, onFiles, onHome, onRail, onFeedback, onNew, feed
       aria-current={(sec ?? null) === at ? "page" : undefined}
       onClick={() => (key === "files" ? onFiles() : sec === null ? (at === null ? onRail() : onHome()) : onGo(key === "ext" ? "extensions" : key === "usage" ? "spend" : sec || undefined))}
     >
-      {key === "files" ? <StudioIcon name="file" aria-hidden="true" /> : <svg viewBox="0 0 16 16" aria-hidden="true">
-        {key === "chat" ? <path d={CHAT} /> : ICON[key]}
-      </svg>}
+      {key === "files" ? <StudioIcon name="file" /> : key === "chat" ? <StudioIcon name="chat" /> : ICON[key === "advanced" ? "common" : key]}
       {key === "advanced" && <UpdateDot />}
       <span className="navhint" role="tooltip">{t(label)}</span>
     </button>

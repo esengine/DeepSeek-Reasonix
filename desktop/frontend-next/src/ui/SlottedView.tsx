@@ -1,3 +1,4 @@
+import { StudioIcon } from "./StudioIcon";
 import { useRef, useState } from "react";
 import { t } from "../i18n";
 import type { ExtensionSurface } from "../port/wire";
@@ -32,7 +33,7 @@ export function SlottedView({
         aria-expanded={open}
         onClick={() => setOpen((v) => !v)}
       >
-        ⋯
+        <StudioIcon name="more" />
       </button>
       {/* hidden rather than conditional: the menu has to stay in the DOM to have
           anything to animate on the way out. */}
@@ -46,7 +47,7 @@ export function SlottedView({
             aria-checked={here === slot.id}
             onClick={() => close(() => onMove(slot.id))}
           >
-            {slot.label}
+            {slot.label}{here === slot.id && <StudioIcon name="check" />}
           </button>
         ))}
         {/* Clearing hands the choice back to the extension rather than

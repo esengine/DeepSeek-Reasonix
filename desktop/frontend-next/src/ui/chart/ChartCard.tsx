@@ -79,7 +79,7 @@ export function ChartCard({ spec, callId }: { spec: ChartSpec; callId?: string }
   return (
     <div className="call" data-k="chart" data-call={callId || undefined}>
       <div className="g">
-        <Sym glyph="⌗" />
+        <Sym icon="chart" />
       </div>
       <div className="c">
         <div className="hl">

@@ -1,3 +1,4 @@
+import { StudioIcon } from "./StudioIcon";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { t } from "../i18n";
@@ -35,7 +36,7 @@ export interface MenuItem {
   header?: boolean;
   disabled?: boolean;
   // A letter chip leading the row or heading, standing in for a vendor mark.
-  mono?: { letter: string; tone: number };
+  providerIcon?: { tone: number };
   // A vendor slug; when artwork exists for it, it replaces the letter chip.
   mark?: string;
   // A switch rather than a choice: picking it flips this state, and the row
@@ -333,7 +334,7 @@ export function MenuRow({ it, id, current, lead, onTake }: {
       data-recommended={it.recommended ? "" : undefined}
       onClick={() => onTake(it.value)}
     >
-      {it.mono || hasVendorMark(it.mark) ? <Lead it={it} /> : <span className="dot" />}
+      {it.providerIcon || hasVendorMark(it.mark) ? <Lead it={it} /> : <span className="dot" />}
       <span className="tx">
         <span className="studio-item-line">
           <span className="lb">{it.label}</span>
@@ -344,7 +345,7 @@ export function MenuRow({ it, id, current, lead, onTake }: {
       </span>
       {it.strength != null && (
         <span className="studio-effort-strength" aria-hidden="true">
-          {[1, 2, 3, 4].map((level) => <i key={level} data-on={level <= (it.strength ?? 0) ? "" : undefined} />)}
+          {it.recommended ? <StudioIcon name="spark" /> : [1, 2, 3, 4].map((level) => <i key={level} data-on={level <= (it.strength ?? 0) ? "" : undefined} />)}
         </span>
       )}
       {it.toggle !== undefined && <span className="studio-item-switch" aria-hidden="true" />}
@@ -353,17 +354,18 @@ export function MenuRow({ it, id, current, lead, onTake }: {
         {it.status.tone === "warning" ? <CircleAlert aria-hidden="true" /> : it.status.tone === "checking" ? <LoaderCircle aria-hidden="true" /> : <CircleDot aria-hidden="true" />}
         {it.status.label}
       </span>}
+      {it.value === current && <StudioIcon name="check" className="menu-current" />}
     </button>
   );
 }
 
 function Lead({ it }: { it: MenuItem }) {
   if (hasVendorMark(it.mark)) return <VendorMark slug={it.mark} />;
-  return it.mono ? <Mono {...it.mono} /> : null;
+  return it.providerIcon ? <ProviderIcon {...it.providerIcon} /> : null;
 }
 
-function Mono({ letter, tone }: { letter: string; tone: number }) {
-  return <i className="mi-mono" data-tone={tone} style={{ "--tone": `var(--cat-${tone + 1})` } as React.CSSProperties} aria-hidden="true">{letter}</i>;
+function ProviderIcon({ tone }: { tone: number }) {
+  return <i className="mi-mono" data-tone={tone} style={{ "--tone": `var(--cat-${tone + 1})` } as React.CSSProperties} aria-hidden="true"><StudioIcon name="server" /></i>;
 }
 
 // Group order is kept rather than ranked by relevance: a list that reorders
