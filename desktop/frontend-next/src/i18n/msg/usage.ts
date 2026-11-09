@@ -111,7 +111,7 @@ export const USAGE: Messages = {
   "usage.spend": { zh: "支出", en: "Spend" },
   "usage.spend_2": { zh: "花费", en: "Spend" },
   "usage.start_date": { zh: "开始日期", en: "Start date" },
-  "usage.subscription_plan_estimated_at_the": { zh: "订阅套餐（按价格折算的估算）", en: "Subscription plan (estimated at the prices above)" },
+  "usage.subscription_plan_estimated_at_the": { zh: "订阅套餐（估算）", en: "Subscription estimate" },
   "usage.subscription_use_priced_at_api": { zh: "按 API 价格估算的订阅用量，不是实际扣费", en: "Subscription use priced at API rates; not a charge" },
   "usage.subscription_use_priced_at_api_2": { zh: "订阅用量按 API 价格估算，不是实际扣费，也不计入上面的实付", en: "Subscription use priced at API rates. It is not a charge and is not part of the paid figure above." },
   "usage.the_backend_system_one_asks": { zh: "system_one 询问的后端", en: "The backend system_one asks" },
