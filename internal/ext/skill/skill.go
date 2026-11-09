@@ -707,6 +707,9 @@ func (s *Store) scanDir(dir string, scope Scope, requireFlatMarker bool, depth i
 	for _, e := range entries {
 		sk, ok := s.readEntry(dir, scope, requireFlatMarker, e)
 		if ok {
+			if depth == 1 && strings.TrimSpace(sk.Description) == "" && !s.suppressWarnings {
+				s.diagnose("warning: skill %q at %s has no description: — it will load but won't appear in the skills index\n", sk.Name, sk.Path)
+			}
 			if depth == 1 || strings.TrimSpace(sk.Description) != "" {
 				*out = append(*out, sk)
 			}
@@ -818,9 +821,6 @@ func (s *Store) parseSkill(path, stem string, scope Scope, requireSkillMarker bo
 			name, path, misplaced, misplaced)
 	}
 	desc := strings.TrimSpace(fm[skillFrontmatterDescription])
-	if desc == "" && !s.suppressWarnings {
-		s.diagnose("warning: skill %q at %s has no description: — it will load but won't appear in the skills index\n", name, path)
-	}
 	sk := Skill{
 		Name:         name,
 		Description:  desc,

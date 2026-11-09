@@ -55,3 +55,19 @@ func TestEachStoreStartsWithAFreshMemoryOfWhatItSaid(t *testing.T) {
 		t.Fatalf("a second store was silenced by the first: %q / %q", a.String(), b.String())
 	}
 }
+
+// A file below the top level of a skills root that has no description is never
+// loaded, so it cannot claim that it "will load"; only a skill that is kept says so.
+func TestAnUnkeptNestedFileIsNotWarnedAboutAsALoadedSkill(t *testing.T) {
+	home := testenv.TempDir(t)
+	writeSkill(t, home, ".claude/skills/top.md", "---\nname: top\n---\nbody")
+	writeSkill(t, home, ".claude/skills/pack/README.md", "---\nname: readme\n---\nnotes")
+	writeSkill(t, home, ".claude/skills/pack/deep/README.md", "---\nname: readme\n---\nnotes")
+	var stderr bytes.Buffer
+	st := New(Options{HomeDir: home, DisableBuiltins: true, Stderr: &stderr})
+	_ = st.List()
+	got := stderr.String()
+	if strings.Count(got, "has no description") != 1 || !strings.Contains(got, `"top"`) {
+		t.Fatalf("want exactly the top-level skill warned about:\n%s", got)
+	}
+}
