@@ -193,10 +193,11 @@ function PaneView({ port, hub, rt, title, active, visible, sideHost, side, onFoc
     // kernel commits a text-only round before it decides to continue the
     // turn, so only this read closes one or vouches one still runs. A
     // payload that cannot say leaves the wire's own running standing.
+    if (next.running === false) pacer.flush();
     if (next.running !== undefined) dispatch({ kind: "__running", running: next.running });
     setSessionRead((prev) => (prev.kind === "settled" && prev.status && JSON.stringify(prev.status) === JSON.stringify(next)
       ? prev : { kind: "settled", status: next }));
-  }, []);
+  }, [pacer]);
 
   const readJob = useCallback((id: string) => port.jobOutput(id), [port]);
   const refreshStatus = useStatusRefresh(port, applyStatus, statusRead);

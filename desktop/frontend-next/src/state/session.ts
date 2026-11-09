@@ -22,7 +22,7 @@ export { currentStep, stepDone, stepLabel };
 import { askAnnounced, askEngaged, askFromCall, promptOpen, prompted, sealByReceipt } from "./prompts";
 import { stampPlan } from "./plan_card";
 import { nameTurnStart, othersSteer } from "./turn_start";
-import { appendText, foldMessage, sealSay } from "./say";
+import { appendText, foldMessage, sealSay, stopThought } from "./say";
 import { nextId } from "./ids";
 import { worked } from "./worked";
 import { chipLabel, IDLE, RUNNING } from "./chip";
@@ -349,7 +349,10 @@ function apply(s: SessionState, ev: SessionEvent): SessionState {
   // /status's own answer, because the record cannot end a turn: the kernel
   // commits a text-only round before it decides whether the turn continues,
   // so only the kernel saying idle can close one. Equal answers fold to s.
-  if (ev.kind === "__running") return s.running === ev.running ? s : { ...s, running: ev.running };
+  if (ev.kind === "__running") {
+    const items = ev.running ? s.items : sealSay(s.items, true);
+    return s.running === ev.running && items === s.items ? s : { ...s, running: ev.running, items };
+  }
   // A wait only text or reasoning could end outlived every turn whose first
   // packet was a tool call: the retry line and its clock stayed up for the rest
   // of the turn, over calls that were running fine.
@@ -400,7 +403,7 @@ function apply(s: SessionState, ev: SessionEvent): SessionState {
 
     case "tool_dispatch":
       return ev.tool
-        ? { ...s, doing: ev.tool.name, executions: noteTool(s.executions, ev.tool, false), items: foldTool(s.items, ev.tool, true) }
+        ? { ...s, doing: ev.tool.name, executions: noteTool(s.executions, ev.tool, false), items: foldTool(ev.tool.parentId ? s.items : ev.tool.partial ? stopThought(s.items) : sealSay(s.items), ev.tool, true) }
         : s;
 
     case "tool_progress":

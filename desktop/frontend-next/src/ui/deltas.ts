@@ -8,6 +8,7 @@ const DELTAS = new Set<WireEvent["kind"]>(["reasoning", "text"]);
 
 export interface Pacer {
   push: (ev: WireEvent) => void;
+  flush: () => void;
   show: (shown: boolean) => void;
   drop: () => void;
 }
@@ -31,6 +32,7 @@ export function createPacer(deliver: (ev: WireEvent) => void, flushMs = BACKGROU
   };
 
   return {
+    flush,
     push(ev) {
       const continues = DELTAS.has(ev.kind) && ev.kind === last;
       last = ev.kind;

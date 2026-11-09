@@ -35,7 +35,7 @@ async function mount() {
       visible={false} sideHost={null} side={false} onFocus={() => {}} onReport={onReport} onSessionChanged={() => {}} pulse={0} findPulse={0} onSettings={() => {}}
       needsProject={false} onOpenProject={() => {}} onKeepHere={() => {}} theme="light" dockW={320} dockMax={640} onDockW={() => {}} />,
   );
-  const send = (kind: WireEvent["kind"]) => act(() => deliver?.({ kind }));
+  const send = (event: WireEvent | WireEvent["kind"]) => act(() => deliver?.(typeof event === "string" ? { kind: event } : event));
   const lastLive = () => onReport.mock.calls.at(-1)?.[1].live;
   return { kernel, send, onReport, lastLive, view };
 }
@@ -78,3 +78,21 @@ it("stops asking when the pane goes away", async () => {
   await new Promise((resolve) => setTimeout(resolve, 2500));
   expect(pane.kernel.reads).toBe(at);
 }, 10000);
+
+it("settles buffered background reasoning before adopting an idle status", async () => {
+  const pane = await mount();
+  await waitFor(() => expect(pane.kernel.reads).toBeGreaterThan(0));
+  pane.kernel.running = true;
+  pane.kernel.failing = 1;
+  await pane.send("turn_started");
+  await waitFor(() => expect(pane.kernel.failing).toBe(0));
+  await pane.send({ kind: "reasoning", text: "分析" });
+  await pane.send({ kind: "reasoning", text: "完成" });
+  pane.kernel.running = false;
+  await waitFor(() => expect(pane.lastLive()).toBe(false), { timeout: 3000 });
+  await new Promise((resolve) => setTimeout(resolve, 1200));
+  expect(pane.view.container.querySelector(".think[data-live]")).toBeNull();
+  const thoughts = pane.view.container.querySelectorAll(".think-label:not(.think-out)");
+  expect(thoughts).toHaveLength(1);
+  expect(thoughts[0].textContent).toContain("4 字");
+});
