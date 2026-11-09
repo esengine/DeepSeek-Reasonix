@@ -179,6 +179,13 @@ func capabilityCall(id string) string {
 	return fmt.Sprintf(`{"action":"call","capability_id":%q,"arguments":{}}`, id)
 }
 
+func runWithin(t *testing.T, ctrl *control.Controller, prompt string) error {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(t.Context(), 90*time.Second)
+	defer cancel()
+	return ctrl.Run(ctx, prompt)
+}
+
 func TestEffectMCPListChangedReachesTheNextRequest(t *testing.T) {
 	for _, transport := range []string{"stdio", "http"} {
 		t.Run(transport, func(t *testing.T) {
@@ -210,7 +217,7 @@ func TestEffectMCPListChangedReachesTheNextRequest(t *testing.T) {
 
 			// The first turn calls alpha, which connects the server and is what
 			// makes it announce the catalog it moved to.
-			if err := ctrl.Run(t.Context(), "call the live tool"); err != nil {
+			if err := runWithin(t, ctrl, "call the live tool"); err != nil {
 				t.Fatalf("Run: %v", err)
 			}
 			if got := toolResults(rec.requests())["probe-0"]; !strings.Contains(got, "ok") {
@@ -223,13 +230,13 @@ func TestEffectMCPListChangedReachesTheNextRequest(t *testing.T) {
 
 			// The approval reaches the model on the next listing, which the
 			// next call's notice brings.
-			if err := ctrl.Run(t.Context(), "call the live tool again"); err != nil {
+			if err := runWithin(t, ctrl, "call the live tool again"); err != nil {
 				t.Fatalf("Run: %v", err)
 			}
 			waitForRegisteredTool(t, ctrl, "mcp__live__gamma")
 
 			// The third turn reads the catalog, calls what arrived, then what left.
-			if err := ctrl.Run(t.Context(), "read the catalog and call both tools"); err != nil {
+			if err := runWithin(t, ctrl, "read the catalog and call both tools"); err != nil {
 				t.Fatalf("Run: %v", err)
 			}
 			requests := rec.requests()
@@ -359,7 +366,7 @@ func TestEffectMCPListChangedKeepsAPinnedToolSurface(t *testing.T) {
 	}
 	t.Cleanup(ctrl.Close)
 
-	if err := ctrl.Run(t.Context(), "call the pinned tool"); err != nil {
+	if err := runWithin(t, ctrl, "call the pinned tool"); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 	pinned := mcpToolNames(live.requests()[0])
@@ -367,12 +374,12 @@ func TestEffectMCPListChangedKeepsAPinnedToolSurface(t *testing.T) {
 		t.Fatalf("the first request carried %v, want the cached catalog pinned into the schema", pinned)
 	}
 	acceptHeldTools(t, ctrl, "live", "delta", "gamma")
-	if err := ctrl.Run(t.Context(), "call the pinned tool again"); err != nil {
+	if err := runWithin(t, ctrl, "call the pinned tool again"); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 	waitForRegisteredTool(t, ctrl, "mcp__live__gamma")
 
-	if err := ctrl.Run(t.Context(), "call the tool the server dropped"); err != nil {
+	if err := runWithin(t, ctrl, "call the tool the server dropped"); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 	requests := live.requests()
