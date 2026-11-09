@@ -693,29 +693,34 @@ func (r *Registry) ProviderSchemas(ctx context.Context) []provider.ToolSchema {
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	type entry struct {
+		name   string
+		tool   Tool
+		params json.RawMessage
+	}
 	r.mu.RLock()
-	var stable, dynamic []string
+	var stable, dynamic []entry
 	for _, name := range r.order {
 		t := r.tools[name]
 		if t == nil || !r.isProviderVisibleLocked(name) {
 			continue
 		}
-		if contextual, ok := t.(ContextualTool); ok {
-			if contextual.ProviderVisible(ctx) {
-				dynamic = append(dynamic, name)
-			}
+		e := entry{name: name, tool: t, params: r.canon[name]}
+		if _, ok := t.(ContextualTool); ok {
+			dynamic = append(dynamic, e)
 			continue
 		}
-		stable = append(stable, name)
-	}
-	slices.Sort(stable)
-	slices.Sort(dynamic)
-	out := make([]provider.ToolSchema, 0, len(stable)+len(dynamic))
-	for _, name := range append(stable, dynamic...) {
-		t := r.tools[name]
-		out = append(out, provider.ToolSchema{Name: t.Name(), Description: t.Description(), Parameters: r.canon[name]})
+		stable = append(stable, e)
 	}
 	r.mu.RUnlock()
+	dynamic = slices.DeleteFunc(dynamic, func(e entry) bool { return !e.tool.(ContextualTool).ProviderVisible(ctx) })
+	for _, group := range [][]entry{stable, dynamic} {
+		slices.SortFunc(group, func(a, b entry) int { return strings.Compare(a.name, b.name) })
+	}
+	out := make([]provider.ToolSchema, 0, len(stable)+len(dynamic))
+	for _, e := range append(stable, dynamic...) {
+		out = append(out, provider.ToolSchema{Name: e.tool.Name(), Description: e.tool.Description(), Parameters: e.params})
+	}
 	return out
 }
 
