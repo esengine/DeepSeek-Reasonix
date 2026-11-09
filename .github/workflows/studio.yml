@@ -168,6 +168,7 @@ jobs:
           node perf/sidebar-tools.mjs
           node perf/select-alignment.mjs
           node perf/provider-fields.mjs
+          node perf/thought-clock.mjs
           node perf/tab-pip.mjs
           node perf/syntax-tokens.mjs
           node perf/tab-close-inside.mjs
@@ -237,6 +238,7 @@ jobs:
             desktop/frontend-next/perf/shots/sidebar-tools-*.png
             desktop/frontend-next/perf/shots/select-alignment-*.png
             desktop/frontend-next/perf/shots/provider-fields-*.png
+            desktop/frontend-next/perf/shots/thought-clock-*.png
           retention-days: 7
 
   # What a hosted page does over the relay, end to end: the production bundle,

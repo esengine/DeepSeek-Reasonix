@@ -12,23 +12,37 @@ export function thoughtStartedAt(id: string): number | undefined {
   return thoughtSince.get(id);
 }
 
-const isWaitingLine = (item: Item) => item.t === "user" && !!item.pending;
+function openSayIndex(items: Item[]): number {
+  for (let i = items.length - 1; i >= 0; i--) {
+    const item = items[i];
+    if (item.t === "say") return item.done ? -1 : i;
+    if (item.t === "user" && !item.pending) return -1;
+  }
+  return -1;
+}
+
+// A partial tool dispatch ends thinking but its response still owes a message frame.
+export function stopThought(items: Item[]): Item[] {
+  const at = openSayIndex(items);
+  if (at < 0) return items;
+  const item = items[at] as Extract<Item, { t: "say" }>;
+  if (!item.reasoning || item.thoughtMs !== undefined) return items;
+  const thoughtMs = Math.max(0, Date.now() - (thoughtSince.get(item.id) ?? Date.now()));
+  thoughtSince.delete(item.id);
+  const next = items.slice();
+  next[at] = { ...item, thoughtMs };
+  return next;
+}
 
 export function appendText(items: Item[], text: string, field: "text" | "reasoning", source?: string, model?: string): Item[] {
-  // A line typed while the model is still writing waits in the transcript after
-  // the open message without being part of it, so the message continues past it.
-  let at = items.length - 1;
-  while (at >= 0 && isWaitingLine(items[at])) at--;
+  const at = openSayIndex(items);
+  if (field === "text") items = stopThought(items);
   const last = items[at];
   if (last && last.t === "say" && !last.done) {
     const next = items.slice();
-    // Thinking runs until the first answer token, so the clock is the gap
-    // between the two streams, not the length of either.
-    const stop = field === "text" && last.thoughtMs === undefined && last.reasoning;
     next[at] = {
       ...last,
       [field]: (last[field] ?? "") + text,
-      ...(stop ? { thoughtMs: Date.now() - (thoughtSince.get(last.id) ?? Date.now()) } : null),
     };
     return next;
   }
@@ -69,16 +83,10 @@ export function sealSay(items: Item[], all = false, cut?: ThoughtCut): Item[] {
 // agree. A stream that lost a chunk is therefore repaired here, never
 // preserved; an empty field is not content and overwrites nothing.
 export function foldMessage(items: Item[], ev: WireEvent): Item[] {
-  let at = -1;
-  for (let i = items.length - 1; i >= 0; i--) {
-    if (items[i].t === "say" && !(items[i] as Extract<Item, { t: "say" }>).done) {
-      at = i;
-      break;
-    }
-  }
+  const at = openSayIndex(items);
   // The kernel's measure wins over this window's: it is the one the transcript
   // keeps, so a reopened turn says the same thing.
-  const measured = ev.thoughtMs || undefined;
+  const measured = ev.thoughtMs;
   if (at < 0) {
     if (!ev.text && !ev.reasoning) return items;
     return [...items, { t: "say", id: nextId(), text: ev.text ?? "", reasoning: ev.reasoning, done: true, source: ev.source, thoughtMs: measured }];
