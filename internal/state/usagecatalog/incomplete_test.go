@@ -72,15 +72,15 @@ func TestUnpricedReasonsAreIndexedOnce(t *testing.T) {
 		if err := catalog.ReconcileFile(ctx, path, "2026-08-10"); err != nil {
 			t.Fatalf("pass %d: %v", pass, err)
 		}
-		calls, reasons, err := catalog.UnpricedInRange(ctx, "2026-08-10", "2026-08-10", "desktop")
+		got, err := catalog.ProvenanceInRange(ctx, "2026-08-10", "2026-08-10", "desktop")
 		if err != nil {
 			t.Fatalf("pass %d: %v", pass, err)
 		}
-		if calls != 2 || !reflect.DeepEqual(reasons, []string{"no_price"}) {
-			t.Fatalf("pass %d: unpriced = %d / reasons %v, want 2 / [no_price]", pass, calls, reasons)
+		if got.UnpricedCalls != 2 || !reflect.DeepEqual(got.Reasons, []string{"no_price"}) {
+			t.Fatalf("pass %d: unpriced = %d / reasons %v, want 2 / [no_price]", pass, got.UnpricedCalls, got.Reasons)
 		}
-		if calls, _, err = catalog.UnpricedInRange(ctx, "2026-08-10", "2026-08-10", "cli"); err != nil || calls != 0 {
-			t.Fatalf("pass %d: source filter read %d unpriced calls (err %v), want none", pass, calls, err)
+		if got, err = catalog.ProvenanceInRange(ctx, "2026-08-10", "2026-08-10", "cli"); err != nil || got.UnpricedCalls != 0 {
+			t.Fatalf("pass %d: source filter read %d unpriced calls (err %v), want none", pass, got.UnpricedCalls, err)
 		}
 	}
 }
