@@ -7,13 +7,26 @@ import (
 	"testing"
 )
 
-func TestPeersAreOffUnlessTheUserFileTurnsThemOn(t *testing.T) {
-	if Default().PeersEnabled() {
-		t.Fatal("messages between sessions are on by default")
+func TestPeersAndDispatchDefaultOnAndRespectExplicitOptOut(t *testing.T) {
+	if cfg := Default(); !cfg.PeersEnabled() || !cfg.PeersDispatch() {
+		t.Fatalf("default peer settings = %+v, want messaging and dispatch enabled", cfg.Peers)
 	}
-	cfg, _ := loadScoped(t, "[peers]\nenabled = true\n", "")
-	if !cfg.PeersEnabled() {
-		t.Fatal("a user file's enabled = true was not honoured")
+	for _, tc := range []struct {
+		name, user        string
+		enabled, dispatch bool
+	}{
+		{"existing config without peers", "[agent]\nmax_turns = 4\n", true, true},
+		{"custom ceiling", "[peers]\nmax_dispatched_sessions = 3\n", true, true},
+		{"messaging off", "[peers]\nenabled = false\n", false, false},
+		{"dispatch off", "[peers]\ndispatch = false\n", true, false},
+		{"both off", "[peers]\nenabled = false\ndispatch = false\n", false, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg, _ := loadScoped(t, tc.user, "")
+			if cfg.PeersEnabled() != tc.enabled || cfg.PeersDispatch() != tc.dispatch {
+				t.Fatalf("loaded peers = %+v, want enabled=%v dispatch=%v", cfg.Peers, tc.enabled, tc.dispatch)
+			}
+		})
 	}
 }
 
@@ -21,7 +34,7 @@ func TestPeersAreOffUnlessTheUserFileTurnsThemOn(t *testing.T) {
 // is the user's alone: a cloned repository can neither switch it on nor undo
 // the user's choice.
 func TestAProjectFileCannotSwitchPeersOn(t *testing.T) {
-	cfg, _ := loadScoped(t, "", "[peers]\nenabled = true\n")
+	cfg, _ := loadScoped(t, "[peers]\nenabled = false\n", "[peers]\nenabled = true\n")
 	if cfg.PeersEnabled() {
 		t.Fatal("a cloned repo's reasonix.toml enabled messages between sessions")
 	}
@@ -58,11 +71,11 @@ func TestSavingTheUserFileKeepsEveryPeersSetting(t *testing.T) {
 }
 
 func TestPeersDispatchNeedsPeersAndAProjectFileCannotGrantIt(t *testing.T) {
-	cfg, _ := loadScoped(t, "[peers]\ndispatch = true\n", "")
+	cfg, _ := loadScoped(t, "[peers]\nenabled = false\ndispatch = true\n", "")
 	if cfg.PeersDispatch() {
 		t.Fatal("dispatch worked without messages between sessions being on")
 	}
-	cfg, _ = loadScoped(t, "[peers]\nenabled = true\n", "[peers]\ndispatch = true\nrelease_projects = [\"/x\"]\n")
+	cfg, _ = loadScoped(t, "[peers]\nenabled = true\ndispatch = false\n", "[peers]\ndispatch = true\nrelease_projects = [\"/x\"]\n")
 	if cfg.PeersDispatch() || cfg.PeersReleasedProject("/x") {
 		t.Fatal("a cloned repo's reasonix.toml granted dispatch or a release")
 	}
@@ -96,6 +109,26 @@ func TestSavingPeersSettingsWritesThemAndReadsThemBack(t *testing.T) {
 	}
 	if got := LoadForEdit(path).Peers; got.Enabled || got.Dispatch || len(got.ReleaseProjects) != 0 {
 		t.Fatalf("peers after clearing = %+v", got)
+	}
+}
+
+func TestSavingAnOptOutDoesNotRestorePeerDefaults(t *testing.T) {
+	t.Setenv("REASONIX_HOME", t.TempDir())
+	path := UserConfigPath()
+	for _, values := range [][2]bool{{false, false}, {true, false}, {false, true}} {
+		cfg := Default()
+		cfg.Peers.Enabled, cfg.Peers.Dispatch = values[0], values[1]
+		if err := cfg.SaveTo(path); err != nil {
+			t.Fatal(err)
+		}
+		loaded := LoadForEdit(path)
+		loaded.Agent.MaxSideSessions = 2
+		if err := loaded.SaveTo(path); err != nil {
+			t.Fatal(err)
+		}
+		if got := LoadForEdit(path).Peers; got.Enabled != values[0] || got.Dispatch != values[1] {
+			t.Fatalf("after unrelated save: %+v, want enabled=%v dispatch=%v", got, values[0], values[1])
+		}
 	}
 }
 

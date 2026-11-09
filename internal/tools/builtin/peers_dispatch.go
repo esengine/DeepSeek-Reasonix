@@ -11,7 +11,7 @@ import (
 )
 
 // DispatchTool lets the model hand a task to a session in another of the user's
-// projects. It is registered only where the user's own file turned dispatch on.
+// projects. It is registered while dispatch is enabled in the user configuration.
 func DispatchTool(link *tool.PeerLink) tool.Tool { return &dispatchToProject{link: link} }
 
 type dispatchToProject struct{ link *tool.PeerLink }

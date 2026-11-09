@@ -13,7 +13,7 @@ import (
 
 // Each is an identity the dispatch tool reports; none is matched by its words.
 var (
-	ErrDispatchDisabled       = errors.New(`the user has not turned on "Let the model hand a task to another session" (Settings > Tools > Messages between sessions, which also needs "enabled"; [peers] dispatch in the user config)`)
+	ErrDispatchDisabled       = errors.New(`"Let the model hand a task to another session" is disabled (Settings > Agent behavior > Messages between sessions, which also needs "enabled"; [peers] dispatch in the user config)`)
 	ErrDispatchUnavailable    = errors.New("this session has no window to open another session in (it is a terminal or protocol session): open the project in Reasonix Studio or the web UI to dispatch from it")
 	ErrDispatchNotLocal       = errors.New("this pane is not one of this machine's own sessions (it is driven over SSH or by another window), so it cannot open a session here")
 	ErrDispatchUnknownProject = errors.New("no project of yours answers to that name")
@@ -39,8 +39,12 @@ type ProjectDispatcher func(ctx context.Context, project, text string) (Dispatch
 
 // dispatchState is the controller's side of cross-project dispatch.
 type dispatchState struct {
-	hook   atomic.Pointer[ProjectDispatcher]
-	opener atomic.Pointer[ProjectOpener]
+	hook    atomic.Pointer[ProjectDispatcher]
+	opener  atomic.Pointer[ProjectOpener]
+	session atomic.Pointer[dispatchSession]
+}
+
+type dispatchSession struct {
 	// mu guards the relation: a partner is a session this one opened or the one
 	// that opened it, paired by a secret the host keeps in memory. The spool only
 	// carries messages; who sent one is proved with the secret, never believed.
@@ -106,51 +110,56 @@ func (c *Controller) SetProjectDispatcher(d ProjectDispatcher) {
 // MarkOpenedByDispatch records that the session filed under parent opened this
 // one to hand it a task, with the secret the host made for the pair.
 func (c *Controller) MarkOpenedByDispatch(parent string, secret []byte, depth int) {
-	c.dispatch.mu.Lock()
-	defer c.dispatch.mu.Unlock()
-	c.dispatch.opened, c.dispatch.depth = true, depth
-	c.rememberPairLocked(parent, secret, true)
+	d := c.dispatch.sessionState()
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.opened, d.depth = true, depth
+	d.rememberPairLocked(parent, secret, true)
 }
 
 // OpenedByDispatch reports whether MarkOpenedByDispatch was called.
 func (c *Controller) OpenedByDispatch() bool {
-	c.dispatch.mu.Lock()
-	defer c.dispatch.mu.Unlock()
-	return c.dispatch.opened
+	d := c.dispatch.sessionState()
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.opened
 }
 
 // DispatchDepth is how many dispatches deep this session is: 0 for one the user
 // opened, one more than its opener's for one a dispatch opened.
 func (c *Controller) DispatchDepth() int {
-	c.dispatch.mu.Lock()
-	defer c.dispatch.mu.Unlock()
-	return c.dispatch.depth
+	d := c.dispatch.sessionState()
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.depth
 }
 
 // NoteDispatchedSession records a session this one opened for a task and the
 // secret the host made for the pair.
 func (c *Controller) NoteDispatchedSession(child string, secret []byte) {
-	c.dispatch.mu.Lock()
-	defer c.dispatch.mu.Unlock()
-	c.rememberPairLocked(child, secret, false)
+	d := c.dispatch.sessionState()
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.rememberPairLocked(child, secret, false)
 }
 
-func (c *Controller) rememberPairLocked(key string, secret []byte, opener bool) {
+func (d *dispatchSession) rememberPairLocked(key string, secret []byte, opener bool) {
 	if key == "" || len(secret) == 0 {
 		return
 	}
-	if c.dispatch.pairs == nil {
-		c.dispatch.pairs = map[string]*dispatchPair{}
+	if d.pairs == nil {
+		d.pairs = map[string]*dispatchPair{}
 	}
-	c.dispatch.pairs[key] = &dispatchPair{secret: append([]byte(nil), secret...), opener: opener}
+	d.pairs[key] = &dispatchPair{secret: append([]byte(nil), secret...), opener: opener}
 }
 
 // signDispatch numbers and signs a message to a dispatch partner, and leaves it
 // alone when the target is not one.
 func (c *Controller) signDispatch(m *peermail.Message) {
-	c.dispatch.mu.Lock()
-	defer c.dispatch.mu.Unlock()
-	pair := c.dispatch.pairs[m.To.SessionID]
+	d := c.dispatch.sessionState()
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	pair := d.pairs[m.To.SessionID]
 	if pair == nil {
 		return
 	}
@@ -163,9 +172,10 @@ func (c *Controller) signDispatch(m *peermail.Message) {
 // one dispatched to or was dispatched by, and that it is the first time it is
 // taken: a proof is valid once per sequence number.
 func (c *Controller) dispatchPartner(m peermail.Message) bool {
-	c.dispatch.mu.Lock()
-	defer c.dispatch.mu.Unlock()
-	pair := c.dispatch.pairs[m.From.SessionID]
+	d := c.dispatch.sessionState()
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	pair := d.pairs[m.From.SessionID]
 	return pair != nil && peermail.ProofValid(pair.secret, m) && pair.accept(m.Seq)
 }
 

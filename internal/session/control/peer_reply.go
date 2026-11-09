@@ -15,9 +15,10 @@ const peerReplyHeadroom = 1 << 10
 // dispatchOpenerKey is the key of the session that opened this one by a
 // dispatch, or "" when none did.
 func (c *Controller) dispatchOpenerKey() string {
-	c.dispatch.mu.Lock()
-	defer c.dispatch.mu.Unlock()
-	for key, pair := range c.dispatch.pairs {
+	d := c.dispatch.sessionState()
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	for key, pair := range d.pairs {
 		if pair.opener {
 			return key
 		}

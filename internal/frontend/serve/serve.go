@@ -56,6 +56,7 @@ type Server struct {
 	bc       *Broadcaster
 	paneSink event.Sink // what the controller emits into; see SetPaneSink
 	currency *control.DisplayCurrencyGroup
+	projects projectBindings
 	// buildController builds the replacement controller during a model switch.
 	// Nil in production (switchModel falls back to boot.Build); tests inject a
 	// fake so switchModel can be exercised without real provider IO.

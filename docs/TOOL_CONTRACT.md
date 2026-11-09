@@ -156,6 +156,19 @@ The host-control tools ride the same surface at every setting: `todo_write` and 
 
 `setting` finds the user's settings and asks the user to confirm a change. A refusal that a setting would lift ends with `(fix: setting ...)`.
 
+Session messaging and cross-project dispatch are enabled by default. Their direct
+tools are `list_peers`, `send_peer_message`, `dispatch_to_project` and `open_projects`.
+User-only `peers.enabled = false` removes all four; `peers.dispatch = false` removes
+the last two. Explicit opt-outs are preserved.
+
+These four schemas enlarge the default provider prefix and cause one cold prefix
+on upgrade. They stay stable within each turn; changing the switches takes effect
+between turns. The golden boot contract records the enabled default surface.
+
+会话间消息与跨项目派发默认开启，四个工具直接提供给模型。用户配置中的
+`peers.enabled = false` 撤回全部四个工具，`peers.dispatch = false` 仅撤回派发和打开项目工具。
+显式关闭的配置会保留；升级后新增的工具定义会使前缀缓存重新建立一次，轮内工具定义保持不变。
+
 Optional tools (`glob`, `grep`, `ls`, `web_fetch`, MCP, skills, subagents, docs, session history, memory mutation, workflow, and so on) remain in the host registry for dispatch. The model lists, inspects, calls, or declines them via `use_capability` without changing the provider tool list.
 
 Execution settings change host planning / verification / review policy, not which tools appear on the provider-visible surface. The retired `connect_tool_source` path is no longer registered.

@@ -60,6 +60,9 @@ type standbyFixture struct {
 func newStandbyFixture(t *testing.T) *standbyFixture {
 	t.Helper()
 	t.Setenv("REASONIX_HOME", testenv.TempDir(t))
+	if err := os.WriteFile(config.UserConfigPath(), []byte("[peers]\nenabled = false\ndispatch = false\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	dir := testenv.TempDir(t)
 	peersDir := filepath.Join(dir, "peers")
 	path := filepath.Join(dir, "sessions", "me.jsonl")
