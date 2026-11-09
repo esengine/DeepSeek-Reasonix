@@ -170,8 +170,6 @@ export const WORKBENCH: Messages = {
   "workbench.will_send": { zh: "将发送", en: "Will send" },
   "workbench.you_do_not_have_permission": { zh: "没有权限读取这个文件。", en: "You do not have permission to read this file." },
   "workbench.changes_history_and_files": { zh: "改动、提交历史和文件", en: "Changes, history and files" },
-  "workbench.find_a_file": { zh: "文件…", en: "Find a file…" },
-  "workbench.find_a_file_by_name": { zh: "按名字找项目里的文件", en: "Find a file in the project by name" },
   "workbench.new_tab_label": { zh: "新标签", en: "New tab" },
   "workbench.line_n": { zh: "第 {n} 行", en: "Line {n}" },
   "workbench.unsaved": { zh: "未保存", en: "Unsaved" },

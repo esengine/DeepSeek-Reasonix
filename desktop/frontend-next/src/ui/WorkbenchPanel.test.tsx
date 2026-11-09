@@ -208,22 +208,26 @@ describe("WorkbenchPanel", () => {
     expect(editor.state.doc.toString()).toContain("local draft");
   });
 
-  it("leaves new-tab choice through the explorer, finding a file or an existing browser", async () => {
+  it("uses one explorer entry for browsing and searching, and preserves existing browser tabs", async () => {
     const user = userEvent.setup();
     const port = new MockPort();
     const open = vi.spyOn(port, "browserOpen");
     const page = { id: "b1", target: "t1", url: "https://example.com", title: "Existing page", active: true };
+    const files = vi.spyOn(port, "workspaceFiles");
     const { container } = render(<WorkbenchPanel port={port} tabs={[page]} manual shown scheme="light" changes={[{ path: "README.md", status: "M" }]} onCloseManual={vi.fn()} onSurfaces={vi.fn()} onExternal={vi.fn()} />);
     const plus = container.querySelector<HTMLButtonElement>(".workbench-new")!;
     await user.click(plus);
+    expect(container.querySelector('[data-action="workbench.launch-find"]')).toBeNull();
     await user.click(container.querySelector('[data-action="workbench.launch-files"]')!);
     expect(container.querySelector(".workbench-body")?.hasAttribute("data-files")).toBe(true);
+    const search = container.querySelector<HTMLInputElement>(".workbench-search input")!;
+    await waitFor(() => expect(document.activeElement).toBe(search));
+    await user.type(search, "README");
+    await waitFor(() => expect(files).toHaveBeenLastCalledWith("", "README", false));
+    await user.click(container.querySelector('[data-action="workbench.clear-search"]')!);
+    await waitFor(() => expect(files).toHaveBeenLastCalledWith("", "", false));
     await user.click(plus);
     expect(screen.getByRole("tab", { name: "新标签" }).getAttribute("aria-selected")).toBe("true");
-    await user.click(container.querySelector('[data-action="workbench.launch-find"]')!);
-    expect(container.querySelector(".workbench-body")?.hasAttribute("data-files")).toBe(true);
-    await waitFor(() => expect(document.activeElement).toBe(container.querySelector(".workbench-search input")));
-    await user.click(plus);
     await user.click(screen.getByRole("tab", { name: "Existing page" }).querySelector("button")!);
     expect(screen.queryByRole("group", { name: "开始" })).toBeNull();
     expect(screen.getAllByRole("tab")).toHaveLength(1);

@@ -145,7 +145,10 @@ export function WorkbenchPanel({
   const toggleLauncher = () => { supersede(); setLauncher((open) => !open); };
   const [cursor, setCursor] = useState<[string, number]>(["", 1]);
   const [reread, setReread] = useState(0);
-  const chooseFiles = () => { supersede(); setLauncher(false); setShowFiles(true); };
+  const chooseFiles = () => {
+    supersede(); setLauncher(false); setShowFiles(true);
+    requestAnimationFrame(() => frame.current?.querySelector<HTMLInputElement>(".workbench-search input")?.focus());
+  };
   const toggleExplorer = () => { supersede(); setLauncher(false); setShowFiles((on) => launcher || !on); };
   const [changesOpen, setChangesOpen] = useState(false);
   const openChanges = () => {
@@ -619,7 +622,6 @@ export function WorkbenchPanel({
               key={String(launcher)} focus={launcher}
               changes={changes.length}
               onFiles={chooseFiles}
-              onFind={() => { chooseFiles(); requestAnimationFrame(() => document.querySelector<HTMLInputElement>(".workbench-search input")?.focus()); }}
               onBrowser={() => void addBrowser()} onTerminal={() => void terminals.open()}
               recent={recentFiles} onOpenFile={openFile}
             />
