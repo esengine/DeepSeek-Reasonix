@@ -51,4 +51,8 @@ describe("a select's popup list", () => {
   it("gives every option a finger-sized row on a touch screen", () => {
     expect(block()).toMatch(/@media \(pointer: coarse\)\s*\{[^}]*select:not\(\[multiple\]\) option\s*\{[^}]*min-height:\s*40px/);
   });
+
+  it("keeps the chosen text centred in the box, which the engine's own layout leaves at the top", () => {
+    expect(rule(block(), "select:not([multiple])")).toMatch(/align-items:\s*center/);
+  });
 });
