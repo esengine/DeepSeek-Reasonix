@@ -112,6 +112,7 @@ func jsonBool(b bool) string {
 
 func TestAnElevatedChangeOffersNoSessionGrantAndAsksEveryTime(t *testing.T) {
 	c, requests, _ := settingController(t)
+	setDispatchSwitch(t, false, false)
 	done := propose(c, "peers.enabled", "true", "")
 	a := nextApproval(t, requests)
 	if a.Tool != SettingElevatedApprovalTool || a.AllowsSession {
@@ -263,6 +264,7 @@ func TestOpeningASettingEmitsANoticeAndChangesNothing(t *testing.T) {
 
 func TestADisabledDispatchNamesTheSwitchThatWouldLiftIt(t *testing.T) {
 	c, requests, _ := settingController(t)
+	setDispatchSwitch(t, false, false)
 	_, err := peerDirectory{c}.DispatchToProject(context.Background(), "other", "do it")
 	r, ok := asRefusal(err)
 	if !ok || r.Code != "dispatch.disabled" || r.Remedy == nil || r.Remedy.Setting != "peers.enabled" || r.Remedy.Op != tool.RemedyPropose {

@@ -1682,11 +1682,10 @@ func TestProjectDeltaDropsResolvers(t *testing.T) {
 	}
 }
 
-// The shared renderer has one [peers] table, and a change near it must not drop
-// it: the next save would silently switch messages between sessions off.
+// The shared renderer must persist an opt-out rather than restore the defaults.
 func TestPeersSurviveRender(t *testing.T) {
 	c := Default()
-	c.Peers.Enabled = true
+	c.Peers.Enabled = false
 	if !strings.Contains(RenderTOMLForScope(c, RenderScopeUser), "[peers]") {
 		t.Fatal("[peers] missing from the rendered config")
 	}

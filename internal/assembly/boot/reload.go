@@ -180,12 +180,13 @@ func CaptureRuntimeMigration(old control.SessionAPI) RuntimeMigration {
 
 // ApplyRuntimeMigration is the single definition of what survives a rebuild,
 // so a frontend assembling its own replacement carries exactly what boot does.
-// old may be nil (outgoing runtime is not a live Controller); the two steps
-// reading it are skipped. Steps are infallible public control calls today —
+// old may be nil (outgoing runtime is not a live Controller); transfers that
+// require it are skipped. Steps are infallible public control calls today —
 // the error return is the fail-atomic seam for ones that gain failure modes.
 func ApplyRuntimeMigration(ctrl, old *control.Controller, m RuntimeMigration) error {
 	carried := spliceFreshSystemPrompt(m.carried, ctrl.History())
 	path := sessionstore.ContinueSessionPath(m.prevPath, ctrl.SessionDir(), ctrl.Label())
+	ctrl.InheritDispatchSession(old, path)
 	ctrl.AdoptHistory(carried, path)
 	// Same conversation, different model: the carried blocks were composed
 	// for the model being replaced, so this one is owed them once.

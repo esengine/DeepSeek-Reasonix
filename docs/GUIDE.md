@@ -149,8 +149,8 @@ allow = ["Bash(go test:*)"]                  # never prompted
 # egress_unlisted = "allow"    # unattended long tasks (user config only): hosts outside allowed_domains pass without asking, said once each; denied_domains still refuse
 
 [peers]
-# enabled = false              # your sessions on this machine can message each other; every message waits for that session's user to approve it; also a switch in Settings, applied at the next turn (user config only)
-# dispatch = false             # the model may hand a task to a session in another of your projects, via dispatch_to_project (the session it opens sends its final answer back on its own), and ask you to open folders as projects with open_projects (one card lists every path; nothing is added or trusted until you approve it, and no mode answers it for you); needs enabled; turning it on is your consent for those sessions' tasks and replies, no card, and a project in your sidebar you have not decided about is trusted by being named; the opened session keeps the sender's model, preset, approval mode and planning, so a YOLO sender opens a YOLO session that answers the target project's ask rules too (deny rules still hold) (user config only)
+# enabled = true               # your sessions on this machine can message each other; unpaired messages wait for the receiving session's user to approve them; also a switch in Settings, applied at the next turn (user config only)
+# dispatch = true              # the model may hand a task to a session in another of your projects, via dispatch_to_project (the session it opens sends its final answer back on its own), and ask you to open folders as projects with open_projects (one card lists every path; nothing is added or trusted until you approve it, and no mode answers it for you); needs enabled; turning it on is your consent for those sessions' tasks and replies, no card, and a project in your sidebar you have not decided about is trusted by being named; the opened session keeps the sender's model, preset, approval mode and planning, so a YOLO sender opens a YOLO session that answers the target project's ask rules too (deny rules still hold) (user config only)
 # max_dispatch_depth = 1       # how many sessions deep a dispatch may chain; 0 removes the ceiling (user config only)
 # max_dispatched_sessions = 8  # sessions one session may keep open from its dispatches; 0 removes the ceiling (user config only)
 # release_projects = []        # projects that take messages from your other sessions without the card; their own approvals and sandbox still apply; they start over a pause the host set itself (session switch, unreadable @ reference, reopen) but never over one you pressed (user config only)
@@ -2573,8 +2573,9 @@ Not built, and why:
 ## Cross-project task dispatch
 
 Use this when one project needs an answer from another project's session, rather
-than letting the current session edit across project roots. Dispatch is
-experimental and off by default.
+than letting the current session edit across project roots. Session messaging
+and dispatch are experimental and enabled by default. An explicit user setting
+of `false` remains disabled after upgrading.
 
 Start from a **local session in Reasonix Studio
 or the web UI**; terminal/protocol sessions and SSH-driven panes cannot open the
@@ -2584,9 +2585,9 @@ receiving session.
    workspace trust question there before dispatching. The target must be an
    existing directory in your project list; use its full path if several projects
    share a folder name.
-2. In the sending session, open **Settings → Session messages → Messages between
-   sessions (experimental)**. Turn on **Turn on session messages**, then **Let the
-   model hand a task to another session**.
+2. If you previously disabled either switch, open **Settings → Agent behavior →
+   Messages between sessions (experimental)** in the sending session. Enable
+   **Turn on session messages** and **Let the model hand a task to another session**.
 
    These save to your user config, not
    `reasonix.toml`. They apply between turns; if a turn is running, send the task
@@ -2616,7 +2617,9 @@ receiving session.
    queue yourself, standing consent does not resume it: resume it to process the
    queued task or reply.
 
-The equivalent user configuration is:
+The default user configuration is equivalent to the following. Set `dispatch`
+to `false` to disable task dispatch, or `enabled` to `false` to disable all
+session messaging:
 
 ```toml
 [peers]
@@ -2670,9 +2673,9 @@ level and eight open dispatched sessions per sender; user-only
 A workspace-bound agent composition cannot dispatch
 into another workspace.
 
-Disabling dispatch also stops automatic replies; live
-pairings are held in memory, so do not rely on them surviving an application
-restart.
+Disabling dispatch also stops automatic replies. Pairings and replies survive
+model switches and extension reloads within the same conversation. They are
+held in memory, so do not rely on them surviving an application restart.
 
 ## Letting the model change a setting
 

@@ -9,11 +9,11 @@ import (
 
 // PeersConfig governs messages between sessions of one user on one machine.
 type PeersConfig struct {
-	// Enabled publishes this session to its peers and reads its own spool. Off
-	// by default; the user file only, so a cloned repo cannot open the door.
+	// Enabled publishes this session to its peers and reads its own spool.
+	// Only the user file may override the default.
 	Enabled bool `toml:"enabled"`
 	// Dispatch gives the model a tool that hands a task to a session in another of
-	// the user's projects. Needs Enabled; off by default; the user file only.
+	// the user's projects. Needs Enabled; the user file only.
 	Dispatch bool `toml:"dispatch"`
 	// ReleaseProjects lists projects whose sessions take a message from the user's
 	// other sessions without the approval card. Only the asking is skipped: what
@@ -30,7 +30,7 @@ type PeersConfig struct {
 }
 
 func defaultPeers() PeersConfig {
-	return PeersConfig{MaxDispatchDepth: DefaultMaxDispatchDepth, MaxDispatchedSessions: DefaultMaxDispatchedSessions}
+	return PeersConfig{Enabled: true, Dispatch: true, MaxDispatchDepth: DefaultMaxDispatchDepth, MaxDispatchedSessions: DefaultMaxDispatchedSessions}
 }
 
 // Defaults of the two ceilings above.
@@ -87,19 +87,16 @@ func renderServeAndPeers(b *strings.Builder, c *Config) {
 	renderModsSection(b, c)
 }
 
-// renderPeersSection writes [peers] only once something in it is set, so a user
-// who never touched messages between sessions keeps a file without the table.
+// Explicit opt-outs must survive unrelated saves and later default changes.
 func renderPeersSection(b *strings.Builder, c *Config) {
 	p := c.Peers
 	customCeilings := p.MaxDispatchDepth != DefaultMaxDispatchDepth || p.MaxDispatchedSessions != DefaultMaxDispatchedSessions
-	if !p.Enabled && !p.Dispatch && len(p.ReleaseProjects) == 0 && !customCeilings {
+	if p.Enabled && p.Dispatch && len(p.ReleaseProjects) == 0 && !customCeilings {
 		return
 	}
 	b.WriteString("[peers]\n")
 	fmt.Fprintf(b, "enabled = %v   # messages between your sessions on this machine; user file only\n", p.Enabled)
-	if p.Dispatch {
-		b.WriteString("dispatch = true   # the model may hand a task to a session in another of your projects; needs enabled\n")
-	}
+	fmt.Fprintf(b, "dispatch = %v   # the model may hand a task to a session in another of your projects; needs enabled\n", p.Dispatch)
 	if len(p.ReleaseProjects) > 0 {
 		fmt.Fprintf(b, "release_projects = %s   # projects that take messages from your other sessions without a card\n", renderStringArray(p.ReleaseProjects))
 	}

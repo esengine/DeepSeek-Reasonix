@@ -99,8 +99,8 @@ func (f *dispatchFixture) sender(root string) *control.Controller {
 
 const dispatchOn = "[peers]\nenabled = true\ndispatch = true\n"
 
-func TestDispatchOpensASessionInTheOtherProjectAndHoldsTheTaskThere(t *testing.T) {
-	f := newDispatchFixture(t, dispatchOn)
+func TestDispatchDefaultsOpenASessionAndDeliverTheTask(t *testing.T) {
+	f := newDispatchFixture(t, "")
 	a, b := f.project("alpha", true), f.project("billing", true)
 	sender := f.sender(a)
 
@@ -184,8 +184,8 @@ func TestADispatchedSessionCannotDispatchFurther(t *testing.T) {
 	t.Fatal("no dispatched session found")
 }
 
-func TestDispatchIsOffUnlessTheUserFileSaysSo(t *testing.T) {
-	f := newDispatchFixture(t, "[peers]\nenabled = true\n")
+func TestDispatchHonoursTheUsersOptOut(t *testing.T) {
+	f := newDispatchFixture(t, "[peers]\nenabled = true\ndispatch = false\n")
 	f.project("billing", true)
 	sender := f.sender(f.project("alpha", true))
 	if _, err := sender.DispatchToProject(context.Background(), "billing", "x"); !errors.Is(err, control.ErrDispatchDisabled) {
@@ -321,7 +321,7 @@ func TestSwitchingDispatchOffBeforeTheReceiverReadsPutsTheCardBack(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(config.UserConfigPath(), []byte("[peers]\nenabled = true\n"), 0o600); err != nil {
+	if err := os.WriteFile(config.UserConfigPath(), []byte("[peers]\nenabled = true\ndispatch = false\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	child := f.paneOf(got.Key)

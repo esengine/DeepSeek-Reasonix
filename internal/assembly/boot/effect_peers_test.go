@@ -2,6 +2,7 @@ package boot
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -69,9 +70,7 @@ name = "test-model"
 kind = "`+kind+`"
 model = "x"
 `)
-	if enabled {
-		writeFile(t, home, "config.toml", "[peers]\nenabled = true\n")
-	}
+	writeFile(t, home, "config.toml", fmt.Sprintf("[peers]\nenabled = %t\n", enabled))
 	approveWorkspaceAt(t, home, dir)
 	ctrl, err := Build(context.Background(), Options{Home: home, WorkspaceRoot: dir, Sink: event.Discard})
 	if err != nil {
@@ -93,7 +92,7 @@ model = "x"
 	return rec, filepath.Join(home, "peers"), ctrl, held
 }
 
-func TestEffectPeersAreOffUnlessTheUserFileEnablesThem(t *testing.T) {
+func TestEffectExplicitPeerOptOutStaysUnpublished(t *testing.T) {
 	t.Parallel()
 	_, peersDir, ctrl, _ := buildPeerSession(t, false)
 	if err := ctrl.Run(context.Background(), "hello"); err != nil {
@@ -104,7 +103,7 @@ func TestEffectPeersAreOffUnlessTheUserFileEnablesThem(t *testing.T) {
 		t.Fatal(err)
 	}
 	if live, _ := d.ListLive(func(peermail.Live) bool { return true }); len(live) != 0 {
-		t.Fatalf("a session that never opted in is published: %+v", live)
+		t.Fatalf("a session whose user opted out is published: %+v", live)
 	}
 }
 

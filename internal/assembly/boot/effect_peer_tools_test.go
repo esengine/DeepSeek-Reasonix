@@ -81,8 +81,8 @@ name = "test-model"
 kind = "`+kind+`"
 model = "x"
 `)
-	if enabled {
-		writeFile(t, home, "config.toml", "[peers]\nenabled = true\n"+strings.Join(peersExtra, ""))
+	if !enabled || len(peersExtra) > 0 {
+		writeFile(t, home, "config.toml", fmt.Sprintf("[peers]\nenabled = %t\n", enabled)+strings.Join(peersExtra, ""))
 	}
 	approveWorkspaceAt(t, home, dir)
 	seen := &struct {
@@ -114,7 +114,7 @@ model = "x"
 	return rec, ctrl, home + "/peers", seen
 }
 
-func TestEffectPeerToolsExistOnlyWhereMessagesBetweenSessionsAreOn(t *testing.T) {
+func TestEffectDefaultPeerToolsAndExplicitOptOutReachTheProvider(t *testing.T) {
 	t.Parallel()
 	for _, enabled := range []bool{true, false} {
 		rec, ctrl, _, _ := buildPeerToolSession(t, enabled, "nobody", "hello")
@@ -125,7 +125,7 @@ func TestEffectPeerToolsExistOnlyWhereMessagesBetweenSessionsAreOn(t *testing.T)
 		for _, name := range rec.toolNames() {
 			has[name] = true
 		}
-		if has["list_peers"] != enabled || has["send_peer_message"] != enabled {
+		if has["list_peers"] != enabled || has["send_peer_message"] != enabled || has["dispatch_to_project"] != enabled || has["open_projects"] != enabled {
 			t.Fatalf("enabled=%v: tools in the first request = %v", enabled, rec.toolNames())
 		}
 	}
@@ -185,18 +185,12 @@ func TestEffectAnInjectedRequestToMessageAnotherSessionAsksFirstAndWritesNothing
 	}
 }
 
-// Handing a task to another project is a second switch, off unless the user's
-// own file turns it on beside messages between sessions: without it the model's
-// tool block is exactly what it was.
-func TestEffectDispatchToolExistsOnlyWhereTheUserTurnedDispatchOn(t *testing.T) {
+func TestEffectDispatchOptOutLeavesOnlyMessagingTools(t *testing.T) {
 	t.Parallel()
 	for _, dispatch := range []bool{true, false} {
 		t.Run(fmt.Sprintf("dispatch=%v", dispatch), func(t *testing.T) {
 			t.Parallel()
-			extra := ""
-			if dispatch {
-				extra = "dispatch = true\n"
-			}
+			extra := fmt.Sprintf("dispatch = %t\n", dispatch)
 			rec, ctrl, _, _ := buildPeerToolSession(t, true, "nobody", "hello", extra)
 			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 			_ = ctrl.Run(ctx, "hi")

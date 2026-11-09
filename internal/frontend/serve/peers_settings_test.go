@@ -18,6 +18,9 @@ import (
 func standbyServer(t *testing.T, allowEdit bool) *httptest.Server {
 	t.Helper()
 	t.Setenv("REASONIX_HOME", testenv.TempDir(t))
+	if err := os.WriteFile(config.UserConfigPath(), []byte("[peers]\nenabled = false\ndispatch = false\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	dir := testenv.TempDir(t)
 	path := filepath.Join(dir, "sessions", "me.jsonl")
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
