@@ -29,7 +29,7 @@ func TestProviderSchemasDescriptionMayReadTheRegistryWhileAWriterWaits(t *testin
 
 	finished := make(chan struct{})
 	go func() {
-		r.ProviderSchemas(nil)
+		r.ProviderSchemas(t.Context())
 		close(finished)
 	}()
 	select {
