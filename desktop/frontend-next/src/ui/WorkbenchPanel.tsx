@@ -603,7 +603,7 @@ export function WorkbenchPanel({
         </TooltipButton>
         {fullMode && <BrowserFullToggle {...fullMode} />}
         {onDismiss && (
-          <TooltipButton className="workbench-dismiss" data-action="workbench.dismiss" aria-label={t("app.close_workbench")} title={t("app.close_workbench")} onClick={() => slideAway(frame.current, onDismiss)}>
+          <TooltipButton className="workbench-dismiss" data-action="workbench.dismiss" aria-label={t("app.close_workbench")} title={t("app.close_workbench")} onClick={() => slideAway(frame.current, () => { setShowFiles(false); onDismiss(); })}>
             <StudioIcon name="close" />
           </TooltipButton>
         )}
