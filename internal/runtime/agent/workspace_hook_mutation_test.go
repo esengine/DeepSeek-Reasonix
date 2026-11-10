@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/contract/event"
 	"reasonix/internal/contract/provider"
 	"reasonix/internal/contract/tool"
@@ -69,7 +70,7 @@ func TestWorkspaceHookEffectsSurviveToolClassificationAndRefusal(t *testing.T) {
 		{name: "failure hook", readOnly: true, fail: true, post: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			path := filepath.Join(t.TempDir(), "hook-side.txt")
+			path := filepath.Join(testenv.TempDir(t), "hook-side.txt")
 			write := func() {
 				if err := os.WriteFile(path, []byte("hook changed bytes"), 0o600); err != nil {
 					t.Fatal(err)
@@ -113,7 +114,7 @@ func TestWorkspaceHookPanicStillInvalidates(t *testing.T) {
 	reg := tool.NewRegistry()
 	reg.Add(fakeTool{name: "probe", readOnly: true})
 	sink := newWorkspaceSignalSink()
-	path := filepath.Join(t.TempDir(), "partial.txt")
+	path := filepath.Join(testenv.TempDir(t), "partial.txt")
 	a := New(nil, reg, sessionstore.NewSession(""), Options{Hooks: &workspaceEffectHooks{pre: func() (bool, string) {
 		if err := os.WriteFile(path, []byte("partial"), 0o600); err != nil {
 			t.Fatal(err)
@@ -141,8 +142,8 @@ func TestWorkspaceHooksNotEnteredDoNotInvalidate(t *testing.T) {
 		deny  bool
 	}{
 		{name: "nil"},
-		{name: "empty runner", hooks: hook.NewRunner(nil, t.TempDir(), nil, nil)},
-		{name: "session-only runner", hooks: hook.NewRunner([]hook.ResolvedHook{{Event: hook.SessionStart}}, t.TempDir(), nil, nil)},
+		{name: "empty runner", hooks: hook.NewRunner(nil, testenv.TempDir(t), nil, nil)},
+		{name: "session-only runner", hooks: hook.NewRunner([]hook.ResolvedHook{{Event: hook.SessionStart}}, testenv.TempDir(t), nil, nil)},
 		{name: "permission denied", hooks: &workspaceEffectHooks{pre: func() (bool, string) { t.Fatal("denied call reached hooks"); return false, "" }}, deny: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

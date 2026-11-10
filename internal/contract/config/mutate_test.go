@@ -557,7 +557,7 @@ func TestAcquireConfigEditLockPathRefusesLockDirOwnedBySomeoneElse(t *testing.T)
 	if runtime.GOOS == "windows" {
 		t.Skip("directory ownership is not checked on Windows")
 	}
-	dir := filepath.Join(t.TempDir(), "locks")
+	dir := filepath.Join(testenv.TempDir(t), "locks")
 	if err := os.Mkdir(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -594,7 +594,7 @@ func TestAcquireConfigEditLockPathTightensOwnLockDir(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("POSIX modes are not enforced on Windows")
 	}
-	dir := filepath.Join(t.TempDir(), "locks")
+	dir := filepath.Join(testenv.TempDir(t), "locks")
 	if err := os.Mkdir(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}

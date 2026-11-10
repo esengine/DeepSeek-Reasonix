@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"reasonix/internal/base/testenv"
 )
 
 var syntaxBases = []string{
@@ -65,8 +67,8 @@ func TestEverySyntaxWrappedCommandTheClassifierCallsAReadLeavesTheDirectoryAlone
 		t.Skip("no sh")
 	}
 	rng := rand.New(rand.NewSource(20261018))
-	scratch := t.TempDir()
-	home := t.TempDir()
+	scratch := testenv.TempDir(t)
+	home := testenv.TempDir(t)
 	classified, bare := 0, 0
 	seen := map[string]bool{}
 	for range 4000 {

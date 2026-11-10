@@ -133,7 +133,7 @@ func TestSensitiveGlobsComeFromTheProjectHostChecks(t *testing.T) {
 // leaves the reader measuring a package by hand on a platform they may not be
 // on, which is how a shortfall on one GOOS goes unfixed.
 func TestUncoveredBlocksAreReportedLargestFirst(t *testing.T) {
-	dir := t.TempDir()
+	dir := testenv.TempDir(t)
 	profile := filepath.Join(dir, "c.out")
 	body := "mode: set\n" +
 		"reasonix/internal/x/a.go:1.1,2.2 3 1\n" +

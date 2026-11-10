@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"reasonix/internal/base/testenv"
 )
 
 // A Repo is resolved when the session opens; what the workspace gains
@@ -52,7 +54,7 @@ func (f *repoFixture) assertReadsOpenedRepository(repo Repo, wantGitDir string) 
 
 func TestOpenResolvesLinkedWorktreeIdentity(t *testing.T) {
 	f := newRepoFixture(t, "", map[string]string{"f.txt": "one\n"})
-	linked := filepath.Join(t.TempDir(), "linked")
+	linked := filepath.Join(testenv.TempDir(t), "linked")
 	f.plain("worktree", "add", "--quiet", linked)
 	repo := f.open(linked)
 	common := f.open(f.dir).GitDir
@@ -63,7 +65,7 @@ func TestOpenResolvesLinkedWorktreeIdentity(t *testing.T) {
 	if repo.CommonDir != common || repo.GitDir == common || repo.WorkTree != real {
 		t.Fatalf("linked worktree resolved as %+v, want common dir %s", repo, common)
 	}
-	if _, err := Open(f.ctx, t.TempDir()); !errors.Is(err, ErrNotRepository) {
+	if _, err := Open(f.ctx, testenv.TempDir(t)); !errors.Is(err, ErrNotRepository) {
 		t.Fatalf("Open(non-repo) = %v, want ErrNotRepository", err)
 	}
 	if err := (Repo{}).Command(f.ctx, "status").Run(); !errors.Is(err, ErrNotRepository) {
@@ -81,10 +83,10 @@ func TestOpenResolvesSymlinkedWorktreeIdentity(t *testing.T) {
 			f := newRepoFixture(t, "", map[string]string{"f.txt": "one\n"})
 			dir := f.dir
 			if linked {
-				dir = filepath.Join(t.TempDir(), "linked")
+				dir = filepath.Join(testenv.TempDir(t), "linked")
 				f.plain("worktree", "add", "--quiet", dir)
 			}
-			alias := filepath.Join(t.TempDir(), "alias")
+			alias := filepath.Join(testenv.TempDir(t), "alias")
 			if err := os.Symlink(dir, alias); err != nil {
 				t.Fatal(err)
 			}
@@ -128,7 +130,7 @@ func TestOpenedRepoIgnoresNestedRepositoryCreatedLater(t *testing.T) {
 func TestOpenedRepoIgnoresCommondirWrittenLater(t *testing.T) {
 	f := newRepoFixture(t, "", map[string]string{"f.txt": "one\n"})
 	repo := f.open(f.dir)
-	evil := filepath.Join(t.TempDir(), "evil")
+	evil := filepath.Join(testenv.TempDir(t), "evil")
 	f.plain("clone", "--quiet", "--bare", f.dir, evil)
 	if err := os.WriteFile(filepath.Join(evil, "config"), []byte("[core]\n\trepositoryformatversion = 0\n"+f.substituteConfig()), 0o644); err != nil {
 		t.Fatal(err)
@@ -176,7 +178,7 @@ func TestOpenedRepoFailsClosedOnDamagedHead(t *testing.T) {
 func TestOpenRefusesGitDirOfAnotherCheckout(t *testing.T) {
 	other := newRepoFixture(t, "", map[string]string{"other.txt": "other\n"})
 	t.Run("gitdir file", func(t *testing.T) {
-		ws := t.TempDir()
+		ws := testenv.TempDir(t)
 		if err := os.WriteFile(filepath.Join(ws, ".git"), []byte("gitdir: "+filepath.Join(other.dir, ".git")+"\n"), 0o644); err != nil {
 			t.Fatal(err)
 		}
@@ -195,9 +197,9 @@ func TestOpenRefusesGitDirOfAnotherCheckout(t *testing.T) {
 		}
 	})
 	t.Run("linked admin dir of another worktree", func(t *testing.T) {
-		linked := filepath.Join(t.TempDir(), "linked")
+		linked := filepath.Join(testenv.TempDir(t), "linked")
 		other.plain("worktree", "add", "--quiet", linked)
-		ws := t.TempDir()
+		ws := testenv.TempDir(t)
 		admin := strings.TrimSpace(other.plainIn(linked, "rev-parse", "--absolute-git-dir"))
 		if err := os.WriteFile(filepath.Join(ws, ".git"), []byte("gitdir: "+admin+"\n"), 0o644); err != nil {
 			t.Fatal(err)

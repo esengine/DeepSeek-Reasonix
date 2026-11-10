@@ -4,12 +4,13 @@ import (
 	"errors"
 	"testing"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/contract/config"
 	"reasonix/internal/ext/modhost"
 )
 
 func TestSavingTheModsSwitchOnIsRefusedUntilItIsAvailable(t *testing.T) {
-	t.Setenv("REASONIX_HOME", t.TempDir())
+	t.Setenv("REASONIX_HOME", testenv.TempDir(t))
 	on, off := true, false
 	c := &Controller{}
 

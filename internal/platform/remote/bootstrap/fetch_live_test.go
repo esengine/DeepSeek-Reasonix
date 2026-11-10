@@ -139,7 +139,7 @@ func TestFetchRefusesAnArchiveThatFailsItsDigest(t *testing.T) {
 func runScript(t *testing.T, script string) (string, error) {
 	t.Helper()
 	cmd := exec.Command("/bin/sh", "-c", script)
-	cmd.Env = []string{"PATH=/usr/bin:/bin", "HOME=" + t.TempDir()}
+	cmd.Env = []string{"PATH=/usr/bin:/bin", "HOME=" + testenv.TempDir(t)}
 	out, err := cmd.CombinedOutput()
 	return string(out), err
 }

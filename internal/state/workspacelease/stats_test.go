@@ -4,12 +4,14 @@ import (
 	"context"
 	"testing"
 	"time"
+
+	"reasonix/internal/base/testenv"
 )
 
 func statsOwner(t *testing.T) (*Owner, <-chan Stats) {
 	t.Helper()
 	closed := make(chan Stats, 4)
-	owner, err := New(t.TempDir(), t.TempDir(), nil)
+	owner, err := New(testenv.TempDir(t), testenv.TempDir(t), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -84,7 +86,7 @@ func TestAWaitUnderTheGraceIsCountedButNotReported(t *testing.T) {
 	waitNoticeGrace = time.Hour
 	defer func() { waitNoticeGrace = restore }()
 
-	root, lockDir := t.TempDir(), t.TempDir()
+	root, lockDir := testenv.TempDir(t), testenv.TempDir(t)
 	holder, err := New(root, lockDir, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -124,7 +126,7 @@ func TestAWaitUnderTheGraceIsCountedButNotReported(t *testing.T) {
 }
 
 func TestAnOwnerWithNoNoticeKeepsNoAccount(t *testing.T) {
-	owner, err := New(t.TempDir(), t.TempDir(), nil)
+	owner, err := New(testenv.TempDir(t), testenv.TempDir(t), nil)
 	if err != nil {
 		t.Fatal(err)
 	}

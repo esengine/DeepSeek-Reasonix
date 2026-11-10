@@ -58,7 +58,7 @@ func TestPromptText(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := promptText(t.TempDir(), tt.blocks)
+			got, err := promptText(testenv.TempDir(t), tt.blocks)
 			if err != nil || got != tt.want {
 				t.Errorf("promptText() = %q, %v, want %q", got, err, tt.want)
 			}

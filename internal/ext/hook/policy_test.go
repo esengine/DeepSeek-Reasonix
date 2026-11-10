@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"reflect"
 	"testing"
+
+	"reasonix/internal/base/testenv"
 )
 
 func TestPolicyGuardClassificationAndLiveReplacement(t *testing.T) {
@@ -25,7 +27,7 @@ func TestPolicyGuardClassificationAndLiveReplacement(t *testing.T) {
 	runner := NewRunner([]ResolvedHook{
 		{Event: SessionStart, HookConfig: HookConfig{Command: "retained"}},
 		{Event: PreToolUse, HookConfig: HookConfig{Command: "old-guard"}},
-	}, t.TempDir(), spawn, nil)
+	}, testenv.TempDir(t), spawn, nil)
 	role := runner.ForRole("child")
 	runner.ReplacePolicyGuards([]ResolvedHook{
 		{Event: SessionStart, HookConfig: HookConfig{Command: "unselected"}},

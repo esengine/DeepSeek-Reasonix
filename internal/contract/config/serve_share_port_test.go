@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"reasonix/internal/base/testenv"
 )
 
 func TestSharePortRange(t *testing.T) {
@@ -64,7 +66,7 @@ func TestSharePortSurvivesASaveAndKeepsTheRestOfServe(t *testing.T) {
 
 func TestProjectConfigCannotPinTheSharePort(t *testing.T) {
 	isolateUserConfigHome(t)
-	root := t.TempDir()
+	root := testenv.TempDir(t)
 	if err := os.WriteFile(filepath.Join(root, "reasonix.toml"), []byte("[serve]\nshare_port = 41234\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}

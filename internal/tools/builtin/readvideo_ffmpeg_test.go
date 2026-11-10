@@ -11,6 +11,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"reasonix/internal/base/testenv"
 )
 
 // These run the real ffmpeg and are skipped where it is not installed: the unit
@@ -27,7 +29,7 @@ func requireFFmpeg(t *testing.T) {
 
 func makeClip(t *testing.T, name, format string, size string, seconds string) string {
 	t.Helper()
-	path := filepath.Join(t.TempDir(), name)
+	path := filepath.Join(testenv.TempDir(t), name)
 	out, err := exec.Command("ffmpeg", "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "testsrc=size="+size+":rate=10:duration="+seconds,
 		"-c:v", "mpeg4", "-f", format, path).CombinedOutput()
 	if err != nil {
@@ -94,7 +96,7 @@ func TestReadVideoWithRealFFmpegShrinksWideFrames(t *testing.T) {
 
 func TestReadVideoWithRealFFmpegDoesNotFollowAPlaylistInsideAnMP4(t *testing.T) {
 	requireFFmpeg(t)
-	dir := t.TempDir()
+	dir := testenv.TempDir(t)
 	secret := filepath.Join(dir, "secret.txt")
 	if err := os.WriteFile(secret, []byte("do not read me"), 0o644); err != nil {
 		t.Fatal(err)

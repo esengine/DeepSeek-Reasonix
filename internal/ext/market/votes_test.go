@@ -12,6 +12,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"reasonix/internal/base/testenv"
 )
 
 func TestVoteSendsTheTokenAndValueToTheRegistry(t *testing.T) {
@@ -117,7 +119,7 @@ func TestReportInstallSendsOnlyTheSlugAndKey(t *testing.T) {
 }
 
 func TestInstallIDIsTheMarketsOwnRandomID(t *testing.T) {
-	home := t.TempDir()
+	home := testenv.TempDir(t)
 	id, err := InstallID(home)
 	if err != nil {
 		t.Fatal(err)
@@ -129,7 +131,7 @@ func TestInstallIDIsTheMarketsOwnRandomID(t *testing.T) {
 	if err != nil || again != id {
 		t.Fatalf("second read = %q, %v; want the stored %q", again, err, id)
 	}
-	if other, _ := InstallID(t.TempDir()); other == id {
+	if other, _ := InstallID(testenv.TempDir(t)); other == id {
 		t.Fatal("two homes drew the same id")
 	}
 	if err := os.WriteFile(filepath.Join(home, "market", "install-id"), []byte("not-an-id\n"), 0o600); err != nil {

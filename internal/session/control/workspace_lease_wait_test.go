@@ -23,7 +23,7 @@ type leaseRig struct {
 
 func newLeaseRig(t *testing.T, timeout time.Duration) leaseRig {
 	t.Helper()
-	root, locks := t.TempDir(), t.TempDir()
+	root, locks := testenv.TempDir(t), testenv.TempDir(t)
 	owner, err := workspacelease.New(root, locks, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -265,7 +265,7 @@ func TestApprovalThatNeedsNoPromptDoesNotYield(t *testing.T) {
 
 func TestHookAutoAllowDoesNotYield(t *testing.T) {
 	allowJSON := `{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"allow"}}}`
-	root, locks := t.TempDir(), t.TempDir()
+	root, locks := testenv.TempDir(t), testenv.TempDir(t)
 	owner, err := workspacelease.New(root, locks, nil)
 	if err != nil {
 		t.Fatal(err)

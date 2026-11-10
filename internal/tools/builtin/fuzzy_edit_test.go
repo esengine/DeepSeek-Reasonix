@@ -204,7 +204,7 @@ func TestMultiEditFuzzyReplaceAll(t *testing.T) {
 // produces: the file separates top-level defs with two blank lines and the model
 // reproduces the span with one.
 func TestEditFileFuzzyBlankLineRun(t *testing.T) {
-	dir := t.TempDir()
+	dir := testenv.TempDir(t)
 	path := filepath.Join(dir, "metrics.py")
 	seed := "_count = 0\n\n\ndef bump(by=1):\n    global _count\n    _count += by\n    return _count\n"
 	if err := os.WriteFile(path, []byte(seed), 0o644); err != nil {
@@ -236,7 +236,7 @@ func TestEditFileFuzzyBlankLineRun(t *testing.T) {
 // relaxation safe: collapsing runs must not turn two candidate spans into one
 // silent pick.
 func TestEditFileBlankLineRunKeepsUniquenessRule(t *testing.T) {
-	dir := t.TempDir()
+	dir := testenv.TempDir(t)
 	path := filepath.Join(dir, "dup.py")
 	seed := "def a():\n    pass\n\n\ndef b():\n    pass\n\n\ndef a():\n    pass\n\n\ndef b():\n    pass\n"
 	if err := os.WriteFile(path, []byte(seed), 0o644); err != nil {
@@ -263,7 +263,7 @@ func TestEditFileBlankLineRunKeepsUniquenessRule(t *testing.T) {
 // TestEditFileBlankLineRunDoesNotInventSeparation keeps the relaxation
 // one-directional: only a run's length is free, never its presence.
 func TestEditFileBlankLineRunDoesNotInventSeparation(t *testing.T) {
-	dir := t.TempDir()
+	dir := testenv.TempDir(t)
 	path := filepath.Join(dir, "tight.py")
 	seed := "x = 1\ny = 2\n"
 	if err := os.WriteFile(path, []byte(seed), 0o644); err != nil {
@@ -370,7 +370,7 @@ func TestApplyOldStringEditBlankLineRunCases(t *testing.T) {
 // TestMultiEditBlankLineRunReplaceAll covers the replace_all path, where the
 // relaxation is allowed to land on every occurrence instead of exactly one.
 func TestMultiEditBlankLineRunReplaceAll(t *testing.T) {
-	dir := t.TempDir()
+	dir := testenv.TempDir(t)
 	path := filepath.Join(dir, "dup.py")
 	seed := "def f():\n    p\n\n\ndef g():\n    p\n\n\ndef f():\n    p\n\n\ndef g():\n    p\n"
 	if err := os.WriteFile(path, []byte(seed), 0o644); err != nil {
@@ -401,7 +401,7 @@ func TestMultiEditBlankLineRunReplaceAll(t *testing.T) {
 // TestEditFileBlankLineRunPreservesCRLF keeps the relaxation compatible with the
 // CRLF handling the other fuzzy modes already guarantee.
 func TestEditFileBlankLineRunPreservesCRLF(t *testing.T) {
-	dir := t.TempDir()
+	dir := testenv.TempDir(t)
 	path := filepath.Join(dir, "crlf.py")
 	seed := "a = 1\r\n\r\n\r\nb = 2\r\n"
 	if err := os.WriteFile(path, []byte(seed), 0o644); err != nil {
@@ -429,7 +429,7 @@ func TestEditFileBlankLineRunPreservesCRLF(t *testing.T) {
 // TestEditFileBlankLineRunKeepsFinalNewline guards the span end: an old_string
 // that omits the file's trailing newline must not consume it.
 func TestEditFileBlankLineRunKeepsFinalNewline(t *testing.T) {
-	dir := t.TempDir()
+	dir := testenv.TempDir(t)
 	path := filepath.Join(dir, "tail.py")
 	seed := "a = 1\n\n\nb = 2\n"
 	if err := os.WriteFile(path, []byte(seed), 0o644); err != nil {
@@ -457,7 +457,7 @@ func TestEditFileBlankLineRunKeepsFinalNewline(t *testing.T) {
 // becoming a file-wide blank-run rewrite: without an anchoring non-blank line,
 // a blank-only old_string would land on every run at once.
 func TestMultiEditBlankLineRunReplaceAllRejectsBlankOnly(t *testing.T) {
-	dir := t.TempDir()
+	dir := testenv.TempDir(t)
 	path := filepath.Join(dir, "runs.py")
 	seed := "a = 1\n\n\nb = 2\n\n\nc = 3\n"
 	if err := os.WriteFile(path, []byte(seed), 0o644); err != nil {

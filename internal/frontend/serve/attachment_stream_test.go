@@ -8,10 +8,12 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"reasonix/internal/base/testenv"
 )
 
 func TestAttachmentStreamAcceptsLargeAPK(t *testing.T) {
-	root := t.TempDir()
+	root := testenv.TempDir(t)
 	srv := attachmentServer(t, root)
 	const size = 65 << 20
 	resp, err := http.Post(srv.URL+"/attachments/upload?name=large.apk", "application/octet-stream", io.LimitReader(repeatingByte{}, size))
@@ -41,7 +43,7 @@ type repeatingByte struct{}
 func (repeatingByte) Read(p []byte) (int, error) { clear(p); return len(p), nil }
 
 func TestAttachmentStreamRejectsSimpleContentType(t *testing.T) {
-	srv := attachmentServer(t, t.TempDir())
+	srv := attachmentServer(t, testenv.TempDir(t))
 	resp, err := http.Post(srv.URL+"/attachments/upload?name=a.apk", "text/plain", bytes.NewReader([]byte("APK")))
 	if err != nil {
 		t.Fatal(err)
@@ -53,7 +55,7 @@ func TestAttachmentStreamRejectsSimpleContentType(t *testing.T) {
 }
 
 func TestAttachmentStreamRetainsImageLimit(t *testing.T) {
-	srv := attachmentServer(t, t.TempDir())
+	srv := attachmentServer(t, testenv.TempDir(t))
 	resp, err := http.Post(srv.URL+"/attachments/upload?name=photo.png&mime=image/png", "application/octet-stream", io.LimitReader(repeatingByte{}, 11<<20))
 	if err != nil {
 		t.Fatal(err)

@@ -6,18 +6,20 @@ import (
 	"path/filepath"
 	"runtime"
 	"testing"
+
+	"reasonix/internal/base/testenv"
 )
 
 func bindingHome(t *testing.T) (*ActivationStore, string) {
 	t.Helper()
-	home := t.TempDir()
+	home := testenv.TempDir(t)
 	t.Setenv("REASONIX_HOME", home)
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
 	t.Setenv("XDG_CONFIG_HOME", home)
 	t.Setenv("BINDING_FLAG", "")
 	_ = os.Unsetenv("BINDING_FLAG")
-	return DefaultActivationStore(), t.TempDir()
+	return DefaultActivationStore(), testenv.TempDir(t)
 }
 
 func writeProjectFiles(t *testing.T, root string, files map[string]string) {

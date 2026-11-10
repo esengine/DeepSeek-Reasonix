@@ -257,7 +257,7 @@ func TestVetExtraRootComparesFileIdentityNotSpelling(t *testing.T) {
 		})
 	}
 	// A relative link to the same directory through a second hop is also the same file.
-	link := filepath.Join(t.TempDir(), "hop")
+	link := filepath.Join(testenv.TempDir(t), "hop")
 	if os.Symlink(filepath.Join(userHome, ".ssh"), link) == nil {
 		if got := refusalOf(t, cfg, primary, link); got != RootProtected {
 			t.Fatalf("a link to ~/.ssh: %s", got)

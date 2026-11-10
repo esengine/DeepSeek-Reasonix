@@ -4,11 +4,13 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"reasonix/internal/base/testenv"
 )
 
 func writeClaudeJSON(t *testing.T, body string) string {
 	t.Helper()
-	dir := t.TempDir()
+	dir := testenv.TempDir(t)
 	if err := os.WriteFile(filepath.Join(dir, claudeJSONFile), []byte(body), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -20,7 +22,7 @@ func writeClaudeJSON(t *testing.T, body string) string {
 // reading only .mcp.json found none of what a machine had configured: three
 // servers on the reporting user's machine, zero of them in a file Reasonix read.
 func TestClaudeConfigSuppliesTheServersItsOwnDefaultScopeHolds(t *testing.T) {
-	root := t.TempDir()
+	root := testenv.TempDir(t)
 	path := writeClaudeJSON(t, `{
 	  "mcpServers": {"shared": {"type": "stdio", "command": "user-node"}},
 	  "projects": {
@@ -79,13 +81,13 @@ func TestReasonixConfigurationOutranksTheCompatibilityRead(t *testing.T) {
 // The file belongs to another tool. Reasonix refusing to start over a typo in it
 // would be a worse answer than starting without it.
 func TestAnUnreadableClaudeConfigIsNotAnError(t *testing.T) {
-	if got := loadClaudeMCP(filepath.Join(t.TempDir(), "absent.json"), t.TempDir()); got != nil {
+	if got := loadClaudeMCP(filepath.Join(testenv.TempDir(t), "absent.json"), testenv.TempDir(t)); got != nil {
 		t.Fatalf("absent file returned %+v", got)
 	}
-	if got := loadClaudeMCP(writeClaudeJSON(t, `{ not json`), t.TempDir()); got != nil {
+	if got := loadClaudeMCP(writeClaudeJSON(t, `{ not json`), testenv.TempDir(t)); got != nil {
 		t.Fatalf("malformed file returned %+v", got)
 	}
-	if got := loadClaudeMCP("", t.TempDir()); got != nil {
+	if got := loadClaudeMCP("", testenv.TempDir(t)); got != nil {
 		t.Fatalf("empty path returned %+v", got)
 	}
 }
@@ -93,7 +95,7 @@ func TestAnUnreadableClaudeConfigIsNotAnError(t *testing.T) {
 // Claude Code writes those keys with forward slashes on Windows, where the same
 // directory is also spelled with backslashes.
 func TestTheProjectKeyIsComparedAsAPathNotAString(t *testing.T) {
-	root := t.TempDir()
+	root := testenv.TempDir(t)
 	path := writeClaudeJSON(t, `{"projects": {"`+filepath.ToSlash(root)+`": {
 	  "mcpServers": {"here": {"type": "stdio", "command": "node"}}}}}`)
 	if got := loadClaudeMCP(path, filepath.FromSlash(root)); len(got) != 1 {
@@ -107,7 +109,7 @@ func TestTheProjectKeyIsComparedAsAPathNotAString(t *testing.T) {
 // The effect at the boundary a session actually goes through: a workspace whose
 // only MCP configuration is Claude's own default scope still comes up with it.
 func TestLoadingAWorkspaceFindsWhatClaudeConfiguredForIt(t *testing.T) {
-	root := t.TempDir()
+	root := testenv.TempDir(t)
 	writeClaudeJSON(t, `{"projects": {"`+filepath.ToSlash(root)+`": {
 	  "mcpServers": {"unity-editor-mcp": {"type": "stdio", "command": "node", "args": ["server.js"]}}}}}`)
 

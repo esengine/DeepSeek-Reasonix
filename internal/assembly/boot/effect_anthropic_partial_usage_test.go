@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/contract/event"
 	"reasonix/internal/contract/pricing"
 	"reasonix/internal/contract/provider"
@@ -20,7 +21,7 @@ import (
 func TestEffectAnthropicPartialUsageRecovery(t *testing.T) {
 	for _, mode := range []string{"upstream_error", "premature_eof", "complete_control"} {
 		t.Run(mode, func(t *testing.T) {
-			home, root := statedBootHome(t), t.TempDir()
+			home, root := statedBootHome(t), testenv.TempDir(t)
 			writeFile(t, root, "fixture.txt", "partial usage fixture")
 			partial := mode != "complete_control"
 			var calls, reads atomic.Int32

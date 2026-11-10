@@ -8,10 +8,11 @@ import (
 	"testing"
 
 	"reasonix/internal/base/filelock"
+	"reasonix/internal/base/testenv"
 )
 
 func TestOpaqueWritePublishesExplicitVersionAndPreservesLegacyDirectoryMeaning(t *testing.T) {
-	root, state := t.TempDir(), t.TempDir()
+	root, state := testenv.TempDir(t), testenv.TempDir(t)
 	c := testCoordinator(t, root, state)
 	for _, pool := range []bool{false, true} {
 		request := opaqueIntent()
@@ -37,7 +38,7 @@ func TestOpaqueWritePublishesExplicitVersionAndPreservesLegacyDirectoryMeaning(t
 		t.Fatal(err)
 	}
 	defer legacy.End(NotExecuted)
-	other := testCoordinator(t, t.TempDir(), state)
+	other := testCoordinator(t, testenv.TempDir(t), state)
 	named, err := other.TryAcquire(t.Context(), intent("unrelated"))
 	if err != nil {
 		t.Fatalf("legacy directory silently became global: %v", err)
@@ -48,7 +49,7 @@ func TestOpaqueWritePublishesExplicitVersionAndPreservesLegacyDirectoryMeaning(t
 func TestOpaqueUnsupportedProtocolPreservesLiveAndDeadRecords(t *testing.T) {
 	for _, scenario := range []string{"old_version", "future_version", "other_effect", "no_paths", "unknown_field"} {
 		t.Run(scenario, func(t *testing.T) {
-			c := testCoordinator(t, t.TempDir(), t.TempDir())
+			c := testCoordinator(t, testenv.TempDir(t), testenv.TempDir(t))
 			r := record{Version: 3, ID: "opaque", Order: 1, Active: true, Effect: OpaqueWrite,
 				Workspace: c.root, Paths: []string{c.root}}
 			switch scenario {

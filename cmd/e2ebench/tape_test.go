@@ -10,6 +10,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"reasonix/internal/base/testenv"
 )
 
 const tapedStream = "data: {\"choices\":[{\"delta\":{\"content\":\"fixed\"}}]}\n\n" +
@@ -44,7 +46,7 @@ func readAll(t *testing.T, resp *http.Response) string {
 // A run replayed from its tape gets the recorded stream byte for byte, never
 // reaches the provider, and is metered as the recorded run was.
 func TestTapeReplaysARecordedRunWithoutTheProvider(t *testing.T) {
-	root := t.TempDir()
+	root := testenv.TempDir(t)
 	var calls atomic.Int32
 	_, base, stop := tapedMeter(t, tapeRecord, root, &calls)
 	live := readAll(t, post(t, base, "/chat/completions", tapedRequest))
@@ -71,7 +73,7 @@ func TestTapeReplaysARecordedRunWithoutTheProvider(t *testing.T) {
 // A kernel change that alters what the model is asked shows as the first
 // request whose body departs from the tape, named down to the message.
 func TestTapeReplayNamesTheFirstRequestThatDiffers(t *testing.T) {
-	root := t.TempDir()
+	root := testenv.TempDir(t)
 	var calls atomic.Int32
 	_, base, stop := tapedMeter(t, tapeRecord, root, &calls)
 	readAll(t, post(t, base, "/chat/completions", tapedRequest))
@@ -123,7 +125,7 @@ func waitFor(t *testing.T, what string, cond func() bool) {
 // A recording whose request file cannot be written is reported rather than
 // treated as a tape: request.json is what marks the exchange complete.
 func TestTapeSaveFailureIsReportedOnTheMeter(t *testing.T) {
-	root := t.TempDir()
+	root := testenv.TempDir(t)
 	orig := tapeWriteFile
 	tapeWriteFile = func(path string, body []byte, mode os.FileMode) error {
 		if strings.HasSuffix(path, "request.json") {
@@ -161,7 +163,7 @@ func TestTapeSaveFailureIsReportedOnTheMeter(t *testing.T) {
 // A tape with no recorded request is incomplete, not a divergence: there is
 // nothing to compare against, and blaming the harness would be wrong.
 func TestTapeMissingRequestIsIncompleteNotADivergence(t *testing.T) {
-	root := t.TempDir()
+	root := testenv.TempDir(t)
 	var calls atomic.Int32
 	_, base, stop := tapedMeter(t, tapeRecord, root, &calls)
 	readAll(t, post(t, base, "/chat/completions", tapedRequest))
@@ -193,7 +195,7 @@ func TestTapeMissingRequestIsIncompleteNotADivergence(t *testing.T) {
 // first: stopping is what waits for the handlers whose deferred writes carry the
 // tape counters. Snapshotting before that misses the last exchange.
 func TestMeterRecordDrainsHandlersBeforeSnapshot(t *testing.T) {
-	root := t.TempDir()
+	root := testenv.TempDir(t)
 	var calls atomic.Int32
 	m, base, stop := tapedMeter(t, tapeRecord, root, &calls)
 	defer stop()
@@ -214,7 +216,7 @@ func TestMeterRecordDrainsHandlersBeforeSnapshot(t *testing.T) {
 // Re-recording over an existing tape must not let the previous run's
 // completeness marker make a partial new exchange look complete.
 func TestTapeReRecordClearsStaleCompletenessMarkers(t *testing.T) {
-	root := t.TempDir()
+	root := testenv.TempDir(t)
 	var calls atomic.Int32
 	_, base, stop := tapedMeter(t, tapeRecord, root, &calls)
 	readAll(t, post(t, base, "/chat/completions", tapedRequest))
@@ -263,7 +265,7 @@ func TestTapeReRecordClearsStaleCompletenessMarkers(t *testing.T) {
 // incomplete exchange and prints no line about one. Only the failure paths were
 // pinned before.
 func TestTapeCompleteRecordingReportsNothingIncomplete(t *testing.T) {
-	root := t.TempDir()
+	root := testenv.TempDir(t)
 	var calls atomic.Int32
 	m, base, stop := tapedMeter(t, tapeRecord, root, &calls)
 	defer stop()

@@ -307,7 +307,7 @@ func TestSchedulerNamesWhoseClaimHeldARequestBack(t *testing.T) {
 }
 
 func TestStrictWholeWorkspaceWriterStillBlocksTheParent(t *testing.T) {
-	root := t.TempDir()
+	root := testenv.TempDir(t)
 	s := NewSubagentScheduler(4, 2)
 	whole, _ := WholeWorkspaceWriteClaim(root)
 	release, err := s.Acquire(t.Context(), AcquireRequest{Writer: true, WritePaths: whole, Label: "child"})
@@ -322,7 +322,7 @@ func TestStrictWholeWorkspaceWriterStillBlocksTheParent(t *testing.T) {
 }
 
 func TestTwoWritesToOnePathCollideWithATypedRefusalAndNothingElseDoes(t *testing.T) {
-	root := t.TempDir()
+	root := testenv.TempDir(t)
 	s := NewSubagentScheduler(4, 2)
 	a, _ := NormalizeWritePaths(root, []string{"a.txt"})
 	b, _ := NormalizeWritePaths(root, []string{"b.txt"})

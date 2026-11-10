@@ -9,6 +9,7 @@ import (
 	"slices"
 	"testing"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/contract/config"
 	"reasonix/internal/safety/sandbox"
 	"reasonix/internal/session/control"
@@ -32,12 +33,12 @@ func readJSON[T any](t *testing.T, base, path string) T {
 }
 
 func TestRevokeRememberedProjectRuleRebuildsWithoutChangingOtherGrants(t *testing.T) {
-	workspace := t.TempDir()
+	workspace := testenv.TempDir(t)
 	s := newProviderEditServer(t, workspace)
 	store := config.NewProjectGrantStore(config.Roots{}.Home())
 	if err := store.Update(workspace, func(g config.ProjectGrant) (config.ProjectGrant, error) {
 		g.Allow = []string{"Bash(go test:*)", "Bash(git status:*)"}
-		g.AllowWrite = []string{t.TempDir()}
+		g.AllowWrite = []string{testenv.TempDir(t)}
 		return g, nil
 	}); err != nil {
 		t.Fatal(err)
@@ -70,7 +71,7 @@ func TestRevokeRememberedProjectRuleRebuildsWithoutChangingOtherGrants(t *testin
 }
 
 func TestRevokeRememberedProjectRuleReportsUnavailableStoreByCode(t *testing.T) {
-	workspace := t.TempDir()
+	workspace := testenv.TempDir(t)
 	s := newProviderEditServer(t, workspace)
 	s.Controller().(*control.Controller).RestoreSessionAuthorizations(control.SessionAuthorizations{Grants: []string{"Bash(go test:*)"}})
 	store := config.NewProjectGrantStore(config.Roots{}.Home())
@@ -334,7 +335,7 @@ func TestSaveBrowserToolsPersists(t *testing.T) {
 }
 
 func TestSavePermissionsRefusesARuleNamingNoToolByCode(t *testing.T) {
-	s := newProviderEditServer(t, t.TempDir())
+	s := newProviderEditServer(t, testenv.TempDir(t))
 	s.AllowProviderEdit()
 	srv := httptest.NewServer(operatorHandler(s))
 	defer srv.Close()
@@ -359,7 +360,7 @@ func TestSavePermissionsRefusesARuleNamingNoToolByCode(t *testing.T) {
 }
 
 func TestPermissionsListsRulesAlreadyInTheFileThatNameNoTool(t *testing.T) {
-	s := newProviderEditServer(t, t.TempDir())
+	s := newProviderEditServer(t, testenv.TempDir(t))
 	s.AllowProviderEdit()
 	cfg := config.LoadForEdit(config.UserConfigPath())
 	cfg.Permissions.Ask = []string{"rm", "bash"}

@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/contract/event"
 	"reasonix/internal/contract/provider"
 	"reasonix/internal/session/control"
@@ -49,7 +50,7 @@ model = "x"
 // a read that succeeded counts; a read that failed, and a file outside the
 // workspace, do not.
 func TestEffectCompletedReadsFeedTheSkillPathSet(t *testing.T) {
-	outside := filepath.Join(t.TempDir(), "elsewhere.go")
+	outside := filepath.Join(testenv.TempDir(t), "elsewhere.go")
 	if err := os.WriteFile(outside, []byte("package x\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -161,7 +162,7 @@ func TestEffectGrepRecordsOnlyAFileItWasPointedAt(t *testing.T) {
 		t.Fatalf("Build: %v", err)
 	}
 	defer fresh.Close()
-	if err := fresh.Resume(saved, filepath.Join(t.TempDir(), "resumed.jsonl")); err != nil {
+	if err := fresh.Resume(saved, filepath.Join(testenv.TempDir(t), "resumed.jsonl")); err != nil {
 		t.Fatalf("Resume: %v", err)
 	}
 	if got := fresh.TouchedPaths(); !reflect.DeepEqual(got, want) {
@@ -191,7 +192,7 @@ func TestEffectResumeResolvesSymlinksAgainstTheCurrentDisk(t *testing.T) {
 	for _, m := range ctrl.History() {
 		saved.Add(m)
 	}
-	elsewhere := t.TempDir()
+	elsewhere := testenv.TempDir(t)
 	if err := os.WriteFile(filepath.Join(elsewhere, "a.go"), []byte("package x\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}

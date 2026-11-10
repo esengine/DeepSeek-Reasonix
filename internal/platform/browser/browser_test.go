@@ -343,7 +343,7 @@ func TestSecretMarkup(t *testing.T) {
 }
 
 func TestWhichPagesAreTheWorkspacesOwn(t *testing.T) {
-	root := t.TempDir()
+	root := testenv.TempDir(t)
 	if err := os.WriteFile(filepath.Join(root, "index.html"), []byte("<title>x</title>"), 0o644); err != nil {
 		t.Fatal(err)
 	}

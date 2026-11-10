@@ -7,11 +7,12 @@ import (
 	"strings"
 	"testing"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/contract/config"
 )
 
 func TestUserChoseDirRejectsWhatALauncherInherits(t *testing.T) {
-	base := t.TempDir()
+	base := testenv.TempDir(t)
 	app := filepath.Join(base, "ReasonixStudio")
 	exe := filepath.Join(app, "Reasonix Studio.exe")
 	cases := []struct {
@@ -33,7 +34,7 @@ func TestUserChoseDirRejectsWhatALauncherInherits(t *testing.T) {
 }
 
 func TestPickLaunchWorkspaceFallbackOrder(t *testing.T) {
-	base := t.TempDir()
+	base := testenv.TempDir(t)
 	app := filepath.Join(base, "ReasonixStudio")
 	exe := filepath.Join(app, "Reasonix Studio.exe")
 	mk := func(name string) string {
@@ -68,7 +69,7 @@ func TestPickLaunchWorkspaceFallbackOrder(t *testing.T) {
 }
 
 func TestLaunchWorkspaceKeepsLaunchProjectAfterSidebarReorder(t *testing.T) {
-	base := t.TempDir()
+	base := testenv.TempDir(t)
 	home := filepath.Join(base, "state")
 	app := filepath.Join(base, "app")
 	a, b := filepath.Join(base, "a"), filepath.Join(base, "b")
@@ -96,7 +97,7 @@ func TestLaunchWorkspaceKeepsLaunchProjectAfterSidebarReorder(t *testing.T) {
 }
 
 func TestLaunchWithNothingChosenOrRememberedOpensTheAutoWorkspaceNotHome(t *testing.T) {
-	base := t.TempDir()
+	base := testenv.TempDir(t)
 	state := filepath.Join(base, "state")
 	home := filepath.Join(base, "home")
 	app := filepath.Join(base, "app")
@@ -127,7 +128,7 @@ func TestLaunchWithNothingChosenOrRememberedOpensTheAutoWorkspaceNotHome(t *test
 }
 
 func TestPickLaunchWorkspaceCreatesTheAutoWorkspaceLast(t *testing.T) {
-	base := t.TempDir()
+	base := testenv.TempDir(t)
 	app := filepath.Join(base, "app")
 	exe := filepath.Join(app, "Reasonix Studio")
 	auto := filepath.Join(base, "state", "workspaces", "auto")

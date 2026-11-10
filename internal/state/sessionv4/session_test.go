@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/state/sessionv4/v4fixture"
 )
 
@@ -167,7 +168,7 @@ func TestOpenInRefusesASessionLinkedFromOutsideTheStore(t *testing.T) {
 	s := v4fixture.New(t)
 	const id = "0123456789abcdef0123456789abcdef"
 	outside := s.Session(id, 3)
-	store := filepath.Join(t.TempDir(), "store")
+	store := filepath.Join(testenv.TempDir(t), "store")
 	if err := os.MkdirAll(store, 0o755); err != nil {
 		t.Fatal(err)
 	}

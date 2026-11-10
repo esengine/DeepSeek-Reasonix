@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/safety/typesafe"
 )
 
@@ -17,7 +18,7 @@ func TestLocalClientIgnoresALayaPackageInTheWorkingDirectory(t *testing.T) {
 	if err != nil {
 		t.Skip("python3 not installed")
 	}
-	dir := t.TempDir()
+	dir := testenv.TempDir(t)
 	marker := filepath.Join(dir, "imported")
 	if err := os.MkdirAll(filepath.Join(dir, "laya"), 0o700); err != nil {
 		t.Fatal(err)

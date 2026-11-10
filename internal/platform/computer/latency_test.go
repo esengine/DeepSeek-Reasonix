@@ -6,13 +6,15 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"reasonix/internal/base/testenv"
 )
 
 func TestCUATargetObservationDoesNotWalkUnrelatedWindows(t *testing.T) {
 	for _, capture := range []bool{false, true} {
 		t.Run(map[bool]string{false: "tree", true: "capture"}[capture], func(t *testing.T) {
 			t.Setenv("REASONIX_CUA_EXTRA_APPS", "12")
-			log := filepath.Join(t.TempDir(), "requests.jsonl")
+			log := filepath.Join(testenv.TempDir(t), "requests.jsonl")
 			t.Setenv("REASONIX_CUA_REQUEST_LOG", log)
 			s := fakeSession(t)
 			var err error
@@ -58,7 +60,7 @@ func TestCUATargetObservationDoesNotWalkUnrelatedWindows(t *testing.T) {
 
 func TestCUAApplicationDiscoveryUsesOneWindowEnumeration(t *testing.T) {
 	t.Setenv("REASONIX_CUA_EXTRA_APPS", "12")
-	log := filepath.Join(t.TempDir(), "requests.jsonl")
+	log := filepath.Join(testenv.TempDir(t), "requests.jsonl")
 	t.Setenv("REASONIX_CUA_REQUEST_LOG", log)
 	s := fakeSession(t)
 	apps, err := s.Apps(t.Context())

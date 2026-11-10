@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/ext/extension"
 	"reasonix/internal/ext/extension/protocol"
 	"reasonix/internal/ext/extension/sidecar"
@@ -19,7 +20,7 @@ import (
 func startMod(t *testing.T, hooksModule string, budgetMS int) (*sidecar.Client, *Registry) {
 	t.Helper()
 	node := needNode(t)
-	root := t.TempDir()
+	root := testenv.TempDir(t)
 	must := func(err error) {
 		t.Helper()
 		if err != nil {
@@ -31,7 +32,7 @@ func startMod(t *testing.T, hooksModule string, budgetMS int) (*sidecar.Client, 
 	must(os.WriteFile(filepath.Join(root, "hooks", "register.mjs"), []byte(hooksModule), 0o600))
 	pkg := pluginpkg.InstalledPackage{Installed: pluginpkg.InstalledPlugin{Name: "demo", Enabled: true, ManifestKind: "claude"}, Package: pluginpkg.Package{Root: root, ManifestKind: "claude"}}
 	reg := NewRegistry()
-	deps := Deps{Settings: Settings{Enabled: true, HookBudgetMS: budgetMS}, Resolver: Resolver{LookPath: func(string) (string, error) { return node, nil }}, StateRoot: t.TempDir(), Registry: reg}
+	deps := Deps{Settings: Settings{Enabled: true, HookBudgetMS: budgetMS}, Resolver: Resolver{LookPath: func(string) (string, error) { return node, nil }}, StateRoot: testenv.TempDir(t), Registry: reg}
 	packages, warnings := Packages(context.Background(), deps, []pluginpkg.InstalledPackage{pkg})
 	if len(packages) != 1 {
 		t.Fatalf("packages = %d, warnings = %v, status = %+v", len(packages), warnings, reg.Snapshot())
@@ -40,7 +41,7 @@ func startMod(t *testing.T, hooksModule string, budgetMS int) (*sidecar.Client, 
 	defer cancel()
 	client, err := sidecar.StartClient(ctx, sidecar.ClientOptions{
 		Package: packages[0].Package, Installed: packages[0].Installed,
-		Session: protocol.SessionContext{SessionID: "s1", WorkspaceRoot: t.TempDir(), Generation: 1},
+		Session: protocol.SessionContext{SessionID: "s1", WorkspaceRoot: testenv.TempDir(t), Generation: 1},
 		OnCrash: func(error) { reg.Crashed("demo") },
 	})
 	if err != nil {

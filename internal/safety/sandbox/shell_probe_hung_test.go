@@ -5,11 +5,13 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"reasonix/internal/base/testenv"
 )
 
 func hungBash(t *testing.T) string {
 	t.Helper()
-	path := filepath.Join(t.TempDir(), "bash.exe")
+	path := filepath.Join(testenv.TempDir(t), "bash.exe")
 	if err := os.WriteFile(path, []byte("hangs"), 0o700); err != nil {
 		t.Fatal(err)
 	}

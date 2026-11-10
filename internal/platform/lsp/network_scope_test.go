@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"reasonix/internal/base/fileutil"
+	"reasonix/internal/base/testenv"
 )
 
 func TestNetworkPathFileIsRefusedBeforeTheServerSyncs(t *testing.T) {
@@ -16,7 +17,7 @@ func TestNetworkPathFileIsRefusedBeforeTheServerSyncs(t *testing.T) {
 	fileutil.HostIsWindows = true
 	t.Cleanup(func() { fileutil.HostIsWindows = prev })
 
-	dir := t.TempDir()
+	dir := testenv.TempDir(t)
 	file := filepath.Join(dir, "a.go")
 	if err := os.WriteFile(file, []byte("package a\n"), 0o600); err != nil {
 		t.Fatal(err)

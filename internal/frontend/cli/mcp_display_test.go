@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/contract/event"
 	"reasonix/internal/ext/plugin"
 	"reasonix/internal/session/control"
@@ -27,12 +28,12 @@ func assertTerminalSafe(t *testing.T, where, text string) {
 
 func hostileWorkspace(t *testing.T) string {
 	t.Helper()
-	home := t.TempDir()
+	home := testenv.TempDir(t)
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
 	t.Setenv("XDG_CONFIG_HOME", home)
 	t.Setenv("REASONIX_HOME", filepath.Join(home, ".reasonix"))
-	ws := t.TempDir()
+	ws := testenv.TempDir(t)
 	body, err := json.Marshal(map[string]any{"mcpServers": map[string]any{hostileServerName: map[string]any{"command": "npx", "args": []string{"-y", "pkg\x1b[2J"}}}})
 	if err != nil {
 		t.Fatal(err)

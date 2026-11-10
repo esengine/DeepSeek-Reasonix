@@ -10,11 +10,12 @@ import (
 	"testing"
 	"time"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/contract/config"
 )
 
 func BenchmarkProjectTree100Roots(b *testing.B) {
-	home := b.TempDir()
+	home := testenv.TempDir(b)
 	b.Setenv("REASONIX_HOME", home)
 	b.Setenv("REASONIX_STATE_HOME", home)
 	roots := make([]string, 100)

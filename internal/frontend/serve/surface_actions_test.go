@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/contract/config"
 	"reasonix/internal/contract/event"
 	"reasonix/internal/contract/provider"
@@ -26,7 +27,7 @@ func TestSurfaceActionHTTPClosedPayloadAndIdentity(t *testing.T) {
 	registry := tool.NewRegistry()
 	registry.Add(agent.NewRenderSurfaceTool())
 	exec := agent.New(nil, registry, sess, agent.Options{}, event.Discard)
-	ctrl := control.New(control.Options{Runner: exec, Executor: exec, Registry: registry, Sink: event.Discard, SessionPath: filepath.Join(t.TempDir(), "session.jsonl")})
+	ctrl := control.New(control.Options{Runner: exec, Executor: exec, Registry: registry, Sink: event.Discard, SessionPath: filepath.Join(testenv.TempDir(t), "session.jsonl")})
 	defer ctrl.Close()
 	if err := ctrl.SetInboxPaused(true); err != nil {
 		t.Fatal(err)

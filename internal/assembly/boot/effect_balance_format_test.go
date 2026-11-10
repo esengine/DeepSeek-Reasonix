@@ -9,6 +9,7 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/contract/event"
 	"reasonix/internal/contract/provider"
 	"reasonix/internal/model/billing"
@@ -26,7 +27,7 @@ func buildWithWallet(t *testing.T, balanceFormat string) (*atomic.Int64, billing
 	t.Cleanup(wallet.Close)
 
 	home := statedBootHome(t)
-	dir := t.TempDir()
+	dir := testenv.TempDir(t)
 	kind := "boot-wallet-" + strings.ReplaceAll(t.Name(), "/", "-") + "-" + balanceFormat + "-fmt"
 	provider.Register(kind, func(provider.Config) (provider.Provider, error) { return &peerRecorder{}, nil })
 	format := ""

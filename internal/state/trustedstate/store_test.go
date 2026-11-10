@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"reasonix/internal/base/testenv"
 )
 
 func appendN(t *testing.T, s *Store, stream string, n int) []Digest {
@@ -23,7 +25,7 @@ func appendN(t *testing.T, s *Store, stream string, n int) []Digest {
 }
 
 func TestAppendChainsAndVerifies(t *testing.T) {
-	root := t.TempDir()
+	root := testenv.TempDir(t)
 	s := Open(root, func() IntegrityLevel { return HostProtected })
 	digests := appendN(t, s, "ws", 3)
 
@@ -41,7 +43,7 @@ func TestAppendChainsAndVerifies(t *testing.T) {
 }
 
 func TestNilIntegrityClaimsNothing(t *testing.T) {
-	s := Open(t.TempDir(), nil)
+	s := Open(testenv.TempDir(t), nil)
 	rec, _, err := s.Append(context.Background(), "ws", "bundle", []byte("x"))
 	if err != nil || rec.Integrity != TamperEvidentOnly {
 		t.Fatalf("record = %+v, %v; want tamper_evident_only", rec, err)
@@ -49,7 +51,7 @@ func TestNilIntegrityClaimsNothing(t *testing.T) {
 }
 
 func TestChangedObjectIsTampered(t *testing.T) {
-	root := t.TempDir()
+	root := testenv.TempDir(t)
 	s := Open(root, nil)
 	appendN(t, s, "ws", 2)
 	rec, err := s.Record(mustHead(t, s, "ws").Record)
@@ -67,7 +69,7 @@ func TestChangedObjectIsTampered(t *testing.T) {
 }
 
 func TestObservedHeadRefusesRollback(t *testing.T) {
-	root := t.TempDir()
+	root := testenv.TempDir(t)
 	s := Open(root, nil)
 	appendN(t, s, "ws", 2)
 	old, _ := os.ReadFile(headPath(root, "ws"))
@@ -86,11 +88,11 @@ func TestObservedHeadRefusesRollback(t *testing.T) {
 // A writer that owns the whole store can build a self-consistent history. The
 // chain alone accepts it; only a head this process already observed refuses it.
 func TestRewrittenHistoryIsDetectedOnlyAgainstObservedHead(t *testing.T) {
-	root := t.TempDir()
+	root := testenv.TempDir(t)
 	s := Open(root, nil)
 	appendN(t, s, "ws", 2)
 
-	forger := Open(t.TempDir(), nil)
+	forger := Open(testenv.TempDir(t), nil)
 	for _, p := range []string{"forged-1", "forged-2", "forged-3"} {
 		if _, _, err := forger.Append(context.Background(), "ws", "bundle", []byte(p)); err != nil {
 			t.Fatal(err)
@@ -107,7 +109,7 @@ func TestRewrittenHistoryIsDetectedOnlyAgainstObservedHead(t *testing.T) {
 }
 
 func TestDeletedHeadAfterObservationIsTampered(t *testing.T) {
-	root := t.TempDir()
+	root := testenv.TempDir(t)
 	s := Open(root, nil)
 	appendN(t, s, "ws", 1)
 	if err := os.Remove(headPath(root, "ws")); err != nil {
@@ -122,7 +124,7 @@ func TestDeletedHeadAfterObservationIsTampered(t *testing.T) {
 }
 
 func TestStreamNameCannotEscape(t *testing.T) {
-	s := Open(t.TempDir(), nil)
+	s := Open(testenv.TempDir(t), nil)
 	for _, name := range []string{"", "../x", "a/b", "A", `a\b`} {
 		if _, _, err := s.Append(context.Background(), name, "bundle", nil); !errors.Is(err, ErrInvalidStream) {
 			t.Errorf("Append(%q) = %v, want ErrInvalidStream", name, err)
@@ -131,7 +133,7 @@ func TestStreamNameCannotEscape(t *testing.T) {
 }
 
 func TestUnwritableRootIsTyped(t *testing.T) {
-	file := filepath.Join(t.TempDir(), "file")
+	file := filepath.Join(testenv.TempDir(t), "file")
 	if err := os.WriteFile(file, nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -199,7 +201,7 @@ func TestVerifyFollowsReferencedObjects(t *testing.T) {
 		"changed": func(path string) error { return os.WriteFile(path, []byte("other"), 0o600) },
 	} {
 		t.Run(name, func(t *testing.T) {
-			root := t.TempDir()
+			root := testenv.TempDir(t)
 			s := Open(root, nil)
 			ref := appendWithRef(t, s)
 			if _, err := Open(root, nil).Verify("ws"); err != nil {
@@ -218,7 +220,7 @@ func TestVerifyFollowsReferencedObjects(t *testing.T) {
 }
 
 func TestAppendRefusesAReferenceTheStoreDoesNotHold(t *testing.T) {
-	s := Open(t.TempDir(), nil)
+	s := Open(testenv.TempDir(t), nil)
 	_, _, err := s.AppendWithRefs(context.Background(), "ws", "bundle", []byte("p"), []Digest{DigestOf([]byte("never stored"))})
 	if !errors.Is(err, ErrNotFound) {
 		t.Fatalf("err = %v, want ErrNotFound", err)

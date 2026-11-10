@@ -4,10 +4,12 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"reasonix/internal/base/testenv"
 )
 
 func TestTheScriptIsWrittenUnderAContentAddressedNameAndRepairedIfChanged(t *testing.T) {
-	dir := t.TempDir()
+	dir := testenv.TempDir(t)
 	path, err := WriteScript(dir)
 	if err != nil || filepath.Base(path) != ScriptName() {
 		t.Fatalf("path = %q, %v", path, err)

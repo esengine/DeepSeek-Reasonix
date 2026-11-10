@@ -2,6 +2,7 @@ package sessionstore
 
 import (
 	"path/filepath"
+	"reasonix/internal/base/testenv"
 	"testing"
 
 	"reasonix/internal/contract/provider"
@@ -10,7 +11,7 @@ import (
 func TestInterruptedStreamFailureSurvivesSaveLoad(t *testing.T) {
 	for _, cause := range []provider.StreamFailureCause{"", provider.StreamFailureInvalidFunctionCall, provider.StreamFailureUnfinishedFunctionCall} {
 		t.Run(string(cause), func(t *testing.T) {
-			path := filepath.Join(t.TempDir(), "session.jsonl")
+			path := filepath.Join(testenv.TempDir(t), "session.jsonl")
 			s := NewSession("system")
 			s.Add(provider.Message{Role: provider.RoleUser, Content: "run"})
 			s.Add(provider.Message{Role: provider.RoleTool, ToolCallID: provider.LocalOnlyToolID, Name: provider.LocalOnlyToolName, LocalOnly: true, InterruptedTurn: &provider.InterruptedTurnRecovery{Pending: true, StreamFailure: cause}})

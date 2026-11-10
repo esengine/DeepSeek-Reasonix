@@ -4,6 +4,8 @@ import (
 	"os"
 	"strings"
 	"testing"
+
+	"reasonix/internal/base/testenv"
 )
 
 func labelOf(e ProviderEntry, model string) string { return e.ModelShort(model) }
@@ -51,7 +53,7 @@ func TestHideModelPrefixRoundTripsThroughTheConfigFile(t *testing.T) {
 	if !strings.Contains(out, "hide_model_prefix = true") {
 		t.Fatalf("not rendered:\n%s", out)
 	}
-	path := t.TempDir() + "/config.toml"
+	path := testenv.TempDir(t) + "/config.toml"
 	if err := os.WriteFile(path, []byte(out), 0o600); err != nil {
 		t.Fatal(err)
 	}

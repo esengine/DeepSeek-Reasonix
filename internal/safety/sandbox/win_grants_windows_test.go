@@ -6,13 +6,15 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"reasonix/internal/base/testenv"
 )
 
 // The real DACL edit, on a real directory: the SID appears on the root and on a
 // file made after, and is gone after a revoke.
 func TestWindowsGrantOpsEditARealDACL(t *testing.T) {
 	ops := WindowsGrantOps()
-	root := t.TempDir()
+	root := testenv.TempDir(t)
 	sid := newSyntheticSID()
 	if ok, err := ops.Granted(root, sid); err != nil || ok {
 		t.Fatalf("before: granted=%v err=%v", ok, err)
@@ -42,11 +44,11 @@ func TestWindowsGrantOpsEditARealDACL(t *testing.T) {
 }
 
 func TestAGrantBookOverRealDACLsRepairsAfterAnExternalRemoval(t *testing.T) {
-	b, err := OpenGrantBook(t.TempDir(), WindowsGrantOps())
+	b, err := OpenGrantBook(testenv.TempDir(t), WindowsGrantOps())
 	if err != nil {
 		t.Fatal(err)
 	}
-	root := t.TempDir()
+	root := testenv.TempDir(t)
 	if err := b.Ensure(root); err != nil {
 		t.Fatal(err)
 	}

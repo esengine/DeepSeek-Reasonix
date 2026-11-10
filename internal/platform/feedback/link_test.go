@@ -11,6 +11,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"reasonix/internal/base/testenv"
 )
 
 type linkStub struct {
@@ -36,7 +38,7 @@ func linkService(t *testing.T, h http.Handler, withInstall bool, assertion ...st
 	t.Helper()
 	srv := httptest.NewServer(h)
 	t.Cleanup(srv.Close)
-	cfg := Config{Home: t.TempDir(), Base: srv.URL, Backoff: []time.Duration{}}
+	cfg := Config{Home: testenv.TempDir(t), Base: srv.URL, Backoff: []time.Duration{}}
 	if len(assertion) > 0 {
 		cfg.Assert = func(context.Context) (string, error) {
 			if assertion[0] == "" {

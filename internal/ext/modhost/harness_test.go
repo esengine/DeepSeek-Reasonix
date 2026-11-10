@@ -12,6 +12,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"reasonix/internal/base/testenv"
 )
 
 func needNode(t *testing.T) string {
@@ -74,7 +76,7 @@ func (h *fakeHost) waitStderr(want string) string {
 func startHost(t *testing.T, module string, cfg map[string]any) *fakeHost {
 	t.Helper()
 	node := needNode(t)
-	script, err := WriteScript(t.TempDir())
+	script, err := WriteScript(testenv.TempDir(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -82,7 +84,7 @@ func startHost(t *testing.T, module string, cfg map[string]any) *fakeHost {
 		cfg = map[string]any{}
 	}
 	if _, ok := cfg["stateDir"]; !ok {
-		cfg["stateDir"] = t.TempDir()
+		cfg["stateDir"] = testenv.TempDir(t)
 	}
 	raw, _ := json.Marshal(cfg)
 	abs, _ := filepath.Abs(module)
@@ -176,7 +178,7 @@ func (h *fakeHost) initialize() map[string]any {
 	h.t.Helper()
 	res := h.call("extension/initialize", map[string]any{
 		"protocolVersion": "2", "protocolId": "reasonix.extension.v2", "manifest": map[string]any{},
-		"session":      map[string]any{"sessionId": "s1", "workspaceRoot": h.t.TempDir(), "generation": 1},
+		"session":      map[string]any{"sessionId": "s1", "workspaceRoot": testenv.TempDir(h.t), "generation": 1},
 		"capabilities": map[string]any{"contentRefs": true, "uiHost": "desktop", "protocolVersion": "2"},
 	}, 20*time.Second)
 	if res["error"] == nil {
@@ -199,7 +201,7 @@ func (h *fakeHost) intercept(event string, payload any) map[string]any {
 
 func writeMod(t *testing.T, name, src string) string {
 	t.Helper()
-	p := filepath.Join(t.TempDir(), name)
+	p := filepath.Join(testenv.TempDir(t), name)
 	if err := os.WriteFile(p, []byte(src), 0o600); err != nil {
 		t.Fatal(err)
 	}

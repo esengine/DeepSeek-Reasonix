@@ -38,7 +38,7 @@ func storageFixture(t *testing.T, text string) Repo {
 func TestHostStorageEnvironment(t *testing.T) {
 	for _, key := range []string{"GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY", "GIT_ALTERNATE_OBJECT_DIRECTORIES"} {
 		t.Run(key, func(t *testing.T) {
-			t.Setenv(key, filepath.Join(t.TempDir(), "ambient"))
+			t.Setenv(key, filepath.Join(testenv.TempDir(t), "ambient"))
 			for _, entry := range Env() {
 				name, _, _ := strings.Cut(entry, "=")
 				if strings.EqualFold(name, key) {
@@ -91,7 +91,7 @@ func TestHostExplicitStorageControls(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		ambient := filepath.Join(t.TempDir(), "ambient-index")
+		ambient := filepath.Join(testenv.TempDir(t), "ambient-index")
 		if err := os.WriteFile(ambient, []byte("not an index"), 0o600); err != nil {
 			t.Fatal(err)
 		}
@@ -99,7 +99,7 @@ func TestHostExplicitStorageControls(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(repo.WorkTree, "file.txt"), []byte("after\n"), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		private := filepath.Join(t.TempDir(), "private-index")
+		private := filepath.Join(testenv.TempDir(t), "private-index")
 		if err := repo.StageAll(t.Context(), "GIT_INDEX_FILE="+private); err != nil {
 			t.Fatal(err)
 		}
@@ -121,7 +121,7 @@ func TestHostExplicitStorageControls(t *testing.T) {
 	t.Run("explicit_object_directory", func(t *testing.T) {
 		repo := storageFixture(t, "source\n")
 		outside := testenv.TempDir(t)
-		t.Setenv("GIT_OBJECT_DIRECTORY", filepath.Join(t.TempDir(), "missing"))
+		t.Setenv("GIT_OBJECT_DIRECTORY", filepath.Join(testenv.TempDir(t), "missing"))
 		cmd := repo.Command(t.Context(), "hash-object", "-w", "--stdin")
 		cmd.Env = append(cmd.Env, "GIT_OBJECT_DIRECTORY="+outside)
 		cmd.Stdin = strings.NewReader("explicit host object\n")

@@ -7,6 +7,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"reasonix/internal/base/testenv"
 )
 
 // Worktree creation adds with --no-checkout and populates with a reset run
@@ -28,12 +30,12 @@ func TestNoCheckoutThenResetSeesConditionalInclude(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newRepoFixture(t, "f.txt filter=pwn\n", map[string]string{"f.txt": "hello\n"})
 			p := f.payload()
-			evil := filepath.Join(t.TempDir(), "evil.cfg")
+			evil := filepath.Join(testenv.TempDir(t), "evil.cfg")
 			if err := os.WriteFile(evil, []byte("[filter \"pwn\"]\n\tsmudge = "+p+"\n\tclean = "+p+"\n\tprocess = "+p+"\n"), 0o644); err != nil {
 				t.Fatal(err)
 			}
 			f.appendConfig("config", "[includeIf \""+tc.cond+"\"]\n\tpath = "+evil+"\n")
-			dst := filepath.Join(t.TempDir(), "linked")
+			dst := filepath.Join(testenv.TempDir(t), "linked")
 			add := tc.add
 			if add == nil {
 				add = func(dst string) []string {
@@ -61,7 +63,7 @@ func TestNoCheckoutThenResetSeesConditionalInclude(t *testing.T) {
 func TestWorktreeRemoveForceSkipsLinkedConfig(t *testing.T) {
 	f := newRepoFixture(t, "f.txt filter=pwn\n", map[string]string{"f.txt": "hello\n"})
 	f.plain("config", "extensions.worktreeConfig", "true")
-	dst := filepath.Join(t.TempDir(), "linked")
+	dst := filepath.Join(testenv.TempDir(t), "linked")
 	f.plain("worktree", "add", "--quiet", "--detach", dst, "HEAD")
 	gitDir := strings.TrimSpace(f.plainIn(dst, "rev-parse", "--absolute-git-dir"))
 	if err := os.WriteFile(filepath.Join(gitDir, "config.worktree"), []byte("[filter \"pwn\"]\n\tclean = "+f.payload()+"\n"), 0o644); err != nil {
@@ -98,7 +100,7 @@ func TestObjectsMissingReportsPartialCloneGaps(t *testing.T) {
 	src.write("a.txt", "3\n")
 	src.plain("commit", "--quiet", "-am", "three")
 	src.plain("config", "uploadpack.allowFilter", "true")
-	clone := filepath.Join(t.TempDir(), "partial")
+	clone := filepath.Join(testenv.TempDir(t), "partial")
 	if out, err := exec.CommandContext(src.ctx, "git", "clone", "--quiet", "--filter=blob:none", "file://"+src.dir, clone).CombinedOutput(); err != nil {
 		t.Fatalf("partial clone: %v: %s", err, out)
 	}

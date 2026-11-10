@@ -6,6 +6,8 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"reasonix/internal/base/testenv"
 )
 
 // A Studio launched with a PATH that lacks %SystemRoot% still has to find the
@@ -18,9 +20,9 @@ func TestFolderCommandFindsExplorerWithoutPath(t *testing.T) {
 	if root == "" {
 		t.Skip("SystemRoot is not set on this machine")
 	}
-	t.Setenv("PATH", t.TempDir())
+	t.Setenv("PATH", testenv.TempDir(t))
 
-	cmd := folderCommand(t.TempDir())
+	cmd := folderCommand(testenv.TempDir(t))
 	if cmd.Err != nil {
 		t.Fatalf("folderCommand resolved no executable: %v", cmd.Err)
 	}

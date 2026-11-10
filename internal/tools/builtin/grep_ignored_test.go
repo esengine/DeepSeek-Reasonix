@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"reasonix/internal/base/testenv"
 )
 
 // ignoredTree is a repository whose only match lives where the ignore rules
@@ -13,7 +15,7 @@ import (
 // "no matches" is at its most misleading.
 func ignoredTree(t *testing.T, needle string) string {
 	t.Helper()
-	root := t.TempDir()
+	root := testenv.TempDir(t)
 	if err := os.MkdirAll(filepath.Join(root, ".git"), 0o755); err != nil {
 		t.Fatal(err)
 	}

@@ -10,12 +10,13 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/contract/event"
 	"reasonix/internal/session/control"
 )
 
 func TestEffectGoalResumeRenewsPlannerBudget(t *testing.T) {
-	home, root := statedBootHome(t), t.TempDir()
+	home, root := statedBootHome(t), testenv.TempDir(t)
 	for n := 1; n <= 4; n++ {
 		writeFile(t, root, fmt.Sprintf("fixture-%d.txt", n), fmt.Sprintf("planner resume fixture %d", n))
 	}

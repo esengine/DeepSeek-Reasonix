@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"reasonix/internal/base/testenv"
 	"strings"
 	"testing"
 
@@ -94,7 +95,7 @@ func TestSessionDisplayIndexIsWrittenCompact(t *testing.T) {
 	msgs := digestFixture(50)
 	digest, _, _ := referenceDigest(msgs, -1)
 	idx := BuildSessionDisplayIndex(msgs, 1, true, digest)
-	path := t.TempDir() + "/s.display.json"
+	path := testenv.TempDir(t) + "/s.display.json"
 	if err := WriteSessionDisplayIndex(path, idx); err != nil {
 		t.Fatal(err)
 	}

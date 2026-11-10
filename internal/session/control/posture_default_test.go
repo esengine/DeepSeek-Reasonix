@@ -6,12 +6,13 @@ import (
 	"path/filepath"
 	"testing"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/contract/config"
 )
 
 // A defaulted session follows the folder's trust; a named one keeps its posture.
 func TestDefaultPostureFollowsTrustUntilNamed(t *testing.T) {
-	home, ws := t.TempDir(), t.TempDir()
+	home, ws := testenv.TempDir(t), testenv.TempDir(t)
 	c := New(Options{WorkspaceRoot: ws, Posture: PostureEvidence{WritesConfined: true, Home: home}})
 	c.ApplyDefaultPosture()
 	if got := c.Posture(); !got.Defaulted || got.Trust != config.WorkspaceTrustUndecided || !got.Trustable || !got.WritesConfined {
@@ -43,7 +44,7 @@ func TestDefaultPostureFollowsTrustUntilNamed(t *testing.T) {
 
 // Without a confining sandbox trust records but the default still asks.
 func TestDefaultPostureAsksWithoutConfinement(t *testing.T) {
-	c := New(Options{WorkspaceRoot: t.TempDir(), Posture: PostureEvidence{Home: t.TempDir()}})
+	c := New(Options{WorkspaceRoot: testenv.TempDir(t), Posture: PostureEvidence{Home: testenv.TempDir(t)}})
 	c.ApplyDefaultPosture()
 	if err := c.DecideWorkspaceTrust(config.WorkspaceTrusted); err != nil {
 		t.Fatal(err)
@@ -57,7 +58,7 @@ func TestDefaultPostureAsksWithoutConfinement(t *testing.T) {
 // that lands first is named and stays, whatever order the two race in.
 func TestTrustAnswerNeverOverridesAConcurrentSwitch(t *testing.T) {
 	for i := range 200 {
-		c := New(Options{WorkspaceRoot: t.TempDir(), Posture: PostureEvidence{WritesConfined: true, Home: t.TempDir()}})
+		c := New(Options{WorkspaceRoot: testenv.TempDir(t), Posture: PostureEvidence{WritesConfined: true, Home: testenv.TempDir(t)}})
 		c.ApplyDefaultPosture()
 		done := make(chan struct{})
 		go func() {
@@ -83,7 +84,7 @@ func TestDecideWorkspaceTrustRefusesHome(t *testing.T) {
 	if err != nil {
 		t.Skip("no home directory")
 	}
-	c := New(Options{WorkspaceRoot: home, Posture: PostureEvidence{WritesConfined: true, Home: t.TempDir()}})
+	c := New(Options{WorkspaceRoot: home, Posture: PostureEvidence{WritesConfined: true, Home: testenv.TempDir(t)}})
 	if err := c.DecideWorkspaceTrust(config.WorkspaceTrusted); !errors.Is(err, ErrUntrustableFolder) {
 		t.Fatalf("trusting home = %v", err)
 	}
@@ -95,10 +96,10 @@ func TestDecideWorkspaceTrustRefusesHome(t *testing.T) {
 // Nothing that holds a home directory, and nothing of Reasonix's own, is
 // trusted as a whole — spelled directly or reached through a symlink.
 func TestTrustableFolderRefusesWhatHoldsHomeOrReasonixState(t *testing.T) {
-	home := t.TempDir()
+	home := testenv.TempDir(t)
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
-	rxHome := filepath.Join(t.TempDir(), "rx")
+	rxHome := filepath.Join(testenv.TempDir(t), "rx")
 	if err := os.MkdirAll(rxHome, 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -107,7 +108,7 @@ func TestTrustableFolderRefusesWhatHoldsHomeOrReasonixState(t *testing.T) {
 	if err := os.MkdirAll(project, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	links := t.TempDir()
+	links := testenv.TempDir(t)
 	linkRoot := filepath.Join(links, "to-root")
 	linkHome := filepath.Join(links, "to-home")
 	canLink := os.Symlink(string(filepath.Separator), linkRoot) == nil && os.Symlink(home, linkHome) == nil

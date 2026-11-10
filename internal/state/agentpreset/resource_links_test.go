@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/contract/agentcomposition"
 )
 
@@ -17,7 +18,7 @@ func linkAsset(t *testing.T, target, path string) {
 }
 
 func TestCaptureDirectoryMaterializesContainedLinks(t *testing.T) {
-	source := t.TempDir()
+	source := testenv.TempDir(t)
 	if err := os.Mkdir(filepath.Join(source, "data"), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -32,7 +33,7 @@ func TestCaptureDirectoryMaterializesContainedLinks(t *testing.T) {
 	linkAsset(t, "data/script.sh", filepath.Join(source, "relative.sh"))
 	linkAsset(t, filepath.Join(source, "data", "script.sh"), filepath.Join(source, "absolute.sh"))
 	linkAsset(t, "data", filepath.Join(source, "alias"))
-	entry := filepath.Join(t.TempDir(), "linked-root")
+	entry := filepath.Join(testenv.TempDir(t), "linked-root")
 	linkAsset(t, source, entry)
 	snapshot, err := CaptureDirectory(entry)
 	if err != nil {
@@ -49,7 +50,7 @@ func TestCaptureDirectoryMaterializesContainedLinks(t *testing.T) {
 	if err := os.RemoveAll(source); err != nil {
 		t.Fatal(err)
 	}
-	store := New(t.TempDir(), t.TempDir())
+	store := New(testenv.TempDir(t), testenv.TempDir(t))
 	root, err := store.Materialize(snapshot)
 	if err != nil {
 		t.Fatal(err)
@@ -68,11 +69,11 @@ func TestCaptureDirectoryMaterializesContainedLinks(t *testing.T) {
 func TestCaptureDirectoryRefusesUnsafeLinks(t *testing.T) {
 	for _, kind := range []string{"escape", "broken", "cycle", "ancestor", "secret", "vcs"} {
 		t.Run(kind, func(t *testing.T) {
-			root := t.TempDir()
+			root := testenv.TempDir(t)
 			target := "missing"
 			switch kind {
 			case "escape":
-				target = filepath.Join(t.TempDir(), "outside")
+				target = filepath.Join(testenv.TempDir(t), "outside")
 				if err := os.WriteFile(target, []byte("outside"), 0o600); err != nil {
 					t.Fatal(err)
 				}
@@ -100,7 +101,7 @@ func TestCaptureDirectoryRefusesUnsafeLinks(t *testing.T) {
 }
 
 func TestCaptureHookFileFlattensContainedLink(t *testing.T) {
-	source := t.TempDir()
+	source := testenv.TempDir(t)
 	if err := os.WriteFile(filepath.Join(source, "data.txt"), []byte("context"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -113,7 +114,7 @@ func TestCaptureHookFileFlattensContainedLink(t *testing.T) {
 	if err := os.Remove(path); err != nil {
 		t.Fatal(err)
 	}
-	linkAsset(t, filepath.Join(t.TempDir(), "outside"), path)
+	linkAsset(t, filepath.Join(testenv.TempDir(t), "outside"), path)
 	if _, _, err := CaptureHookResources([]string{path}); !errors.Is(err, agentcomposition.ErrUnavailable) {
 		t.Fatalf("outside hook link accepted: %v", err)
 	}
@@ -122,16 +123,16 @@ func TestCaptureHookFileFlattensContainedLink(t *testing.T) {
 func TestMaterializeStillRejectsLinkedRetainedFilesAndRoot(t *testing.T) {
 	for _, rootLink := range []bool{false, true} {
 		t.Run(map[bool]string{false: "file", true: "root"}[rootLink], func(t *testing.T) {
-			store := New(t.TempDir(), t.TempDir())
+			store := New(testenv.TempDir(t), testenv.TempDir(t))
 			snapshot := DirectorySnapshot{Files: []AssetFile{{Path: "entry", Data: []byte("same"), Mode: 0o600}}}
 			root, err := store.Materialize(snapshot)
 			if err != nil {
 				t.Fatal(err)
 			}
-			target := filepath.Join(t.TempDir(), "entry")
+			target := filepath.Join(testenv.TempDir(t), "entry")
 			link := filepath.Join(root, "entry")
 			if rootLink {
-				target, link = filepath.Join(t.TempDir(), "moved"), root
+				target, link = filepath.Join(testenv.TempDir(t), "moved"), root
 				if err := os.Rename(root, target); err != nil {
 					t.Fatal(err)
 				}

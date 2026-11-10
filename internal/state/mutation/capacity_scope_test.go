@@ -6,10 +6,12 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"reasonix/internal/base/testenv"
 )
 
 func TestCapacityLeaseCannotAuthorizeFilesystemWrites(t *testing.T) {
-	c := testCoordinator(t, t.TempDir(), t.TempDir())
+	c := testCoordinator(t, testenv.TempDir(t), testenv.TempDir(t))
 	l, err := c.Acquire(t.Context(), Intent{Effect: CapacityOnly, Capacities: []Capacity{capacity("total")}})
 	if err != nil {
 		t.Fatal(err)
@@ -39,7 +41,7 @@ func TestCapacityLeaseCannotAuthorizeFilesystemWrites(t *testing.T) {
 }
 
 func TestCapacityRejectsAmbiguousOrInvalidRequests(t *testing.T) {
-	c := testCoordinator(t, t.TempDir(), t.TempDir())
+	c := testCoordinator(t, testenv.TempDir(t), testenv.TempDir(t))
 	for _, request := range []Intent{
 		{Effect: CapacityOnly},
 		{Effect: CapacityOnly, Paths: []string{"a"}, Capacities: []Capacity{capacity("total")}},

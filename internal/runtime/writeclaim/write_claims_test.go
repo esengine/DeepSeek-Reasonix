@@ -143,7 +143,7 @@ func TestWriteClaimRefusesNetworkPathBeforeAnyLookup(t *testing.T) {
 	if runtime.GOOS != "windows" {
 		t.Skip("network paths are a Windows reading of a path")
 	}
-	root := t.TempDir()
+	root := testenv.TempDir(t)
 	for _, p := range []string{`\\evil\share\x`, `//evil/share/x`, `\\127.0.0.1\C$\Windows\win.ini`} {
 		if _, err := resolveWriteClaimPath(root, p); !errors.Is(err, fileutil.ErrNetworkPathOutsideScope) {
 			t.Errorf("resolveWriteClaimPath(%q) = %v, want ErrNetworkPathOutsideScope", p, err)

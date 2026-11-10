@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/contract/tool"
 )
 
@@ -140,7 +141,7 @@ func startTaskToolWith(t *testing.T, s *taskServer, clock *clockLog, timeouts ma
 	t.Cleanup(srv.Close)
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	t.Cleanup(cancel)
-	root := t.TempDir()
+	root := testenv.TempDir(t)
 	host, tools, err := StartAll(ctx, []Spec{{Name: "m", Type: "http", URL: srv.URL, WorkspaceRoot: root, ToolTimeouts: timeouts}})
 	if err != nil {
 		t.Fatalf("StartAll: %v", err)

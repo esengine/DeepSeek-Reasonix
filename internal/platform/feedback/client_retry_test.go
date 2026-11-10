@@ -9,6 +9,8 @@ import (
 	"net/http/httptest"
 	"testing"
 	"time"
+
+	"reasonix/internal/base/testenv"
 )
 
 func TestSubmitTransientResponseRetry(t *testing.T) {
@@ -45,7 +47,7 @@ func TestSubmitTransientResponseRetry(t *testing.T) {
 				_, _ = io.WriteString(w, tc.body)
 			}))
 			defer server.Close()
-			svc, err := New(Config{Home: t.TempDir(), Base: server.URL, Backoff: []time.Duration{time.Millisecond, time.Millisecond}})
+			svc, err := New(Config{Home: testenv.TempDir(t), Base: server.URL, Backoff: []time.Duration{time.Millisecond, time.Millisecond}})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -74,7 +76,7 @@ func TestTransientResponseDoesNotRetryReplyOrRead(t *testing.T) {
 			count := 0
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { count++; w.WriteHeader(http.StatusServiceUnavailable) }))
 			defer server.Close()
-			svc, _ := New(Config{Home: t.TempDir(), Base: server.URL, Backoff: []time.Duration{time.Millisecond}})
+			svc, _ := New(Config{Home: testenv.TempDir(t), Base: server.URL, Backoff: []time.Duration{time.Millisecond}})
 			var err error
 			if operation == "reply" {
 				_, err = svc.postReply(context.Background(), "install", "token", "FB-7K3M-9QX2", "neutral reply")
@@ -97,7 +99,7 @@ func TestSubmitRedirectRefusalIsNotRetried(t *testing.T) {
 		http.Redirect(w, r, target.URL, http.StatusTemporaryRedirect)
 	}))
 	defer server.Close()
-	svc, _ := New(Config{Home: t.TempDir(), Base: server.URL, Backoff: []time.Duration{time.Millisecond}})
+	svc, _ := New(Config{Home: testenv.TempDir(t), Base: server.URL, Backoff: []time.Duration{time.Millisecond}})
 	_, err := svc.post(context.Background(), wireSubmit{IdempotencyKey: "neutral-key"}, "")
 	if !errors.Is(err, ErrUnavailable) || count != 1 || targets != 0 {
 		t.Fatalf("error = %v; requests = %d; targets = %d", err, count, targets)
@@ -108,7 +110,7 @@ func TestSubmitTransientBackoffCancellation(t *testing.T) {
 	count := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { count++; w.WriteHeader(http.StatusServiceUnavailable) }))
 	defer server.Close()
-	svc, _ := New(Config{Home: t.TempDir(), Base: server.URL, Backoff: []time.Duration{time.Hour}})
+	svc, _ := New(Config{Home: testenv.TempDir(t), Base: server.URL, Backoff: []time.Duration{time.Hour}})
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	err := svc.withRetry(ctx, func() error {

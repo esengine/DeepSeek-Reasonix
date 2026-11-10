@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reasonix/internal/base/testenv"
 	"testing"
 
 	"reasonix/internal/contract/agentcomposition"
@@ -16,7 +17,7 @@ func TestLiveCompositionStorageAndArchiveBoundary(t *testing.T) {
 	b.Seal()
 	s := NewSession("fixed prompt")
 	s.BindComposition(b)
-	path := filepath.Join(t.TempDir(), "session.jsonl")
+	path := filepath.Join(testenv.TempDir(t), "session.jsonl")
 	if err := s.SaveSnapshot(path); err != nil {
 		t.Fatal(err)
 	}

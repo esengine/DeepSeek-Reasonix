@@ -8,12 +8,13 @@ import (
 	"strings"
 	"testing"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/contract/tool"
 )
 
 func pinSpec(t *testing.T, authorized bool) Spec {
 	t.Helper()
-	return Spec{Name: "srv", Authorized: authorized, StateDir: filepath.Join(t.TempDir(), "ws", "srv")}
+	return Spec{Name: "srv", Authorized: authorized, StateDir: filepath.Join(testenv.TempDir(t), "ws", "srv")}
 }
 
 func pinTool(name, desc string) mcpTool {
@@ -182,7 +183,7 @@ func TestToolPinsEmptyFirstListingRecordsNothing(t *testing.T) {
 }
 
 func TestToolPinsUserServersShareARecordAcrossWorkspaces(t *testing.T) {
-	root := t.TempDir()
+	root := testenv.TempDir(t)
 	a := Spec{Name: "srv", ConfigSource: "user_config", StateDir: filepath.Join(root, "mcp-state", "ws1", "srv")}
 	b := Spec{Name: "srv", ConfigSource: "user_config", StateDir: filepath.Join(root, "mcp-state", "ws2", "srv")}
 	if toolPinsPath(a) != toolPinsPath(b) {
@@ -213,7 +214,7 @@ func TestHeldDigestBindsNamesAndDefinitionsNotOrder(t *testing.T) {
 }
 
 func TestPinFileRefusesAnythingButAFullHexKey(t *testing.T) {
-	dir := t.TempDir()
+	dir := testenv.TempDir(t)
 	for _, key := range []string{"", "../x", strings.Repeat("a", 63), strings.Repeat("A", 64), strings.Repeat("a", 64) + "/.."} {
 		if p := pinFileIn(dir, key); p != "" {
 			t.Errorf("key %q produced %s", key, p)

@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"slices"
 	"testing"
+
+	"reasonix/internal/base/testenv"
 )
 
 func TestCommandNamesFollowsPATHEXTOnlyOnWindows(t *testing.T) {
@@ -23,7 +25,7 @@ func TestCommandNamesFollowsPATHEXTOnlyOnWindows(t *testing.T) {
 }
 
 func TestLookPathInSkipsRelativeEntriesAndFindsTheSibling(t *testing.T) {
-	dir := t.TempDir()
+	dir := testenv.TempDir(t)
 	if err := os.WriteFile(filepath.Join(dir, "mcp.cmd"), []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}

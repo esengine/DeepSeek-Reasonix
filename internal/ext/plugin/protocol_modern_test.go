@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/contract/tool"
 )
 
@@ -143,7 +144,7 @@ func TestModernHTTPServerIsReachedWithoutAHandshake(t *testing.T) {
 	defer srv.Close()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	host, tools, err := StartAll(ctx, []Spec{{Name: "m", Type: "http", URL: srv.URL, WorkspaceRoot: t.TempDir()}})
+	host, tools, err := StartAll(ctx, []Spec{{Name: "m", Type: "http", URL: srv.URL, WorkspaceRoot: testenv.TempDir(t)}})
 	if err != nil {
 		t.Fatalf("StartAll: %v", err)
 	}
@@ -312,7 +313,7 @@ func TestModernInputRoundIsBounded(t *testing.T) {
 	defer srv.Close()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	host, tools, err := StartAll(ctx, []Spec{{Name: "m", Type: "http", URL: srv.URL, WorkspaceRoot: t.TempDir()}})
+	host, tools, err := StartAll(ctx, []Spec{{Name: "m", Type: "http", URL: srv.URL, WorkspaceRoot: testenv.TempDir(t)}})
 	if err != nil {
 		t.Fatalf("StartAll: %v", err)
 	}

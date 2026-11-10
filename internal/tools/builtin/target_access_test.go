@@ -6,15 +6,16 @@ import (
 	"strings"
 	"testing"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/contract/tool"
 )
 
 func TestAReadRefusalNamesTheTargetAndWhyWithoutNamingTheProtection(t *testing.T) {
-	root, err := filepath.EvalSymlinks(t.TempDir())
+	root, err := filepath.EvalSymlinks(testenv.TempDir(t))
 	if err != nil {
 		t.Fatal(err)
 	}
-	outside := filepath.Join(t.TempDir(), "notes.txt")
+	outside := filepath.Join(testenv.TempDir(t), "notes.txt")
 	err = checkReadTargetAccess([]string{root}, nil, outside)
 	var refusal tool.Refusal
 	if !errors.As(err, &refusal) || refusal.Code != CodeReadOutsideScope {

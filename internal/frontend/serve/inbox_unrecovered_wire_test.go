@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/session/control"
 	"reasonix/internal/state/sessioninbox"
 	"reasonix/internal/state/store"
@@ -54,7 +55,7 @@ func decodeInboxBody(t *testing.T, rec *httptest.ResponseRecorder) map[string]an
 // all. An unreadable queue whose bodies are still on disk must reach the wire
 // as unknown, not as the empty list that hides them.
 func TestInboxWireSaysUnreadableNotEmpty(t *testing.T) {
-	dir := t.TempDir()
+	dir := testenv.TempDir(t)
 	session := filepath.Join(dir, "s.jsonl")
 	if err := os.WriteFile(session, []byte("{}\n"), 0o644); err != nil {
 		t.Fatal(err)
@@ -87,7 +88,7 @@ func TestInboxWireSaysUnreadableNotEmpty(t *testing.T) {
 // An empty-but-readable queue is the case the unknown marker must not touch:
 // the window has to keep drawing "nothing waiting" there.
 func TestInboxWireEmptyQueueDoesNotClaimUnknown(t *testing.T) {
-	dir := t.TempDir()
+	dir := testenv.TempDir(t)
 	session := filepath.Join(dir, "s.jsonl")
 	if err := os.WriteFile(session, []byte("{}\n"), 0o644); err != nil {
 		t.Fatal(err)

@@ -4,11 +4,13 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"reasonix/internal/base/testenv"
 )
 
 func TestHeldPathsCoverOnlyTheSameFileAcrossCaseSpellings(t *testing.T) {
-	root := t.TempDir()
-	c, err := New(root, t.TempDir(), nil)
+	root := testenv.TempDir(t)
+	c, err := New(root, testenv.TempDir(t), nil)
 	if err != nil {
 		t.Fatal(err)
 	}

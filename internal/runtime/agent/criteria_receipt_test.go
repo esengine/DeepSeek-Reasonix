@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"reasonix/internal/base/diff"
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/contract/event"
 	"reasonix/internal/contract/provider"
 	"reasonix/internal/contract/tool"
@@ -99,7 +100,7 @@ func TestRewrittenPytestCaseIsReportedNotHeld(t *testing.T) {
 	after := "def test_median():\n    assert median([3, 1, 2]) == 1\n"
 	reg := tool.NewRegistry()
 	reg.Add(previewingEdit{change: diff.Build("tests/test_calc.py", before, after, diff.Modify)})
-	a := New(nil, reg, sessionstore.NewSession(""), Options{ArchiveDir: t.TempDir(),
+	a := New(nil, reg, sessionstore.NewSession(""), Options{ArchiveDir: testenv.TempDir(t),
 		CheckTargetAccess: allowTestFileAccess,
 	}, event.Discard)
 

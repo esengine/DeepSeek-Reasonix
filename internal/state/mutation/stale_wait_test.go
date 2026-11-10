@@ -9,11 +9,12 @@ import (
 	"testing"
 	"time"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/state/workspacelease"
 )
 
 func TestStaleWaiterLeavesBeforeCurrentWriterReleases(t *testing.T) {
-	root, state := t.TempDir(), t.TempDir()
+	root, state := testenv.TempDir(t), testenv.TempDir(t)
 	path := filepath.Join(root, "shared")
 	holder := testCoordinator(t, root, state)
 	held, err := holder.Acquire(t.Context(), intent(path))
@@ -58,7 +59,7 @@ func TestStaleWaiterLeavesBeforeCurrentWriterReleases(t *testing.T) {
 }
 
 func TestAlreadyStaleRequestDoesNotEnterCompatibilityPreparation(t *testing.T) {
-	root, state := t.TempDir(), t.TempDir()
+	root, state := testenv.TempDir(t), testenv.TempDir(t)
 	path := filepath.Join(root, "shared")
 	if err := os.WriteFile(path, []byte("new"), 0600); err != nil {
 		t.Fatal(err)

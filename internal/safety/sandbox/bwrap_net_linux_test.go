@@ -8,13 +8,15 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"reasonix/internal/base/testenv"
 )
 
 // netlessBwrap is a bwrap that starts a namespace unless asked to unshare the
 // network, as a container without CAP_NET_ADMIN behaves.
 func netlessBwrap(t *testing.T) {
 	t.Helper()
-	dir := t.TempDir()
+	dir := testenv.TempDir(t)
 	script := "#!/bin/sh\nfor a in \"$@\"; do [ \"$a\" = --unshare-net ] && exit 1; done\nexit 0\n"
 	if err := os.WriteFile(filepath.Join(dir, "bwrap"), []byte(script), 0o755); err != nil {
 		t.Fatal(err)

@@ -3,13 +3,15 @@ package config
 import (
 	"path/filepath"
 	"testing"
+
+	"reasonix/internal/base/testenv"
 )
 
 func trustStore(t *testing.T) (*ActivationStore, string) {
 	t.Helper()
-	home := t.TempDir()
+	home := testenv.TempDir(t)
 	t.Setenv("REASONIX_HOME", home)
-	return DefaultActivationStore(), t.TempDir()
+	return DefaultActivationStore(), testenv.TempDir(t)
 }
 
 // A .mcp.json is checked in, so whoever wrote the repo chose the command. It
@@ -88,7 +90,7 @@ func TestApprovalDoesNotTravelToAnotherProject(t *testing.T) {
 	if err := store.SetServerEnabled(entry, root, ActivationProject, true); err != nil {
 		t.Fatal(err)
 	}
-	elsewhere := filepath.Join(t.TempDir(), "other")
+	elsewhere := filepath.Join(testenv.TempDir(t), "other")
 	if enabled, _ := store.IsEnabled(entry, elsewhere); enabled {
 		t.Fatal("an approval in one project started a same-named server in another")
 	}

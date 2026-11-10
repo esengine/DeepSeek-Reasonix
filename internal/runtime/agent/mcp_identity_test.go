@@ -9,6 +9,7 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/contract/event"
 	"reasonix/internal/contract/provider"
 	"reasonix/internal/contract/tool"
@@ -51,7 +52,7 @@ func TestDirectMCPInvocationUsesExecutedIdentity(t *testing.T) {
 		{"github", "review", ""},
 	} {
 		t.Run(tc.server+"/"+tc.raw, func(t *testing.T) {
-			t.Setenv("REASONIX_CACHE_HOME", t.TempDir())
+			t.Setenv("REASONIX_CACHE_HOME", testenv.TempDir(t))
 			var calls atomic.Int32
 			var fail atomic.Bool
 			srv := identityMCPServer(t, tc.raw, &calls, &fail)

@@ -4,10 +4,12 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"reasonix/internal/base/testenv"
 )
 
 func TestProseMutationPathScope(t *testing.T) {
-	root, outside := t.TempDir(), t.TempDir()
+	root, outside := testenv.TempDir(t), testenv.TempDir(t)
 	for _, tc := range []struct {
 		name string
 		root string
@@ -38,7 +40,7 @@ func TestProseMutationPathScope(t *testing.T) {
 }
 
 func TestProseMutationPathRejectsLinkedAncestor(t *testing.T) {
-	root, outside := t.TempDir(), t.TempDir()
+	root, outside := testenv.TempDir(t), testenv.TempDir(t)
 	if err := os.Symlink(outside, filepath.Join(root, "alias")); err != nil {
 		t.Skipf("symlink creation unavailable: %v", err)
 	}

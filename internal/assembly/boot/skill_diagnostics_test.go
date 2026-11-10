@@ -10,14 +10,15 @@ import (
 	"testing"
 	"time"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/contract/config"
 	"reasonix/internal/contract/event"
 	"reasonix/internal/ext/skill"
 )
 
 func TestSkillDiagnosticsReachRendererAcrossRediscovery(t *testing.T) {
-	root := t.TempDir()
-	home := t.TempDir()
+	root := testenv.TempDir(t)
+	home := testenv.TempDir(t)
 	t.Setenv("REASONIX_HOME", home)
 	var raw bytes.Buffer
 	var notices []event.Event
@@ -72,8 +73,8 @@ func TestSkillDiagnosticDestinationsAtStartup(t *testing.T) {
 	for _, interactive := range []bool{false, true} {
 		for _, suppressed := range []bool{false, true} {
 			t.Run(fmt.Sprintf("renderer=%t/suppressed=%t", interactive, suppressed), func(t *testing.T) {
-				root := t.TempDir()
-				t.Setenv("REASONIX_HOME", t.TempDir())
+				root := testenv.TempDir(t)
+				t.Setenv("REASONIX_HOME", testenv.TempDir(t))
 				dir := filepath.Join(root, ".reasonix", "skills", "startup-warning")
 				if err := os.MkdirAll(dir, 0700); err != nil {
 					t.Fatal(err)

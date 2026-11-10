@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/state/sessionstore"
 	"reasonix/internal/state/sessionv4/v4fixture"
 )
@@ -20,9 +21,9 @@ func TestRemoveV4SessionStaysRemoved(t *testing.T) {
 			name = "imported"
 		}
 		t.Run(name, func(t *testing.T) {
-			t.Setenv("REASONIX_HOME", t.TempDir())
-			t.Setenv("REASONIX_STATE_HOME", t.TempDir())
-			root := t.TempDir()
+			t.Setenv("REASONIX_HOME", testenv.TempDir(t))
+			t.Setenv("REASONIX_STATE_HOME", testenv.TempDir(t))
+			root := testenv.TempDir(t)
 			rememberWorkspace(root)
 			dir := SessionDirFor(root)
 			f := v4fixture.New(t)

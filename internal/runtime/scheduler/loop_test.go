@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"reasonix/internal/base/filelock"
+	"reasonix/internal/base/testenv"
 )
 
 func runLoop(t *testing.T, l *Loop, d time.Duration) {
@@ -77,7 +78,7 @@ func TestALoopTicksUnderTheLockAndReleasesIt(t *testing.T) {
 
 // Two kernels on one machine: the OS lock lets one tick at a time.
 func TestTwoLoopsOnOneLockFileNeverTickTogether(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "scheduler.lock")
+	path := filepath.Join(testenv.TempDir(t), "scheduler.lock")
 	var inside, overlap, ticks atomic.Int32
 	mk := func() *Loop {
 		return &Loop{

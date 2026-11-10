@@ -8,10 +8,12 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"reasonix/internal/base/testenv"
 )
 
 func TestAttachmentStreamUserLimitRefusesExtraByteAndCleansPartial(t *testing.T) {
-	home, root := t.TempDir(), t.TempDir()
+	home, root := testenv.TempDir(t), testenv.TempDir(t)
 	t.Setenv("REASONIX_HOME", home)
 	if err := os.WriteFile(filepath.Join(home, "config.toml"), []byte("[attachments]\nmax_stream_bytes = 8\n"), 0o600); err != nil {
 		t.Fatal(err)
@@ -57,7 +59,7 @@ func TestAttachmentStreamUserLimitRefusesExtraByteAndCleansPartial(t *testing.T)
 }
 
 func TestAttachmentStreamExplicitUnlimitedAndMalformedUserConfig(t *testing.T) {
-	home, root := t.TempDir(), t.TempDir()
+	home, root := testenv.TempDir(t), testenv.TempDir(t)
 	t.Setenv("REASONIX_HOME", home)
 	path := filepath.Join(home, "config.toml")
 	if err := os.WriteFile(path, []byte("[attachments]\nmax_stream_bytes=0\n"), 0o600); err != nil {

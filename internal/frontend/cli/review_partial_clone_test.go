@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/platform/gitcmd"
 )
 
@@ -17,7 +18,7 @@ func partialClone(t *testing.T) string {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not installed")
 	}
-	src := t.TempDir()
+	src := testenv.TempDir(t)
 	run := func(dir string, args ...string) {
 		t.Helper()
 		cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
@@ -35,7 +36,7 @@ func partialClone(t *testing.T) string {
 		run(src, "commit", "-q", "-m", body)
 	}
 	run(src, "config", "uploadpack.allowFilter", "true")
-	clone := filepath.Join(t.TempDir(), "partial")
+	clone := filepath.Join(testenv.TempDir(t), "partial")
 	run(src, "clone", "-q", "--filter=blob:none", "file://"+src, clone)
 	return clone
 }

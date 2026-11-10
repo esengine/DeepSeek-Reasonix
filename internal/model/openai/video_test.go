@@ -16,6 +16,7 @@ import (
 	"sync"
 	"testing"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/contract/provider"
 )
 
@@ -94,7 +95,7 @@ func (v *videoServer) provider(t *testing.T, protocol string) provider.Provider 
 
 func writeVideo(t *testing.T, content string) provider.VideoRef {
 	t.Helper()
-	path := filepath.Join(t.TempDir(), "clip.mp4")
+	path := filepath.Join(testenv.TempDir(t), "clip.mp4")
 	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -256,7 +257,7 @@ func swapAfterOpen(t *testing.T, ref provider.VideoRef, other string) {
 	if runtime.GOOS == "windows" {
 		t.Skip("Windows does not let a file that is open be replaced, so the swap cannot happen; the system guarantees what this test checks")
 	}
-	elsewhere := filepath.Join(t.TempDir(), "other.mp4")
+	elsewhere := filepath.Join(testenv.TempDir(t), "other.mp4")
 	if err := os.WriteFile(elsewhere, []byte(other), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -320,7 +321,7 @@ func TestUploadIsAbortedWhenTheBytesStopMatchingMidStream(t *testing.T) {
 // The path may already be another file when it is opened. Nothing of it leaves.
 func swapBeforeOpen(t *testing.T, other string) {
 	t.Helper()
-	elsewhere := filepath.Join(t.TempDir(), "other.mp4")
+	elsewhere := filepath.Join(testenv.TempDir(t), "other.mp4")
 	if err := os.WriteFile(elsewhere, []byte(other), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -363,7 +364,7 @@ func TestUploadSendsNotAByteOfAFileThePathBecameBeforeItWasOpened(t *testing.T) 
 }
 
 func TestAReferenceNoToolGrantedSendsNotAByteOfItsFile(t *testing.T) {
-	outside := filepath.Join(t.TempDir(), "secret.mp4")
+	outside := filepath.Join(testenv.TempDir(t), "secret.mp4")
 	content := "NOT-A-VIDEO-BUT-READABLE-SECRET"
 	if err := os.WriteFile(outside, []byte(content), 0o600); err != nil {
 		t.Fatal(err)
@@ -387,7 +388,7 @@ func TestAReferenceNoToolGrantedSendsNotAByteOfItsFile(t *testing.T) {
 func TestAGrantedHashIsOpenedAtTheGrantedPathNotTheOneTheReferenceNames(t *testing.T) {
 	v := newVideoServer(t)
 	ref := writeVideo(t, "GRANTED-BYTES")
-	other := filepath.Join(t.TempDir(), "other.mp4")
+	other := filepath.Join(testenv.TempDir(t), "other.mp4")
 	if err := os.WriteFile(other, []byte("OTHER"), 0o600); err != nil {
 		t.Fatal(err)
 	}

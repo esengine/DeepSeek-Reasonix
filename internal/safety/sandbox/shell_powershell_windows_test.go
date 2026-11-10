@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"reasonix/internal/base/proc"
+	"reasonix/internal/base/testenv"
 )
 
 // installedPowerShells returns every real PowerShell on this host, 5.1 first.
@@ -83,7 +84,7 @@ func assertUTF8File(t *testing.T, path, want string, bom bool) {
 func TestPowerShellToolRedirectWritesUTF8(t *testing.T) {
 	for _, sh := range installedPowerShells(t) {
 		t.Run(filepath.Base(sh.Path), func(t *testing.T) {
-			dir := t.TempDir()
+			dir := testenv.TempDir(t)
 			argv := sh.argv(`'中文' > f.txt; Get-Content f.txt`)
 			stdout, stderr := runPowerShell(t, sh, dir, "", argv[len(argv)-1])
 			if stderr != "" || stdout != "中文\r\n" {
@@ -99,7 +100,7 @@ func TestPowerShellPrologueSurvivesRestrictedSessions(t *testing.T) {
 	for _, sh := range installedPowerShells(t) {
 		for name, setup := range map[string]string{"no-console": freeConsole, "constrained-language": constrained} {
 			t.Run(filepath.Base(sh.Path)+"/"+name, func(t *testing.T) {
-				dir := t.TempDir()
+				dir := testenv.TempDir(t)
 				argv := sh.argv(`'中文' > f.txt; 'done'`)
 				stdout, stderr := runPowerShell(t, sh, dir, setup, argv[len(argv)-1])
 				if stderr != "" {
@@ -117,7 +118,7 @@ func TestPowerShellPrologueSurvivesRestrictedSessions(t *testing.T) {
 func TestPowerShellPipesUTF8WithoutBOMToNativeCommands(t *testing.T) {
 	for _, sh := range installedPowerShells(t) {
 		t.Run(filepath.Base(sh.Path), func(t *testing.T) {
-			dir := t.TempDir()
+			dir := testenv.TempDir(t)
 			// cmd's own redirect stores findstr's stdout untouched, so the file
 			// holds exactly the bytes PowerShell sent down the pipe.
 			argv := sh.argv(`'中文' | cmd.exe /d /c 'findstr . > p.txt'`)
@@ -141,7 +142,7 @@ func TestPowerShellPipesUTF8WithoutBOMToNativeCommands(t *testing.T) {
 func TestHookPrologueLeavesFileDefaultsAlone(t *testing.T) {
 	for _, sh := range installedPowerShells(t) {
 		t.Run(filepath.Base(sh.Path), func(t *testing.T) {
-			stdout, stderr := runPowerShell(t, sh, t.TempDir(), "", PowerShellUTF8Script(`'[' + $PSDefaultParameterValues['Out-File:Encoding'] + ']'; '中文'`))
+			stdout, stderr := runPowerShell(t, sh, testenv.TempDir(t), "", PowerShellUTF8Script(`'[' + $PSDefaultParameterValues['Out-File:Encoding'] + ']'; '中文'`))
 			if stderr != "" || stdout != "[]\r\n中文\r\n" {
 				t.Fatalf("stdout=%q stderr=%q", stdout, stderr)
 			}

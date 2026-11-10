@@ -8,6 +8,8 @@ import (
 	"runtime"
 	"testing"
 	"time"
+
+	"reasonix/internal/base/testenv"
 )
 
 // A launcher's declared environment must not reach the pre-approval ls-remote:
@@ -29,7 +31,7 @@ func TestLocatorSpecEnvDoesNotReachLsRemote(t *testing.T) {
 			"GIT_CONFIG_KEY_1": "protocol.ext.allow", "GIT_CONFIG_VALUE_1": "always"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			dir := t.TempDir()
+			dir := testenv.TempDir(t)
 			marker := filepath.Join(dir, "executed")
 			payload := filepath.Join(dir, "p.sh")
 			if err := os.WriteFile(payload, []byte("#!/bin/sh\necho ran >> '"+marker+"'\nexit 1\n"), 0o755); err != nil {

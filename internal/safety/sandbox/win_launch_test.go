@@ -7,6 +7,7 @@ import (
 	"slices"
 	"testing"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/state/sessiontemp"
 )
 
@@ -57,7 +58,7 @@ func TestTheLauncherGrantsOnlySessionTempFolders(t *testing.T) {
 		t.Fatalf("the host's own request was refused: %v", err)
 	}
 	for name, mutate := range map[string]func(*winLaunch){
-		"outside the temp": func(x *winLaunch) { x.Grant = []string{t.TempDir()} },
+		"outside the temp": func(x *winLaunch) { x.Grant = []string{testenv.TempDir(t)} },
 		"wrong name": func(x *winLaunch) {
 			d, _ := os.MkdirTemp("", "other-")
 			t.Cleanup(func() { _ = os.RemoveAll(d) })
@@ -88,7 +89,7 @@ func TestASIDThatNamesAnAccountIsNotSynthetic(t *testing.T) {
 	if syntheticSID(domainUser) {
 		t.Fatal("a SID naming an account was accepted")
 	}
-	state := t.TempDir()
+	state := testenv.TempDir(t)
 	rec := `{"version":1,"sid":"` + domainUser + `"}`
 	if err := os.WriteFile(filepath.Join(state, grantBookFile), []byte(rec), 0o600); err != nil {
 		t.Fatal(err)

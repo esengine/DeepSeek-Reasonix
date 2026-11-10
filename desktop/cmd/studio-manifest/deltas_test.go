@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/platform/update"
 )
 
@@ -13,7 +14,7 @@ import (
 // the shared chunk store named; an unsigned index fails the release instead of
 // being offered.
 func TestManifestListsEachSignedDeltaFromTheMirror(t *testing.T) {
-	dir, deltaDir := t.TempDir(), t.TempDir()
+	dir, deltaDir := testenv.TempDir(t), testenv.TempDir(t)
 	t.Setenv("GITHUB_REPOSITORY", "esengine/DeepSeek-Reasonix")
 	if err := os.WriteFile(filepath.Join(dir, "ReasonixStudio-windows-amd64-installer.exe"), []byte("x"), 0o644); err != nil {
 		t.Fatal(err)

@@ -5,11 +5,13 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"reasonix/internal/base/testenv"
 )
 
 func cacheStore(t *testing.T) (*Store, string, *time.Time) {
 	t.Helper()
-	home := t.TempDir()
+	home := testenv.TempDir(t)
 	s := New(Options{HomeDir: home, ReasonixHomeDir: home, DisableBuiltins: true})
 	now := time.Unix(1000, 0)
 	s.scans.now = func() time.Time { return now }

@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/contract/provider"
 	"reasonix/internal/contract/tool"
 	"reasonix/internal/ext/skill"
@@ -41,7 +42,7 @@ func TestACPSkillPromptKeepsTypedTextAsRawInput(t *testing.T) {
 	factory := &skillRawFactory{
 		provider: testutil.NewMock("test", testutil.Turn{Text: "done"}),
 		ctrl:     make(chan *control.Controller, 1),
-		dir:      t.TempDir(),
+		dir:      testenv.TempDir(t),
 	}
 	client, stop := startServer(t, factory)
 	defer stop()

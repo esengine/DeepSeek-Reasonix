@@ -266,7 +266,7 @@ func TestAdoptLeavesAnUnmovedInstallAlone(t *testing.T) {
 // dotfiles checkout. Copying nothing and renaming it would disable it.
 func TestAdoptLeavesALinkedEntryInPlace(t *testing.T) {
 	home, state := relocated(t)
-	target := filepath.Join(t.TempDir(), "dotfiles-memory")
+	target := filepath.Join(testenv.TempDir(t), "dotfiles-memory")
 	put(t, filepath.Join(target, "global", "m.md"), "m")
 	if err := os.Symlink(target, filepath.Join(home, "memory")); err != nil {
 		t.Skipf("no symlinks here: %v", err)

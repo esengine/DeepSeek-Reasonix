@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"reasonix/internal/base/testenv"
 )
 
 func TestLinuxReleaseBuildsAndCollectsBothNativeArchitectures(t *testing.T) {
@@ -84,7 +86,7 @@ func TestLinuxCIPackageMatrixPreservesUpstreamScope(t *testing.T) {
 		{"pull_request", "desktop/electron/test/unit.mjs", true},
 	} {
 		t.Run(tc.event+"/"+tc.file, func(t *testing.T) {
-			dir := t.TempDir()
+			dir := testenv.TempDir(t)
 			// A shell function owns command lookup on every host, including Git
 			// Bash on Windows; a PATH shim can resolve the runner's real git.
 			git := "git() { case \"$*\" in 'diff -z --name-only --no-renames fixture HEAD') printf '%s\\0' \"$MATRIX_TEST_FILE\" ;; 'diff --name-only --no-renames fixture HEAD') printf '%s\\n' \"$MATRIX_TEST_FILE\" ;; *) return 1 ;; esac; };\n"

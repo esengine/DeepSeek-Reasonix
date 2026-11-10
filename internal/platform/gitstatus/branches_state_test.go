@@ -9,6 +9,8 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"reasonix/internal/base/testenv"
 )
 
 func branchGitOutput(t *testing.T, dir string, args ...string) []byte {
@@ -39,12 +41,12 @@ func TestSwitchBranchPreservesAnInProgressOperation(t *testing.T) {
 							t.Skip("directory symlink requires privileges on Windows")
 						}
 						if layout == "linked-alias" {
-							linked := filepath.Join(t.TempDir(), "linked")
+							linked := filepath.Join(testenv.TempDir(t), "linked")
 							git(t, dir, "checkout", "--detach")
 							git(t, dir, "worktree", "add", linked, "original")
 							dir = linked
 						}
-						alias := filepath.Join(t.TempDir(), "alias")
+						alias := filepath.Join(testenv.TempDir(t), "alias")
 						if err := os.Symlink(dir, alias); err != nil {
 							t.Fatal(err)
 						}

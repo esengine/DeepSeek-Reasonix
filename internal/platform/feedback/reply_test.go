@@ -15,6 +15,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"reasonix/internal/base/testenv"
 )
 
 type replyStub struct {
@@ -110,7 +112,7 @@ func replySetup(t *testing.T) (*Service, *replyStub) {
 	rs := &replyStub{stub: &stub{}}
 	srv := httptest.NewServer(rs.handler())
 	t.Cleanup(srv.Close)
-	home := t.TempDir()
+	home := testenv.TempDir(t)
 	svc, err := New(Config{Home: home, Base: srv.URL, HTTP: srv.Client(), Backoff: []time.Duration{}})
 	if err != nil {
 		t.Fatal(err)

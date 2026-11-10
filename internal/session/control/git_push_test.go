@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"testing"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/contract/config"
 	"reasonix/internal/platform/gitcmd"
 	"reasonix/internal/platform/gitpush"
@@ -13,7 +14,7 @@ import (
 
 func pushController(t *testing.T, trust config.WorkspaceTrust, repo bool) *Controller {
 	t.Helper()
-	home, ws := t.TempDir(), t.TempDir()
+	home, ws := testenv.TempDir(t), testenv.TempDir(t)
 	if repo {
 		for _, args := range [][]string{
 			{"init", "-q"},

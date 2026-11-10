@@ -9,6 +9,8 @@ import (
 	"testing"
 
 	"golang.org/x/sys/windows"
+
+	"reasonix/internal/base/testenv"
 )
 
 var awkwardPaths = []string{
@@ -47,7 +49,7 @@ func TestOpenerArgumentsArriveWhole(t *testing.T) {
 		if got, err := windows.DecomposeCommandLine(windows.ComposeCommandLine(args)); err != nil || !reflect.DeepEqual(got, args) {
 			t.Errorf("%q: the command line decomposes to %q, want %q", path, got, args)
 		}
-		out := t.TempDir() + `\args.json`
+		out := testenv.TempDir(t) + `\args.json`
 		child := exec.Command(os.Args[0], append([]string{"-test.run=^TestHelperReportsItsArguments$", "--"}, args...)...)
 		child.Env = append(os.Environ(), "OPENDOC_ARGS_OUT="+out)
 		if b, err := child.CombinedOutput(); err != nil {

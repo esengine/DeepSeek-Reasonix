@@ -9,6 +9,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"reasonix/internal/base/testenv"
 )
 
 func put(t *testing.T, path, body string) {
@@ -19,7 +21,7 @@ func put(t *testing.T, path, body string) {
 }
 
 func TestReadKeepsWindowsPathsIntact(t *testing.T) {
-	path := filepath.Join(t.TempDir(), FileName)
+	path := filepath.Join(testenv.TempDir(t), FileName)
 	put(t, path, `{"paths":["D:\\work\\app"," C:\\Users\\_\\x ",""],"launch":"C:\\Users\\_\\x"}`)
 	list, err := Read(path)
 	if err != nil {
@@ -31,7 +33,7 @@ func TestReadKeepsWindowsPathsIntact(t *testing.T) {
 }
 
 func TestMergeOnceAppendsAndSetsAside(t *testing.T) {
-	dir := t.TempDir()
+	dir := testenv.TempDir(t)
 	cur, old := filepath.Join(dir, "cur.json"), filepath.Join(dir, "old.json")
 	put(t, cur, `{"paths":["a","b"],"launch":"b"}`)
 	put(t, old, `["b","c"]`)
@@ -52,7 +54,7 @@ func TestMergeOnceAppendsAndSetsAside(t *testing.T) {
 }
 
 func TestMergeOnceIntoAMissingListCreatesIt(t *testing.T) {
-	dir := t.TempDir()
+	dir := testenv.TempDir(t)
 	cur, old := filepath.Join(dir, "cur.json"), filepath.Join(dir, "old.json")
 	put(t, old, `{"paths":["x"],"launch":"x"}`)
 	if _, err := MergeOnce(context.Background(), cur, old); err != nil {
@@ -64,7 +66,7 @@ func TestMergeOnceIntoAMissingListCreatesIt(t *testing.T) {
 }
 
 func TestMergeOnceRefusesAnUnreadableOldListAndKeepsIt(t *testing.T) {
-	dir := t.TempDir()
+	dir := testenv.TempDir(t)
 	cur, old := filepath.Join(dir, "cur.json"), filepath.Join(dir, "old.json")
 	put(t, cur, `{"paths":["a"]}`)
 	put(t, old, `{broken`)
@@ -79,7 +81,7 @@ func TestMergeOnceRefusesAnUnreadableOldListAndKeepsIt(t *testing.T) {
 // A merge racing ordinary updates must never leave the list half written or
 // drop an entry an update added.
 func TestMergeOnceRacesUpdatesWithoutLosingEntries(t *testing.T) {
-	dir := t.TempDir()
+	dir := testenv.TempDir(t)
 	cur := filepath.Join(dir, "cur.json")
 	put(t, cur, `{"paths":["seed"]}`)
 	var wg sync.WaitGroup
@@ -110,7 +112,7 @@ func TestUpdateWaitsAsLongAsItsCallerAllows(t *testing.T) {
 	prev := defaultLockWait
 	defaultLockWait = 50 * time.Millisecond
 	t.Cleanup(func() { defaultLockWait = prev })
-	path := filepath.Join(t.TempDir(), FileName)
+	path := filepath.Join(testenv.TempDir(t), FileName)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	const writers = 6
@@ -135,7 +137,7 @@ func TestUpdateWithoutADeadlineStillGivesUp(t *testing.T) {
 	prev := defaultLockWait
 	defaultLockWait = 50 * time.Millisecond
 	t.Cleanup(func() { defaultLockWait = prev })
-	path := filepath.Join(t.TempDir(), FileName)
+	path := filepath.Join(testenv.TempDir(t), FileName)
 	release := make(chan struct{})
 	held := make(chan struct{})
 	done := make(chan struct{})

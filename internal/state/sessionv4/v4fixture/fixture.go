@@ -11,6 +11,7 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"reasonix/internal/base/testenv"
 	"strings"
 	"testing"
 	"time"
@@ -48,7 +49,7 @@ func New(t testing.TB) *Store {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { enc.Close() })
-	return &Store{t: t, Root: filepath.Join(t.TempDir(), "sessions-v4"), enc: enc}
+	return &Store{t: t, Root: filepath.Join(testenv.TempDir(t), "sessions-v4"), enc: enc}
 }
 
 // Event is one event of a batch: an inline payload, or one kept in the pool.

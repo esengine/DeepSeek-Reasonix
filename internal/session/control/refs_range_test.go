@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/contract/event"
 	"runtime"
 	"strings"
@@ -13,7 +14,7 @@ import (
 )
 
 func TestLineReferences(t *testing.T) {
-	root := t.TempDir()
+	root := testenv.TempDir(t)
 	path := filepath.Join(root, "source file.txt")
 	if err := os.WriteFile(path, []byte("first\r\nsecond\r\nthird\r\n"), 0600); err != nil {
 		t.Fatal(err)
@@ -41,7 +42,7 @@ func TestLineReferences(t *testing.T) {
 func TestLineReferenceFinalLine(t *testing.T) {
 	for _, body := range []string{"one\ntwo", "one\ntwo\n"} {
 		t.Run(body, func(t *testing.T) {
-			root := t.TempDir()
+			root := testenv.TempDir(t)
 			if err := os.WriteFile(filepath.Join(root, "file"), []byte(body), 0600); err != nil {
 				t.Fatal(err)
 			}
@@ -86,7 +87,7 @@ func TestLineReferenceSuffixGrammar(t *testing.T) {
 }
 
 func TestLineReferenceReadBoundaries(t *testing.T) {
-	root, outside := t.TempDir(), t.TempDir()
+	root, outside := testenv.TempDir(t), testenv.TempDir(t)
 	files := map[string]string{
 		"empty": "", "binary": "\x00secret", "pdf": "%PDF-1.7\nsecret",
 		"long":  strings.Repeat("x", 4096),
@@ -137,7 +138,7 @@ func TestLineReferenceReadBoundaries(t *testing.T) {
 }
 
 func TestLineReferenceBinaryScreeningOutsideSelection(t *testing.T) {
-	root := t.TempDir()
+	root := testenv.TempDir(t)
 	for _, tc := range []struct {
 		name, body string
 		line       int
@@ -155,7 +156,7 @@ func TestLineReferenceBinaryScreeningOutsideSelection(t *testing.T) {
 }
 
 func TestLineReferenceInvalidNotice(t *testing.T) {
-	root := t.TempDir()
+	root := testenv.TempDir(t)
 	if err := os.WriteFile(filepath.Join(root, "file"), []byte("secret\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -183,7 +184,7 @@ func TestLineReferenceInvalidNotice(t *testing.T) {
 }
 
 func TestLineReferenceGrantedFolder(t *testing.T) {
-	workspace, external := t.TempDir(), t.TempDir()
+	workspace, external := testenv.TempDir(t), testenv.TempDir(t)
 	if err := os.WriteFile(filepath.Join(external, "file.txt"), []byte("excluded\nselected\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -210,7 +211,7 @@ func TestLineReferenceGrantedFolder(t *testing.T) {
 }
 
 func TestLineReferenceDoesNotEmbedWholeImage(t *testing.T) {
-	c := New(Options{WorkspaceRoot: t.TempDir()})
+	c := New(Options{WorkspaceRoot: testenv.TempDir(t)})
 	t.Cleanup(c.Close)
 	if err := os.WriteFile(filepath.Join(c.WorkspaceRoot(), "image.png"), []byte("\x89PNG\r\n\x1a\n"), 0600); err != nil {
 		t.Fatal(err)
@@ -222,7 +223,7 @@ func TestLineReferenceDoesNotEmbedWholeImage(t *testing.T) {
 }
 
 func TestLineReferenceMissingPathsStayLiteral(t *testing.T) {
-	root := t.TempDir()
+	root := testenv.TempDir(t)
 	t.Chdir(root)
 	for _, workspace := range []string{root, ""} {
 		c := New(Options{WorkspaceRoot: workspace})
@@ -248,7 +249,7 @@ func TestLineReferenceEscapedAttributes(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("Windows filenames cannot contain quotes")
 	}
-	root := t.TempDir()
+	root := testenv.TempDir(t)
 	name := `source"&<'.txt`
 	if err := os.WriteFile(filepath.Join(root, name), []byte("excluded\nselected\n"), 0600); err != nil {
 		t.Fatal(err)
@@ -279,7 +280,7 @@ func TestLineReferenceEscapedAttributes(t *testing.T) {
 }
 
 func TestLineReferenceUnscopedPaths(t *testing.T) {
-	root, outside := t.TempDir(), t.TempDir()
+	root, outside := testenv.TempDir(t), testenv.TempDir(t)
 	t.Chdir(root)
 	path := filepath.Join(outside, "file")
 	if err := os.WriteFile(path, []byte("excluded\nselected\n"), 0600); err != nil {
@@ -301,7 +302,7 @@ func TestLineReferenceUnscopedPaths(t *testing.T) {
 }
 
 func TestLineReferenceWorkspaceEscapesStayLiteral(t *testing.T) {
-	root, outside := t.TempDir(), t.TempDir()
+	root, outside := testenv.TempDir(t), testenv.TempDir(t)
 	secret := filepath.Join(outside, "secret")
 	if err := os.WriteFile(secret, []byte("secret\n"), 0600); err != nil {
 		t.Fatal(err)

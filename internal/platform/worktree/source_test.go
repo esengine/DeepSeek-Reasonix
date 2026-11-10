@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"reasonix/internal/base/testenv"
 )
 
 func TestCreateFromBranchKeepsSourceAndSeparatesTasks(t *testing.T) {
@@ -29,7 +31,7 @@ func TestCreateFromBranchKeepsSourceAndSeparatesTasks(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "README.md"), []byte("uncommitted\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	managed := t.TempDir()
+	managed := testenv.TempDir(t)
 	first, err := CreateFrom(ctx, repo, managed, "refs/heads/task-base")
 	if err != nil {
 		t.Fatal(err)
@@ -70,7 +72,7 @@ func TestCreateFromRejectsUnknownOrNonBranchBeforeMutation(t *testing.T) {
 	repo := opened(t, initRepo(t))
 	for _, ref := range []string{"missing", "--detach", "HEAD~0", "refs/heads/missing"} {
 		t.Run(ref, func(t *testing.T) {
-			managed := filepath.Join(t.TempDir(), "not-created")
+			managed := filepath.Join(testenv.TempDir(t), "not-created")
 			if _, err := CreateFrom(context.Background(), repo, managed, ref); err == nil {
 				t.Fatal("invalid source accepted")
 			}
@@ -89,13 +91,13 @@ func TestCreateFromDetachedHEADAndOccupiedBranch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := CreateFrom(ctx, repo, t.TempDir(), strings.TrimSpace(branch)); err != nil {
+	if _, err := CreateFrom(ctx, repo, testenv.TempDir(t), strings.TrimSpace(branch)); err != nil {
 		t.Fatalf("branch occupied by source worktree: %v", err)
 	}
 	if _, _, err := runGit(ctx, repo, "checkout", "--detach"); err != nil {
 		t.Fatal(err)
 	}
-	managedRoot := t.TempDir()
+	managedRoot := testenv.TempDir(t)
 	result, err := CreateFrom(ctx, repo, managedRoot, "")
 	if err != nil {
 		t.Fatal(err)

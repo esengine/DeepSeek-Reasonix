@@ -7,13 +7,14 @@ import (
 	"strings"
 	"testing"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/session/control"
 	"reasonix/internal/state/memory"
 )
 
 func memoryReviewServer(t *testing.T, facts ...memory.Memory) *Server {
 	t.Helper()
-	set := memory.Load(memory.Options{CWD: t.TempDir(), UserDir: t.TempDir()})
+	set := memory.Load(memory.Options{CWD: testenv.TempDir(t), UserDir: testenv.TempDir(t)})
 	for _, f := range facts {
 		if _, err := set.Store.Save(f); err != nil {
 			t.Fatal(err)

@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/contract/provider"
 	"reasonix/internal/ext/hook"
 	"reasonix/internal/session/control"
@@ -40,7 +41,7 @@ func TestEffectCancelledCheckpointAdmissionStopsUserCode(t *testing.T) {
 				scenario = name + "/capability"
 			}
 			t.Run(scenario, func(t *testing.T) {
-				home, root := statedBootHome(t), t.TempDir()
+				home, root := statedBootHome(t), testenv.TempDir(t)
 				writeFile(t, root, "note.txt", "user bytes")
 				marker := filepath.Join(root, "hook.txt")
 				args := `{"path":"note.txt"}`

@@ -7,6 +7,8 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"reasonix/internal/base/testenv"
 )
 
 func fakePath(names ...string) func(string) (string, error) {
@@ -154,7 +156,7 @@ func TestWSLLauncherFoundAsCandidateIsNotOffered(t *testing.T) {
 
 func wslFixture(t *testing.T) (win, stub string) {
 	t.Helper()
-	win = filepath.Join(t.TempDir(), "win")
+	win = filepath.Join(testenv.TempDir(t), "win")
 	sys := filepath.Join(win, "System32")
 	if err := os.MkdirAll(sys, 0o755); err != nil {
 		t.Fatal(err)
@@ -168,7 +170,7 @@ func wslFixture(t *testing.T) (win, stub string) {
 
 func TestWSLLauncherPathJudgesByIdentity(t *testing.T) {
 	win, stub := wslFixture(t)
-	git := filepath.Join(t.TempDir(), "bash.exe")
+	git := filepath.Join(testenv.TempDir(t), "bash.exe")
 	if err := os.WriteFile(git, []byte("x"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -185,7 +187,7 @@ func TestWSLLauncherPathJudgesByIdentity(t *testing.T) {
 
 func TestWSLLauncherPathFollowsLinks(t *testing.T) {
 	win, stub := wslFixture(t)
-	other := t.TempDir()
+	other := testenv.TempDir(t)
 	hard := filepath.Join(other, "hard.exe")
 	if err := os.Link(stub, hard); err != nil {
 		t.Skip("hard links unavailable:", err)

@@ -6,17 +6,19 @@ import (
 	"path/filepath"
 	"runtime"
 	"testing"
+
+	"reasonix/internal/base/testenv"
 )
 
 func TestDiscoverRefusesWithAnIdentityWhenNothingIsInstalled(t *testing.T) {
-	t.Setenv("PATH", t.TempDir())
-	t.Setenv("LOCALAPPDATA", t.TempDir())
-	t.Setenv("ProgramFiles", t.TempDir())
-	t.Setenv("HOME", t.TempDir())
+	t.Setenv("PATH", testenv.TempDir(t))
+	t.Setenv("LOCALAPPDATA", testenv.TempDir(t))
+	t.Setenv("ProgramFiles", testenv.TempDir(t))
+	t.Setenv("HOME", testenv.TempDir(t))
 
 	// The system application folder is the machine's own; an empty one stands
 	// in for a Mac with nothing installed there.
-	_, err := discover("", host{goos: runtime.GOOS, getenv: os.Getenv, applications: t.TempDir()})
+	_, err := discover("", host{goos: runtime.GOOS, getenv: os.Getenv, applications: testenv.TempDir(t)})
 	if !errors.Is(err, ErrNoEditor) {
 		t.Fatalf("Discover on a bare machine = %v, want ErrNoEditor", err)
 	}
@@ -26,7 +28,7 @@ func TestDiscoverRefusesWithAnIdentityWhenNothingIsInstalled(t *testing.T) {
 // something else first, and a name that resolves to nothing is their name
 // failing rather than the machine having none.
 func TestConfiguredEditorIsTheOnlyCandidate(t *testing.T) {
-	dir := t.TempDir()
+	dir := testenv.TempDir(t)
 	named := filepath.Join(dir, "my-editor")
 	if err := os.WriteFile(named, []byte("#!/bin/sh\n"), 0o755); err != nil {
 		t.Fatal(err)
@@ -51,7 +53,7 @@ func TestInstalledPathsAreSearchedBeforePath(t *testing.T) {
 	if runtime.GOOS != "windows" && runtime.GOOS != "darwin" {
 		t.Skip("only windows and darwin have installer paths to search")
 	}
-	local := t.TempDir()
+	local := testenv.TempDir(t)
 	f := families[0]
 	var placed string
 	switch runtime.GOOS {
@@ -73,21 +75,21 @@ func TestInstalledPathsAreSearchedBeforePath(t *testing.T) {
 		}
 		return ""
 	}
-	got, ok := f.find(host{goos: runtime.GOOS, getenv: getenv, applications: t.TempDir()})
+	got, ok := f.find(host{goos: runtime.GOOS, getenv: getenv, applications: testenv.TempDir(t)})
 	if !ok || got != placed {
 		t.Fatalf("find = %q %v, want the installed %q", got, ok, placed)
 	}
 }
 
 func TestOpenRefusesSomethingThatIsNotADirectory(t *testing.T) {
-	file := filepath.Join(t.TempDir(), "a.txt")
+	file := filepath.Join(testenv.TempDir(t), "a.txt")
 	if err := os.WriteFile(file, []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := Open(Spec{Executable: "editor"}, file); err == nil {
 		t.Fatal("opening a file as a workspace was accepted")
 	}
-	if err := Open(Spec{}, t.TempDir()); !errors.Is(err, ErrNoEditor) {
+	if err := Open(Spec{}, testenv.TempDir(t)); !errors.Is(err, ErrNoEditor) {
 		t.Fatalf("opening with no executable = %v, want ErrNoEditor", err)
 	}
 }

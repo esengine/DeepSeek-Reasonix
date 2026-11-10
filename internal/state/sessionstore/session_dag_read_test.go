@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reasonix/internal/base/testenv"
 	"strings"
 	"testing"
 
@@ -35,7 +36,7 @@ func dagMsg(t *testing.T, id, parent, head string, m map[string]any) string {
 // .jsonl checkpoint beside it.
 func writeDAGSession(t *testing.T, lines ...string) string {
 	t.Helper()
-	path := filepath.Join(t.TempDir(), "20260925-130000.000000000-deepseek-flash.jsonl")
+	path := filepath.Join(testenv.TempDir(t), "20260925-130000.000000000-deepseek-flash.jsonl")
 	if err := os.WriteFile(path, nil, 0o600); err != nil {
 		t.Fatal(err)
 	}

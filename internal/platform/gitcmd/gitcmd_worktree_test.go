@@ -7,14 +7,16 @@ import (
 	"path/filepath"
 	"slices"
 	"testing"
+
+	"reasonix/internal/base/testenv"
 )
 
 func TestDriverOverridesReadRealLinkedWorktreeConfigs(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not installed")
 	}
-	main := t.TempDir()
-	linked := filepath.Join(t.TempDir(), "linked")
+	main := testenv.TempDir(t)
+	linked := filepath.Join(testenv.TempDir(t), "linked")
 	run := func(dir string, args ...string) {
 		t.Helper()
 		cmdArgs := append([]string{"-C", dir}, args...)

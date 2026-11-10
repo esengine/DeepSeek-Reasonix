@@ -46,7 +46,7 @@ func BenchmarkThirtyOneMiBItemsRetainedHeap(b *testing.B) {
 	var retainedTotal uint64
 	for range b.N {
 		b.StopTimer()
-		session := filepath.Join(b.TempDir(), "s.jsonl")
+		session := filepath.Join(testenv.TempDir(b), "s.jsonl")
 		s, err := Open(session, Limits{})
 		if err != nil {
 			b.Fatal(err)

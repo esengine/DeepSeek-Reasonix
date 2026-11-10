@@ -7,11 +7,12 @@ import (
 	"path/filepath"
 	"testing"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/platform/packagegrant"
 )
 
 func TestStripPackageGrantsOnlyAnswersForAnApplication(t *testing.T) {
-	dir := t.TempDir()
+	dir := testenv.TempDir(t)
 	for name, app := range map[string]string{
 		"no application":         "",
 		"a path that is nothing": filepath.Join(dir, "missing.exe"),
@@ -27,7 +28,7 @@ func TestStripPackageGrantsOnlyAnswersForAnApplication(t *testing.T) {
 // The shell reads this line as structure, so both lists are present even when
 // empty: a null would be a third answer it has to guess about.
 func TestStripPackageGrantsReportsOneLineOfJSON(t *testing.T) {
-	app := filepath.Join(t.TempDir(), "Reasonix Studio.exe")
+	app := filepath.Join(testenv.TempDir(t), "Reasonix Studio.exe")
 	if err := os.WriteFile(app, []byte("x"), 0o755); err != nil {
 		t.Fatal(err)
 	}

@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"reasonix/internal/base/testenv"
 )
 
 func named(o *Owner, name, id string) {
@@ -135,7 +137,7 @@ func TestACallMidWriteKeepsTheClaimWhileAnotherCallAsks(t *testing.T) {
 }
 
 func TestABlockedAcquisitionFailsTypedAtTheMaximumWait(t *testing.T) {
-	root, locks := t.TempDir(), t.TempDir()
+	root, locks := testenv.TempDir(t), testenv.TempDir(t)
 	a, err := New(root, locks, nil)
 	if err != nil {
 		t.Fatal(err)

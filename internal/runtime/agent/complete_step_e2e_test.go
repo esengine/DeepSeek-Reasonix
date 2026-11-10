@@ -15,6 +15,7 @@ import (
 	"reasonix/internal/runtime/agent/testutil"
 	"reasonix/internal/safety/evidence"
 
+	"reasonix/internal/base/testenv"
 	_ "reasonix/internal/tools/builtin"
 )
 
@@ -295,7 +296,7 @@ func TestE2ESigningOffAdvancesThePlanRevision(t *testing.T) {
 // The agent hands complete_step its workspace, so a relative citation of a file
 // the writer was given by absolute path is the same file.
 func TestE2ERelativeCitationOfAbsoluteWriteSignsOff(t *testing.T) {
-	root := t.TempDir()
+	root := testenv.TempDir(t)
 	written := filepath.Join(root, "pkg", "x.go")
 	mp := testutil.NewMock("m",
 		testutil.Turn{ToolCalls: []provider.ToolCall{{ID: "w1", Name: "write_file", Arguments: fmt.Sprintf(`{"path":%q}`, written)}}},

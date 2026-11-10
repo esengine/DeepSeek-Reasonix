@@ -3,6 +3,8 @@ package cli
 import (
 	"strings"
 	"testing"
+
+	"reasonix/internal/base/testenv"
 )
 
 func TestMCPAddHelpPrintsUsage(t *testing.T) {
@@ -35,7 +37,7 @@ func TestMCPListAndGetRejectExtraArguments(t *testing.T) {
 }
 
 func TestMCPHelpFlagPrintsUsageForEverySubcommandAndRunsNothing(t *testing.T) {
-	home := t.TempDir()
+	home := testenv.TempDir(t)
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
 	t.Setenv("REASONIX_HOME", home)
@@ -53,7 +55,7 @@ func TestMCPHelpFlagPrintsUsageForEverySubcommandAndRunsNothing(t *testing.T) {
 }
 
 func TestMCPImportRejectsArgumentsInsteadOfImporting(t *testing.T) {
-	home := t.TempDir()
+	home := testenv.TempDir(t)
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
 	t.Setenv("REASONIX_HOME", home)

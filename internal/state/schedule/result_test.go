@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/contract/observe"
 )
 
@@ -141,7 +142,7 @@ func TestReapDeadSettlesOnlyRunsWhoseLeaseIsFree(t *testing.T) {
 }
 
 func TestLoadOverridesReadsOnlyTheScheduleTable(t *testing.T) {
-	dir := t.TempDir()
+	dir := testenv.TempDir(t)
 	path := filepath.Join(dir, "config.toml")
 	if o, err := LoadOverrides(path); err != nil || o != (Overrides{}) {
 		t.Fatalf("missing file: %+v %v", o, err)
@@ -227,9 +228,9 @@ func TestSessionPathMustLieUnderTheStateRoot(t *testing.T) {
 	}
 	for path, want := range map[string]string{
 		filepath.Join(inside, "a.jsonl"):                 filepath.Join(inside, "a.jsonl"),
-		filepath.Join(t.TempDir(), "a.jsonl"):            "",
+		filepath.Join(testenv.TempDir(t), "a.jsonl"):     "",
 		filepath.Join(filepath.Dir(dir), "..", "x.json"): "",
-		"relative.jsonl":                                 "",
+		"relative.jsonl": "",
 	} {
 		if got := st.sessionPathOrEmpty(path); got != want {
 			t.Errorf("sessionPathOrEmpty(%q) = %q, want %q", path, got, want)

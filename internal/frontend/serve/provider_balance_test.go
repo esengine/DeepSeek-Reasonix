@@ -10,6 +10,7 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/contract/config"
 	"reasonix/internal/model/billing"
 	"reasonix/internal/session/control"
@@ -141,7 +142,7 @@ func TestProvidersListCarriesTheWalletAndWhatItsHostImplies(t *testing.T) {
 func TestWalletOnAnUndeclaredHostSaysNotConfiguredAndNeverAsks(t *testing.T) {
 	var hits atomic.Int64
 	wallet := walletStub(t, &hits, nil)
-	dir := t.TempDir()
+	dir := testenv.TempDir(t)
 	bc := NewBroadcaster()
 	ctrl := control.New(control.Options{Sink: bc, SessionDir: dir, Balance: billing.NewCache(nil, wallet.URL, "", "")})
 	srv := httptest.NewServer(operatorHandler(New(ctrl, bc, config.ServeConfig{})))

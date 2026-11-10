@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"reasonix/internal/base/proc"
+	"reasonix/internal/base/testenv"
 )
 
 func TestMutationRootWaitHelper(t *testing.T) {
@@ -33,7 +34,7 @@ func (w *rootWaitOutput) Write(p []byte) (int, error) {
 }
 
 func TestRootWaitRetainsLeaseAfterRealBoundedCancellation(t *testing.T) {
-	root, state := t.TempDir(), t.TempDir()
+	root, state := testenv.TempDir(t), testenv.TempDir(t)
 	released := make(chan struct{}, 1)
 	c, err := New(root, state, func(n Notice) {
 		if n.State == "released" && n.CallID == "root-wait" {

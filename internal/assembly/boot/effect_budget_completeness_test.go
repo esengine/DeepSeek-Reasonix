@@ -10,6 +10,7 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/contract/event"
 	"reasonix/internal/session/control"
 )
@@ -29,7 +30,7 @@ func (s *budgetCompletenessSink) RecordRunBudget(sample event.RunBudgetSample) {
 func TestEffectBudgetCompletenessFromOpenAIStream(t *testing.T) {
 	for _, missing := range []int32{0, 1, 2} {
 		t.Run(fmt.Sprintf("missing_%d", missing), func(t *testing.T) {
-			home, root := statedBootHome(t), t.TempDir()
+			home, root := statedBootHome(t), testenv.TempDir(t)
 			writeFile(t, root, "fixture.txt", "fixture content")
 			var calls atomic.Int32
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

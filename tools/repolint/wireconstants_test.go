@@ -4,10 +4,12 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"reasonix/internal/base/testenv"
 )
 
 func TestWireConstantParityRejectsEitherSideDrifting(t *testing.T) {
-	root := t.TempDir()
+	root := testenv.TempDir(t)
 	pair := []wireConstantMirror{{"code.go", "Code", "code.ts", "Code"}}
 	for _, tc := range []struct {
 		goSource, tsSource string

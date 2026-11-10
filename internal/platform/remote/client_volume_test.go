@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/platform/remote/execfs/fstest"
 	"reasonix/internal/platform/remote/sftpfs"
 	"reasonix/internal/platform/remote/sshtest"
@@ -28,7 +29,7 @@ func startedClient(t *testing.T, srv *sshtest.Server) *Client {
 }
 
 func TestAServerThatServesSFTPKeepsTheSFTPLayer(t *testing.T) {
-	c := startedClient(t, sshtest.Start(t, sshtest.Options{Password: "pw", SFTPRoot: t.TempDir()}))
+	c := startedClient(t, sshtest.Start(t, sshtest.Options{Password: "pw", SFTPRoot: testenv.TempDir(t)}))
 	v, err := c.Volume()
 	if err != nil || v.Mode() != sftpfs.ModeSFTP {
 		t.Fatalf("Volume = %v, %v; want sftp", v, err)
@@ -101,5 +102,5 @@ func TestTheScriptLayerThroughARealShellOverSSH(t *testing.T) {
 	if err != nil || v.Mode() != sftpfs.ModeExec {
 		t.Fatalf("Volume = %v, %v", v, err)
 	}
-	fstest.RunScenario(t, v, t.TempDir())
+	fstest.RunScenario(t, v, testenv.TempDir(t))
 }

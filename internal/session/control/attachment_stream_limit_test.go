@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/contract/config"
 )
 
@@ -23,7 +24,7 @@ func TestAttachmentStreamLimitBoundaryAndCleanup(t *testing.T) {
 		{"unlimited", 0, 16, false}, {"largest limit", math.MaxInt64, 16, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			root := t.TempDir()
+			root := testenv.TempDir(t)
 			ref, err := SaveAttachmentStreamInRoot(t.Context(), root, "test.apk", bytes.NewReader(make([]byte, tc.size)), config.AttachmentLimit{Bytes: tc.limit, Source: "user"})
 			if tc.refuse {
 				var limit *AttachmentStreamLimitError

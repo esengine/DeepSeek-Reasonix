@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"reasonix/internal/base/testenv"
 )
 
 // TestAuditUnreadableCheckpointIsSilentlyForgotten pins what the store must do
@@ -14,8 +16,8 @@ import (
 // silently overwritten by the next turn. The file below is the store's own,
 // truncated the way an interrupted write, a bad sector, or an editor leaves it.
 func TestAuditUnreadableCheckpointIsSilentlyForgotten(t *testing.T) {
-	dir := t.TempDir()
-	root := t.TempDir()
+	dir := testenv.TempDir(t)
+	root := testenv.TempDir(t)
 
 	// A healthy turn-1 checkpoint, produced by the store itself so the layout
 	// and JSON shape are the production ones.
@@ -72,8 +74,8 @@ func TestAuditUnreadableCheckpointIsSilentlyForgotten(t *testing.T) {
 // TestAuditAbsentTurnStillNumbersNormally is the control for a turn that truly
 // never happened: no file, so no reservation, so no invented gap.
 func TestAuditAbsentTurnStillNumbersNormally(t *testing.T) {
-	dir := t.TempDir()
-	root := t.TempDir()
+	dir := testenv.TempDir(t)
+	root := testenv.TempDir(t)
 
 	seed := New(dir, root)
 	seed.Begin(0, "first", 3)
@@ -104,8 +106,8 @@ func TestAuditAbsentTurnStillNumbersNormally(t *testing.T) {
 // directory: its metadata is readable, so it must keep loading with the same
 // boundaries and reserve nothing.
 func TestAuditExpiredCheckpointStillLoads(t *testing.T) {
-	dir := t.TempDir()
-	root := t.TempDir()
+	dir := testenv.TempDir(t)
+	root := testenv.TempDir(t)
 	content := "before"
 
 	seed := New(dir, root)
@@ -140,8 +142,8 @@ func TestAuditExpiredCheckpointStillLoads(t *testing.T) {
 // half of the contract: numbering past the lost turn is only useful if the
 // unreadable file itself is left byte-identical.
 func TestAuditUnreadableTurnBytesSurviveLaterBegins(t *testing.T) {
-	dir := t.TempDir()
-	root := t.TempDir()
+	dir := testenv.TempDir(t)
+	root := testenv.TempDir(t)
 
 	seed := New(dir, root)
 	seed.Begin(1, "first", 7)

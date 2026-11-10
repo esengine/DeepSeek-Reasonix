@@ -109,7 +109,7 @@ func TestAppendDocPropagatesReadErrors(t *testing.T) {
 	// A directory is a real path that os.ReadFile refuses with a non-NotExist
 	// error (EISDIR), exercising the "exists but unreadable" branch without
 	// relying on permission bits that vary across platforms and CI users.
-	dir := t.TempDir()
+	dir := testenv.TempDir(t)
 	if err := AppendDoc(dir, "note"); err == nil {
 		t.Fatal("AppendDoc on an unreadable path must fail")
 	} else if !strings.Contains(err.Error(), "read") {
@@ -129,7 +129,7 @@ func TestAppendDocDoesNotOverwriteUnreadableDoc(t *testing.T) {
 	if os.Geteuid() == 0 {
 		t.Skip("root bypasses permission bits")
 	}
-	dir := t.TempDir()
+	dir := testenv.TempDir(t)
 	path := filepath.Join(dir, "REASONIX.md")
 	original := "# Project memory\n\n- keep this line\n"
 	if err := os.WriteFile(path, []byte(original), 0o200); err != nil {

@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/contract/agentcomposition"
 )
 
@@ -19,7 +20,7 @@ func makeResourceJunction(t *testing.T, target, link string) {
 
 func TestWindowsCompositionJunctions(t *testing.T) {
 	t.Run("capture-and-restore", func(t *testing.T) {
-		source := t.TempDir()
+		source := testenv.TempDir(t)
 		data := filepath.Join(source, "data")
 		if err := os.Mkdir(data, 0o700); err != nil {
 			t.Fatal(err)
@@ -28,7 +29,7 @@ func TestWindowsCompositionJunctions(t *testing.T) {
 			t.Fatal(err)
 		}
 		makeResourceJunction(t, data, filepath.Join(source, "alias"))
-		link := filepath.Join(t.TempDir(), "source")
+		link := filepath.Join(testenv.TempDir(t), "source")
 		makeResourceJunction(t, source, link)
 		asset, err := CaptureDirectory(link)
 		if err != nil || len(asset.Files) != 2 {
@@ -42,7 +43,7 @@ func TestWindowsCompositionJunctions(t *testing.T) {
 		if err := os.RemoveAll(source); err != nil {
 			t.Fatal(err)
 		}
-		store := New(t.TempDir(), t.TempDir())
+		store := New(testenv.TempDir(t), testenv.TempDir(t))
 		for _, snapshot := range []DirectorySnapshot{asset, hookAsset} {
 			root, err := store.Materialize(snapshot)
 			if err != nil {
@@ -65,27 +66,27 @@ func TestWindowsCompositionJunctions(t *testing.T) {
 		}
 	})
 	t.Run("escape", func(t *testing.T) {
-		root, outside := t.TempDir(), t.TempDir()
+		root, outside := testenv.TempDir(t), testenv.TempDir(t)
 		makeResourceJunction(t, outside, filepath.Join(root, "alias"))
 		if _, err := CaptureDirectory(root); !errors.Is(err, agentcomposition.ErrUnavailable) {
 			t.Fatalf("outside junction accepted: %v", err)
 		}
 	})
 	t.Run("cycle", func(t *testing.T) {
-		root := t.TempDir()
+		root := testenv.TempDir(t)
 		makeResourceJunction(t, root, filepath.Join(root, "alias"))
 		if _, err := CaptureDirectory(root); !errors.Is(err, agentcomposition.ErrUnavailable) {
 			t.Fatalf("cyclic junction accepted: %v", err)
 		}
 	})
 	t.Run("retained-root", func(t *testing.T) {
-		store := New(t.TempDir(), t.TempDir())
+		store := New(testenv.TempDir(t), testenv.TempDir(t))
 		asset := DirectorySnapshot{Files: []AssetFile{{Path: "entry", Data: []byte("same"), Mode: 0o600}}}
 		root, err := store.Materialize(asset)
 		if err != nil {
 			t.Fatal(err)
 		}
-		moved := filepath.Join(t.TempDir(), "moved")
+		moved := filepath.Join(testenv.TempDir(t), "moved")
 		if err := os.Rename(root, moved); err != nil {
 			t.Fatal(err)
 		}

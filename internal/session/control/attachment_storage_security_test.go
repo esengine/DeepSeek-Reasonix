@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/contract/config"
 )
 
@@ -35,10 +36,10 @@ func attachmentStorageDirectoryLink(t *testing.T, target, link string) {
 }
 
 func TestAttachmentStorageRejectsSymlinkedReasonixParent(t *testing.T) {
-	attachmentStorageDirectoryLink(t, t.TempDir(), filepath.Join(t.TempDir(), "probe"))
+	attachmentStorageDirectoryLink(t, testenv.TempDir(t), filepath.Join(testenv.TempDir(t), "probe"))
 	for _, transport := range []string{"stream", "legacy-bytes"} {
 		t.Run(transport, func(t *testing.T) {
-			root, outside := t.TempDir(), t.TempDir()
+			root, outside := testenv.TempDir(t), testenv.TempDir(t)
 			attachmentStorageDirectoryLink(t, outside, filepath.Join(root, ".reasonix"))
 			var path string
 			var err error
@@ -62,10 +63,10 @@ func TestAttachmentStorageRejectsSymlinkedReasonixParent(t *testing.T) {
 }
 
 func TestAttachmentStorageCleanupKeepsOriginalDirectoryOwner(t *testing.T) {
-	attachmentStorageDirectoryLink(t, t.TempDir(), filepath.Join(t.TempDir(), "probe"))
+	attachmentStorageDirectoryLink(t, testenv.TempDir(t), filepath.Join(testenv.TempDir(t), "probe"))
 	for _, failure := range []string{"read-error", "cancel", "stream-limit"} {
 		t.Run(failure, func(t *testing.T) {
-			root, outside := t.TempDir(), t.TempDir()
+			root, outside := testenv.TempDir(t), testenv.TempDir(t)
 			directory := filepath.Join(root, ".reasonix", "attachments")
 			retained := filepath.Join(root, ".reasonix", "retained-attachments")
 			cleanupDirectory := retained

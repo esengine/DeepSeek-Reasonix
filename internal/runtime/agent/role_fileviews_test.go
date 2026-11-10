@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/contract/tool"
 	"reasonix/internal/runtime/capability"
 	"reasonix/internal/runtime/usecap"
@@ -17,7 +18,7 @@ func TestRoleFileViewsDoNotRefreshExecutor(t *testing.T) {
 	for _, role := range []string{"planner", "guardian"} {
 		for _, shared := range []bool{false, true} {
 			t.Run(role+map[bool]string{false: "/clone", true: "/runtime"}[shared], func(t *testing.T) {
-				path := filepath.Join(t.TempDir(), "a.txt")
+				path := filepath.Join(testenv.TempDir(t), "a.txt")
 				if err := os.WriteFile(path, []byte("first"), 0600); err != nil {
 					t.Fatal(err)
 				}
@@ -82,7 +83,7 @@ func TestRoleFileViewsDoNotRefreshExecutor(t *testing.T) {
 }
 
 func TestGenericReadOnlyFilterKeepsSameActorViews(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "a.txt")
+	path := filepath.Join(testenv.TempDir(t), "a.txt")
 	if err := os.WriteFile(path, []byte("first"), 0600); err != nil {
 		t.Fatal(err)
 	}

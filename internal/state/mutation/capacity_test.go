@@ -7,13 +7,14 @@ import (
 	"testing"
 	"time"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/state/workspacelease"
 )
 
 func capacity(id string) Capacity { return Capacity{ID: id, Limit: 1, Units: 1} }
 
 func TestDisjointWriterCapacityWaitReportsActualBlockingResource(t *testing.T) {
-	root, state := t.TempDir(), t.TempDir()
+	root, state := testenv.TempDir(t), testenv.TempDir(t)
 	c := testCoordinator(t, root, state)
 	first := intent(filepath.Join(root, "first"))
 	first.Capacities = []Capacity{capacity("writers")}
@@ -68,7 +69,7 @@ func awaitCapacityNotice(t *testing.T, notices <-chan Notice, state string) Noti
 }
 
 func TestWaitingFileTransactionDoesNotConsumeCapacity(t *testing.T) {
-	root, state := t.TempDir(), t.TempDir()
+	root, state := testenv.TempDir(t), testenv.TempDir(t)
 	owner := testCoordinator(t, root, state)
 	path := filepath.Join(root, "a")
 	held, err := owner.Acquire(t.Context(), intent(path))
@@ -112,7 +113,7 @@ func TestWaitingFileTransactionDoesNotConsumeCapacity(t *testing.T) {
 }
 
 func TestWaitingCapacityTransactionDoesNotHoldPaths(t *testing.T) {
-	root, state := t.TempDir(), t.TempDir()
+	root, state := testenv.TempDir(t), testenv.TempDir(t)
 	owner := testCoordinator(t, root, state)
 	held, err := owner.Acquire(t.Context(), Intent{Effect: CapacityOnly, Capacities: []Capacity{capacity("root-total")}})
 	if err != nil {
@@ -139,7 +140,7 @@ func TestWaitingCapacityTransactionDoesNotHoldPaths(t *testing.T) {
 	}()
 	awaitCapacityNotice(t, notices, "waiting")
 	// An unrelated writer has no admission to this root's execution budget.
-	other, err := testCoordinator(t, t.TempDir(), state).Acquire(t.Context(), intent(filepath.Join(root, "b")))
+	other, err := testCoordinator(t, testenv.TempDir(t), state).Acquire(t.Context(), intent(filepath.Join(root, "b")))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -156,7 +157,7 @@ func TestWaitingCapacityTransactionDoesNotHoldPaths(t *testing.T) {
 }
 
 func TestCapacityGrantsReadyWaitersInOrder(t *testing.T) {
-	root, state := t.TempDir(), t.TempDir()
+	root, state := testenv.TempDir(t), testenv.TempDir(t)
 	owner := testCoordinator(t, root, state)
 	held, err := owner.Acquire(t.Context(), Intent{Effect: CapacityOnly, Capacities: []Capacity{capacity("total")}})
 	if err != nil {
@@ -215,7 +216,7 @@ func TestCapacityGrantsReadyWaitersInOrder(t *testing.T) {
 }
 
 func TestCapacityIdentityCannotChangeLimit(t *testing.T) {
-	c := testCoordinator(t, t.TempDir(), t.TempDir())
+	c := testCoordinator(t, testenv.TempDir(t), testenv.TempDir(t))
 	l, err := c.Acquire(t.Context(), Intent{Effect: CapacityOnly, Capacities: []Capacity{capacity("total")}})
 	if err != nil {
 		t.Fatal(err)
@@ -228,7 +229,7 @@ func TestCapacityIdentityCannotChangeLimit(t *testing.T) {
 }
 
 func TestLegacyWaitDoesNotConsumeExecutionCapacity(t *testing.T) {
-	root, state := t.TempDir(), t.TempDir()
+	root, state := testenv.TempDir(t), testenv.TempDir(t)
 	path := filepath.Join(root, "a")
 	legacy, err := workspacelease.New(root, state, nil)
 	if err != nil {
@@ -273,7 +274,7 @@ func TestLegacyWaitDoesNotConsumeExecutionCapacity(t *testing.T) {
 }
 
 func TestLargeCapacityRequestCannotBeStarvedBySmallerLaterRequests(t *testing.T) {
-	root, state := t.TempDir(), t.TempDir()
+	root, state := testenv.TempDir(t), testenv.TempDir(t)
 	one := Intent{Effect: CapacityOnly, Capacities: []Capacity{{ID: "total", Limit: 2, Units: 1}}}
 	owner := testCoordinator(t, root, state)
 	held, err := owner.Acquire(t.Context(), one)

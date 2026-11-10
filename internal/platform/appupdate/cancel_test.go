@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/platform/update"
 )
 
@@ -111,7 +112,7 @@ func TestACancelledPrepareDiscardsWhatItFetched(t *testing.T) {
 		t.Fatal("abandon refused a running download")
 	}
 	cancel(errInstallCancelled)
-	c.prepare(ctx, update.Install{Layout: update.Layout{Root: t.TempDir()}}, "2.21.0")
+	c.prepare(ctx, update.Install{Layout: update.Layout{Root: testenv.TempDir(t)}}, "2.21.0")
 	select {
 	case <-done:
 	default:
@@ -156,7 +157,7 @@ func TestANewMoveWaitsForTheCancelledOneToCleanUp(t *testing.T) {
 // ErrInstallInFlight until the cancelled move has cleaned up, then accepts.
 func TestStartInstallIsRefusedWhileCancelCleansUp(t *testing.T) {
 	c, _ := owned(t, "2.20.0")
-	install := update.Install{Layout: update.Layout{Root: t.TempDir()}}
+	install := update.Install{Layout: update.Layout{Root: testenv.TempDir(t)}}
 	if _, ok := c.install.begin("2.21.0"); !ok {
 		t.Fatal("begin refused an idle slot")
 	}

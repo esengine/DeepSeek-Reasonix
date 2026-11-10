@@ -7,12 +7,13 @@ import (
 	"slices"
 	"testing"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/contract/config"
 	"reasonix/internal/state/workspacelist"
 )
 
 func TestARequestedFolderIsOnlyEverComparedWithTheTrustedList(t *testing.T) {
-	root := t.TempDir()
+	root := testenv.TempDir(t)
 	inner := filepath.Join(root, "app")
 	other := filepath.Join(root, "other")
 	for _, d := range []string{inner, other} {
@@ -46,8 +47,8 @@ func TestARequestedFolderIsOnlyEverComparedWithTheTrustedList(t *testing.T) {
 }
 
 func TestADraftNamesATrustedFolderOrIsRefusedAsUnknown(t *testing.T) {
-	t.Setenv("REASONIX_HOME", t.TempDir())
-	inner := t.TempDir()
+	t.Setenv("REASONIX_HOME", testenv.TempDir(t))
+	inner := testenv.TempDir(t)
 	d := Draft{Prompt: "p", EverySec: 3600, Workspace: filepath.Join(inner, "..")}
 	if _, err := d.Request([]string{inner}); !errors.Is(err, ErrDraftFolderUnknown) {
 		t.Fatalf("a parent directory = %v, want ErrDraftFolderUnknown", err)
@@ -59,8 +60,8 @@ func TestADraftNamesATrustedFolderOrIsRefusedAsUnknown(t *testing.T) {
 }
 
 func TestTheTrustedFoldersAreTheRememberedProjectsThePersonTrusted(t *testing.T) {
-	t.Setenv("REASONIX_HOME", t.TempDir())
-	remembered, declined, undecided, current := t.TempDir(), t.TempDir(), t.TempDir(), t.TempDir()
+	t.Setenv("REASONIX_HOME", testenv.TempDir(t))
+	remembered, declined, undecided, current := testenv.TempDir(t), testenv.TempDir(t), testenv.TempDir(t), testenv.TempDir(t)
 	list := filepath.Join(config.MemoryUserDir(), workspacelist.FileName)
 	if err := workspacelist.Update(t.Context(), list, false, func(l *workspacelist.List) error {
 		l.Paths = append(l.Paths, remembered, declined, undecided)
@@ -89,8 +90,8 @@ func TestTheTrustedFoldersAreTheRememberedProjectsThePersonTrusted(t *testing.T)
 }
 
 func TestATrustedProjectThatIsGoneOrIsNotAFolderIsNotListed(t *testing.T) {
-	t.Setenv("REASONIX_HOME", t.TempDir())
-	gone, file := t.TempDir(), filepath.Join(t.TempDir(), "afile")
+	t.Setenv("REASONIX_HOME", testenv.TempDir(t))
+	gone, file := testenv.TempDir(t), filepath.Join(testenv.TempDir(t), "afile")
 	if err := os.WriteFile(file, []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}

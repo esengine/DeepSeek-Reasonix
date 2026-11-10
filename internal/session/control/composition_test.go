@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/contract/agentcomposition"
 	"reasonix/internal/runtime/agent/testutil"
 	"reasonix/internal/state/sessioninbox"
@@ -19,14 +20,14 @@ func testComposition(t *testing.T, c *Controller) {
 	b := &agentcomposition.Binding{Resolved: d, Version: agentcomposition.Version{Definition: d, Revision: agentcomposition.Revision(d)}}
 	b.Seal()
 	c.BindComposition(b)
-	c.ConfigureCompositions(t.TempDir(), nil)
+	c.ConfigureCompositions(testenv.TempDir(t), nil)
 }
 
 func TestCompositionSwitchAndFirstTurnShareAdmission(t *testing.T) {
 	c, _, done := newOneTurnController(t, testutil.Turn{Text: "answer"})
 	testComposition(t, c)
 	entered, finish := make(chan struct{}), make(chan struct{})
-	c.ConfigureCompositions(t.TempDir(), func(context.Context, string) error { close(entered); <-finish; return errors.New("candidate failed") })
+	c.ConfigureCompositions(testenv.TempDir(t), func(context.Context, string) error { close(entered); <-finish; return errors.New("candidate failed") })
 	result := make(chan error, 1)
 	go func() { result <- c.SelectAgentComposition(t.Context(), "builtin:general") }()
 	<-entered
@@ -116,7 +117,7 @@ func TestCompositionAdmissionPersistenceFailureRejectsExecutionAndReleasesGate(t
 		t.Run(map[bool]string{false: "async", true: "sync"}[synchronous], func(t *testing.T) {
 			c, _, _ := newOneTurnController(t)
 			testComposition(t, c)
-			blocker := filepath.Join(t.TempDir(), "not-a-directory")
+			blocker := filepath.Join(testenv.TempDir(t), "not-a-directory")
 			if err := os.WriteFile(blocker, nil, 0o600); err != nil {
 				t.Fatal(err)
 			}

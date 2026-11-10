@@ -4,10 +4,12 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"reasonix/internal/base/testenv"
 )
 
 func TestStoreSavePreservesUnreadableIndex(t *testing.T) {
-	s := Store{Dir: t.TempDir()}
+	s := Store{Dir: testenv.TempDir(t)}
 	if _, err := s.Save(Memory{Name: "alpha", Description: "keep", Type: TypeProject, Body: "body"}); err != nil {
 		t.Fatal(err)
 	}
@@ -32,7 +34,7 @@ func TestStoreSavePreservesUnreadableIndex(t *testing.T) {
 }
 
 func TestStoreArchivePreservesUnreadableIndex(t *testing.T) {
-	s := Store{Dir: t.TempDir()}
+	s := Store{Dir: testenv.TempDir(t)}
 	for _, name := range []string{"alpha", "beta"} {
 		if _, err := s.Save(Memory{Name: name, Description: "keep", Type: TypeProject, Body: "body"}); err != nil {
 			t.Fatal(err)
@@ -62,7 +64,7 @@ func TestStoreArchivePreservesUnreadableIndex(t *testing.T) {
 }
 
 func TestFlushIndexPreservesUnreadableFile(t *testing.T) {
-	dir := t.TempDir()
+	dir := testenv.TempDir(t)
 	indexPath := filepath.Join(dir, indexFile)
 	before := "# Memory\n\nHand-written note.\n"
 	if err := os.WriteFile(indexPath, []byte(before), 0o644); err != nil {

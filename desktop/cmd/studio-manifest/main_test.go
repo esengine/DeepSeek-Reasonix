@@ -9,11 +9,12 @@ import (
 	"strings"
 	"testing"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/platform/update"
 )
 
 func TestManifestRecordsEveryArtifactWithItsSignature(t *testing.T) {
-	dir := t.TempDir()
+	dir := testenv.TempDir(t)
 	t.Setenv("GITHUB_REPOSITORY", "esengine/DeepSeek-Reasonix")
 	body := []byte("studio archive bytes")
 	for _, name := range []string{
@@ -71,7 +72,7 @@ func TestManifestRecordsEveryArtifactWithItsSignature(t *testing.T) {
 // on the Studio side does. Only what installs itself may resolve as a platform
 // asset, or the version panel offers a move it cannot make.
 func TestManifestResolvesOnlyWhatCanInstallItself(t *testing.T) {
-	dir := t.TempDir()
+	dir := testenv.TempDir(t)
 	t.Setenv("GITHUB_REPOSITORY", "esengine/DeepSeek-Reasonix")
 	for _, name := range []string{
 		"ReasonixStudio-linux-amd64.tar.gz",
@@ -128,7 +129,7 @@ func TestManifestResolvesOnlyWhatCanInstallItself(t *testing.T) {
 
 func TestEmptyDirIsAFailedRelease(t *testing.T) {
 	t.Setenv("GITHUB_REPOSITORY", "esengine/DeepSeek-Reasonix")
-	if err := run(t.TempDir(), "v0.1.0", "studio-v0.1.0", "", false); err == nil {
+	if err := run(testenv.TempDir(t), "v0.1.0", "studio-v0.1.0", "", false); err == nil {
 		t.Fatal("a release with no artifacts must fail, not publish an empty manifest")
 	}
 }
@@ -136,7 +137,7 @@ func TestEmptyDirIsAFailedRelease(t *testing.T) {
 // A mirrored release is fetched from the mirror first, with GitHub kept as the
 // address a client falls back to; every full artifact and its signature alike.
 func TestMirroredManifestPutsTheMirrorFirst(t *testing.T) {
-	dir := t.TempDir()
+	dir := testenv.TempDir(t)
 	t.Setenv("GITHUB_REPOSITORY", "esengine/DeepSeek-Reasonix")
 	for _, name := range []string{
 		"ReasonixStudio-windows-amd64-installer.exe",
@@ -193,7 +194,7 @@ func TestUnmirroredManifestNamesOnlyGitHub(t *testing.T) {
 // Both Windows architectures ship an installer and a portable archive under
 // the same naming rule; each installer answers only its own platform key.
 func TestWindowsArchitecturesResolveToTheirOwnInstallers(t *testing.T) {
-	dir := t.TempDir()
+	dir := testenv.TempDir(t)
 	t.Setenv("GITHUB_REPOSITORY", "esengine/DeepSeek-Reasonix")
 	for _, name := range []string{
 		"ReasonixStudio-windows-amd64-installer.exe",
@@ -258,7 +259,7 @@ func TestRPMRidesBesideTheDebWithoutMovingItsKey(t *testing.T) {
 		}
 		return m
 	}
-	debOnly, both := t.TempDir(), t.TempDir()
+	debOnly, both := testenv.TempDir(t), testenv.TempDir(t)
 	write(debOnly, "ReasonixStudio-linux-amd64.deb")
 	write(both, "ReasonixStudio-linux-amd64.deb", "ReasonixStudio-linux-amd64.rpm")
 	before, after := generate(debOnly), generate(both)
@@ -292,7 +293,7 @@ func TestRPMRidesBesideTheDebWithoutMovingItsKey(t *testing.T) {
 // the second architecture must not move the first one's entries.
 func TestLinuxArm64PackagesAreKeyedBesideAmd64(t *testing.T) {
 	t.Setenv("GITHUB_REPOSITORY", "esengine/DeepSeek-Reasonix")
-	dir := t.TempDir()
+	dir := testenv.TempDir(t)
 	generate := func() update.Manifest {
 		if err := run(dir, "v2.39.0", "studio-v2.39.0", "", true); err != nil {
 			t.Fatal(err)
@@ -345,7 +346,7 @@ func TestLinuxArm64PackagesAreKeyedBesideAmd64(t *testing.T) {
 // replaces: it must not appear as a platform asset or a native package, and
 // adding it must not move any entry a shipped client reads.
 func TestAnAppImageIsOfferedButNeverResolvedAsAnUpdate(t *testing.T) {
-	dir := t.TempDir()
+	dir := testenv.TempDir(t)
 	for _, name := range []string{"ReasonixStudio-linux-amd64.deb", "ReasonixStudio-linux-amd64.AppImage", "ReasonixStudio-linux-arm64.AppImage"} {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte(name), 0o644); err != nil {
 			t.Fatal(err)

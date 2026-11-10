@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"reasonix/internal/base/testenv"
 )
 
 const holderEnv = "REASONIX_SCRATCH_HOLDER"
@@ -33,7 +35,7 @@ func TestMain(m *testing.M) {
 
 func isolatedTemp(t *testing.T) string {
 	t.Helper()
-	root := t.TempDir()
+	root := testenv.TempDir(t)
 	t.Setenv("TMPDIR", root)
 	t.Setenv("TMP", root)
 	t.Setenv("TEMP", root)

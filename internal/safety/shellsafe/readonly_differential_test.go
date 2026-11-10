@@ -14,6 +14,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"reasonix/internal/base/testenv"
 )
 
 // For every generated command the classifier accepts as a read, run it in a
@@ -97,8 +99,8 @@ func TestEveryCommandTheClassifierCallsAReadLeavesTheDirectoryAlone(t *testing.T
 		}
 	}
 	rng := rand.New(rand.NewSource(20261016))
-	scratch := t.TempDir()
-	home := t.TempDir()
+	scratch := testenv.TempDir(t)
+	home := testenv.TempDir(t)
 	classified, executed := 0, 0
 	seen := map[string]bool{}
 	for range 1200 {
@@ -174,7 +176,7 @@ func TestEveryGitCommandTheClassifierCallsAReadLeavesTheRepositoryAlone(t *testi
 		t.Skip("no git")
 	}
 	sh, _ := exec.LookPath("sh")
-	home := t.TempDir()
+	home := testenv.TempDir(t)
 	env := []string{"HOME=" + home, "PATH=" + os.Getenv("PATH"), "LC_ALL=C", "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null", "GIT_TERMINAL_PROMPT=0", "GIT_PAGER=cat", "GIT_EDITOR=true"}
 	build := func(dir string) {
 		t.Helper()
@@ -202,7 +204,7 @@ func TestEveryGitCommandTheClassifierCallsAReadLeavesTheRepositoryAlone(t *testi
 		return strings.Join(keep, "\n")
 	}
 	rng := rand.New(rand.NewSource(20261017))
-	scratch := t.TempDir()
+	scratch := testenv.TempDir(t)
 	classified := 0
 	seen := map[string]bool{}
 	for range 120 {

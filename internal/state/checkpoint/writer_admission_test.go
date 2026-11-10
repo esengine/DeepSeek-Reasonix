@@ -7,6 +7,8 @@ import (
 	"testing"
 	"testing/synctest"
 	"time"
+
+	"reasonix/internal/base/testenv"
 )
 
 func TestWriterRegistrationDoesNotHoldRegistryDuringUndoCallback(t *testing.T) {
@@ -32,7 +34,7 @@ func TestWriterRegistrationDoesNotHoldRegistryDuringUndoCallback(t *testing.T) {
 }
 
 func TestWriterRegistrationWaitCanBeCancelledWithoutExclusiveRelease(t *testing.T) {
-	s := New("", t.TempDir())
+	s := New("", testenv.TempDir(t))
 	o := NewMutationObserver(ObserverOptions{Store: s})
 	synctest.Test(t, func(t *testing.T) {
 		if err := s.Barrier().EnterExclusive(); err != nil {
@@ -67,7 +69,7 @@ func TestWriterRegistrationWaitCanBeCancelledWithoutExclusiveRelease(t *testing.
 }
 
 func TestUnregisterPendingWriterDoesNotBlockOrResurrect(t *testing.T) {
-	s := New("", t.TempDir())
+	s := New("", testenv.TempDir(t))
 	o := NewMutationObserver(ObserverOptions{Store: s})
 	synctest.Test(t, func(t *testing.T) {
 		if err := s.Barrier().EnterExclusive(); err != nil {
@@ -98,7 +100,7 @@ func TestUnregisterPendingWriterDoesNotBlockOrResurrect(t *testing.T) {
 }
 
 func TestWriterRegistrationFollowerCancellationDoesNotCancelLeader(t *testing.T) {
-	s := New("", t.TempDir())
+	s := New("", testenv.TempDir(t))
 	o := NewMutationObserver(ObserverOptions{Store: s})
 	synctest.Test(t, func(t *testing.T) {
 		if err := s.Barrier().EnterExclusive(); err != nil {
@@ -137,7 +139,7 @@ func TestWriterRegistrationFollowerCancellationDoesNotCancelLeader(t *testing.T)
 }
 
 func TestWriterRegistrationOldCleanupCannotReleaseNewGeneration(t *testing.T) {
-	s := New("", t.TempDir())
+	s := New("", testenv.TempDir(t))
 	o := NewMutationObserver(ObserverOptions{Store: s})
 	ctx, cancel := context.WithCancel(t.Context())
 	first, err := o.RegisterWriterContext(ctx, "reused", "background", 1)
@@ -229,7 +231,7 @@ func TestWriterRegistrationPanicClosesFollowersAndPermit(t *testing.T) {
 }
 
 func TestWriterRegistrationRegistryAvailableDuringStorePublication(t *testing.T) {
-	s := New("", t.TempDir())
+	s := New("", testenv.TempDir(t))
 	o := NewMutationObserver(ObserverOptions{Store: s})
 	first, err := o.RegisterWriterContext(t.Context(), "first", "background", 1)
 	if err != nil {

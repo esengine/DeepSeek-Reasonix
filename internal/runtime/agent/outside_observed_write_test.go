@@ -44,7 +44,7 @@ func ordinaryTurnAgent(t *testing.T, turns ...testutil.Turn) (*Agent, *testutil.
 	}
 	prov := testutil.NewMock("m", turns...)
 	a := New(prov, reg, sessionstore.NewSession("sys"),
-		Options{WriteWorkspaceRoot: t.TempDir(), CheckTargetAccess: allowTestFileAccess}, event.Discard)
+		Options{WriteWorkspaceRoot: testenv.TempDir(t), CheckTargetAccess: allowTestFileAccess}, event.Discard)
 	return a, prov
 }
 
@@ -103,7 +103,7 @@ func TestADeliverableInThePublicTempDirectoryIsNotExempt(t *testing.T) {
 func TestTheExemptionIsNarrowerThanALookalikePath(t *testing.T) {
 	// The host's roots are stated rather than steered through variables, which
 	// each platform spells differently; the rule under test takes them as input.
-	root := t.TempDir()
+	root := testenv.TempDir(t)
 	tempRoot := filepath.Join(root, "tmp")
 	caches := []string{filepath.Join(root, "go")}
 

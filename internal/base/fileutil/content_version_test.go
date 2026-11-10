@@ -6,10 +6,12 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"reasonix/internal/base/testenv"
 )
 
 func TestContentVersionTracksBytesKindAndAbsence(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "file")
+	path := filepath.Join(testenv.TempDir(t), "file")
 	absent, err := ReadContentVersion(t.Context(), path)
 	if err != nil || absent.Kind != "absent" {
 		t.Fatalf("absent: %+v %v", absent, err)
@@ -43,13 +45,13 @@ func TestContentVersionTracksBytesKindAndAbsence(t *testing.T) {
 func TestContentVersionCancellationPrecedesFilesystemAccess(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
-	if _, err := ReadContentVersion(ctx, filepath.Join(t.TempDir(), "missing")); !errors.Is(err, context.Canceled) {
+	if _, err := ReadContentVersion(ctx, filepath.Join(testenv.TempDir(t), "missing")); !errors.Is(err, context.Canceled) {
 		t.Fatalf("cancelled read: %v", err)
 	}
 }
 
 func TestContentVersionHashesSymlinkTextWithoutReadingTarget(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "link")
+	path := filepath.Join(testenv.TempDir(t), "link")
 	if err := os.Symlink("missing-target", path); err != nil {
 		t.Skipf("symlinks unavailable: %v", err)
 	}

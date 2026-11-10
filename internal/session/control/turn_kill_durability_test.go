@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/contract/event"
 	"reasonix/internal/contract/provider"
 	"reasonix/internal/contract/tool"
@@ -49,7 +50,7 @@ func TestKilledTurnKeepsItsPrompt(t *testing.T) {
 		time.Sleep(10 * time.Second)
 		t.Fatal("fixture was not killed")
 	}
-	root := t.TempDir()
+	root := testenv.TempDir(t)
 	cmd := exec.Command(os.Args[0], "-test.run=^TestKilledTurnKeepsItsPrompt$")
 	cmd.Env = append(os.Environ(), "REASONIX_TURN_KILL_FIXTURE="+root)
 	out, err := cmd.CombinedOutput()

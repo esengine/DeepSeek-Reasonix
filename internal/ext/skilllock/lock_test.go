@@ -7,6 +7,8 @@ import (
 	"strconv"
 	"testing"
 	"time"
+
+	"reasonix/internal/base/testenv"
 )
 
 func putFile(t *testing.T, path, body string) {
@@ -20,7 +22,7 @@ func putFile(t *testing.T, path, body string) {
 }
 
 func TestADigestIsTheSameForACopyAndIgnoresTimeButNotContentOrNames(t *testing.T) {
-	a, b := t.TempDir(), t.TempDir()
+	a, b := testenv.TempDir(t), testenv.TempDir(t)
 	for _, root := range []string{a, b} {
 		putFile(t, filepath.Join(root, "SKILL.md"), "---\ndescription: x\n---\nbody")
 		putFile(t, filepath.Join(root, "scripts", "run.sh"), "echo hi")
@@ -47,7 +49,7 @@ func TestADigestIsTheSameForACopyAndIgnoresTimeButNotContentOrNames(t *testing.T
 }
 
 func TestRecordReplacesAndForgetRemoves(t *testing.T) {
-	home := t.TempDir()
+	home := testenv.TempDir(t)
 	if err := Record(home, Entry{Name: "a", Scope: "global", Source: "/s/a", Mode: "copy", Digest: "d1"}); err != nil {
 		t.Fatal(err)
 	}
@@ -67,7 +69,7 @@ func TestRecordReplacesAndForgetRemoves(t *testing.T) {
 }
 
 func TestADamagedLockIsReportedAndNeverReadAsEmpty(t *testing.T) {
-	home := t.TempDir()
+	home := testenv.TempDir(t)
 	putFile(t, Path(home), "{not json")
 	if _, err := Entries(home); err == nil {
 		t.Fatal("a damaged lock read as an empty one")
@@ -76,7 +78,7 @@ func TestADamagedLockIsReportedAndNeverReadAsEmpty(t *testing.T) {
 	if _, err := Entries(home); err == nil {
 		t.Fatal("a lock from a newer build read as an empty one")
 	}
-	if entries, err := Entries(t.TempDir()); err != nil || len(entries) != 0 {
+	if entries, err := Entries(testenv.TempDir(t)); err != nil || len(entries) != 0 {
 		t.Fatalf("a missing lock = %v %v, want nothing and no error", entries, err)
 	}
 	if err := Record(home, Entry{Name: "a", Scope: "global", Digest: "d"}); err != nil {
@@ -88,7 +90,7 @@ func TestADamagedLockIsReportedAndNeverReadAsEmpty(t *testing.T) {
 }
 
 func TestAssessSaysWhichSideMoved(t *testing.T) {
-	src, installed := t.TempDir(), t.TempDir()
+	src, installed := testenv.TempDir(t), testenv.TempDir(t)
 	for _, root := range []string{src, installed} {
 		putFile(t, filepath.Join(root, "SKILL.md"), "v1")
 	}
@@ -115,10 +117,10 @@ func TestAssessSaysWhichSideMoved(t *testing.T) {
 }
 
 func TestAssessNeverReadsWhatItCannotTrustAsInStep(t *testing.T) {
-	installed := t.TempDir()
+	installed := testenv.TempDir(t)
 	putFile(t, filepath.Join(installed, "SKILL.md"), "v1")
 	for name, e := range map[string]Entry{
-		"no digest":     {Name: "a", Source: t.TempDir(), Mode: "copy"},
+		"no digest":     {Name: "a", Source: testenv.TempDir(t), Mode: "copy"},
 		"no source":     {Name: "a", Mode: "copy", Digest: "d"},
 		"remote source": {Name: "a", Source: "https://example.com/skill", Mode: "copy", Digest: "d"},
 	} {
@@ -133,14 +135,14 @@ func TestAssessNeverReadsWhatItCannotTrustAsInStep(t *testing.T) {
 }
 
 func TestADigestIsBoundedAndAnOversizedSkillReadsAsUnknown(t *testing.T) {
-	many := t.TempDir()
+	many := testenv.TempDir(t)
 	for i := range MaxFiles + 1 {
 		putFile(t, filepath.Join(many, "f", string(rune('a'+i%26)), strconv.Itoa(i)), "x")
 	}
 	if _, err := Digest(many); !errors.Is(err, ErrTooLarge) {
 		t.Fatalf("a folder of %d files digested: %v", MaxFiles+1, err)
 	}
-	big := t.TempDir()
+	big := testenv.TempDir(t)
 	putFile(t, filepath.Join(big, "SKILL.md"), "small")
 	f, err := os.Create(filepath.Join(big, "blob"))
 	if err != nil {
@@ -153,7 +155,7 @@ func TestADigestIsBoundedAndAnOversizedSkillReadsAsUnknown(t *testing.T) {
 	if _, err := Digest(big); !errors.Is(err, ErrTooLarge) {
 		t.Fatalf("a folder past %d bytes digested: %v", MaxBytes, err)
 	}
-	installed := t.TempDir()
+	installed := testenv.TempDir(t)
 	putFile(t, filepath.Join(installed, "SKILL.md"), "v1")
 	d, _ := Digest(installed)
 	for name, src := range map[string]string{"too many files": many, "too many bytes": big} {
@@ -169,7 +171,7 @@ func TestADigestIsBoundedAndAnOversizedSkillReadsAsUnknown(t *testing.T) {
 // A copy materialises an in-folder link as the file it points at and leaves out
 // .git and every other link, so the source and its copy must digest the same.
 func TestTreeReadsAFolderTheWayAnInstallCopiesIt(t *testing.T) {
-	root, outside := t.TempDir(), t.TempDir()
+	root, outside := testenv.TempDir(t), testenv.TempDir(t)
 	putFile(t, filepath.Join(root, "SKILL.md"), "body")
 	putFile(t, filepath.Join(root, "real.txt"), "real")
 	putFile(t, filepath.Join(root, ".git", "HEAD"), "ref")
@@ -197,7 +199,7 @@ func TestTreeReadsAFolderTheWayAnInstallCopiesIt(t *testing.T) {
 			t.Fatalf("tree = %v, want %v", got, want)
 		}
 	}
-	copied := t.TempDir()
+	copied := testenv.TempDir(t)
 	putFile(t, filepath.Join(copied, "SKILL.md"), "body")
 	putFile(t, filepath.Join(copied, "real.txt"), "real")
 	putFile(t, filepath.Join(copied, "alias.txt"), "real")

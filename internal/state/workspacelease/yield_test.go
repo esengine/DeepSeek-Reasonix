@@ -6,12 +6,14 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"reasonix/internal/base/testenv"
 )
 
 func yieldPair(t *testing.T) (a, b *Owner, root string) {
 	t.Helper()
-	root = t.TempDir()
-	locks := t.TempDir()
+	root = testenv.TempDir(t)
+	locks := testenv.TempDir(t)
 	var err error
 	if a, err = New(root, locks, nil); err != nil {
 		t.Fatal(err)

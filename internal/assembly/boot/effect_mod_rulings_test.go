@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/contract/event"
 	"reasonix/internal/contract/provider"
 	"reasonix/internal/session/control"
@@ -107,7 +108,7 @@ func TestEffectAModQueuesAPromptThatReachesTheModelLabelledAsTheMods(t *testing.
 			done <- struct{}{}
 		}
 	})
-	res, err := BuildRuntime(t.Context(), Options{Sink: sink, SessionDir: t.TempDir()})
+	res, err := BuildRuntime(t.Context(), Options{Sink: sink, SessionDir: testenv.TempDir(t)})
 	if err != nil {
 		t.Fatal(err)
 	}

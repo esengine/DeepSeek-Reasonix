@@ -8,6 +8,7 @@ import (
 	"sync"
 	"testing"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/contract/tool"
 )
 
@@ -146,7 +147,7 @@ func TestResourceReadToolRefusesBadArguments(t *testing.T) {
 // A server that has not connected yet is known by what its last handshake
 // cached, and every cache writer must keep what the server declared.
 func TestDeclaresResourcesReadsTheLiveClientThenTheCache(t *testing.T) {
-	t.Setenv("REASONIX_HOME", t.TempDir())
+	t.Setenv("REASONIX_HOME", testenv.TempDir(t))
 	spec := Spec{Name: "cached-docs", Type: "http", URL: "https://example.test/mcp"}
 	h := NewHost()
 	if h.DeclaresResources(spec) {

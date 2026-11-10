@@ -12,6 +12,7 @@ import (
 	"strings"
 	"testing"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/contract/provider"
 	"reasonix/internal/contract/tool"
 )
@@ -42,7 +43,7 @@ func mp4Of(seconds, size int) []byte {
 
 func nativeTool(t *testing.T, content []byte, name string) (readVideo, string) {
 	t.Helper()
-	dir := t.TempDir()
+	dir := testenv.TempDir(t)
 	if err := os.WriteFile(filepath.Join(dir, name), content, 0o644); err != nil {
 		t.Fatal(err)
 	}

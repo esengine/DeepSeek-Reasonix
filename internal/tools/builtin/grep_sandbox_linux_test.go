@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/safety/sandbox"
 )
 
@@ -45,7 +46,7 @@ func TestGrepSandboxUnavailableRootDoesNotSearchHome(t *testing.T) {
 		t.Run(mode, func(t *testing.T) {
 			spec := sandbox.Spec{Mode: "enforce", WriteRoots: []string{home}, MinimalWrites: true}
 			if mode == "session-temp" {
-				spec.SessionTemp = t.TempDir()
+				spec.SessionTemp = testenv.TempDir(t)
 			}
 			g := grepTool{rg: rg, sb: spec, paths: paths}
 			out := runTool(t, g, map[string]any{"pattern": needle, "path": home})

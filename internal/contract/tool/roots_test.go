@@ -7,10 +7,12 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"reasonix/internal/base/testenv"
 )
 
 func TestMissingRootNamesTheFirstGoneDirectoryByItsDisplayPath(t *testing.T) {
-	dir := t.TempDir()
+	dir := testenv.TempDir(t)
 	gone := filepath.Join(dir, "gone")
 	roots := []Root{
 		{Kind: RootWorkspace, Path: dir, Display: dir},
@@ -52,7 +54,7 @@ func TestMissingRootLeavesOtherStatFailuresToTheTool(t *testing.T) {
 }
 
 func TestMissingRootTreatsAFileWhereADirectoryShouldBeAsMissing(t *testing.T) {
-	file := filepath.Join(t.TempDir(), "f")
+	file := filepath.Join(testenv.TempDir(t), "f")
 	if err := os.WriteFile(file, nil, 0o644); err != nil {
 		t.Fatal(err)
 	}

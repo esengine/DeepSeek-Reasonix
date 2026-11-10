@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"reasonix/internal/base/filelock"
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/state/schedule"
 )
 
@@ -49,14 +50,14 @@ type fixture struct {
 
 func newFixture(t *testing.T) *fixture {
 	t.Helper()
-	dir := filepath.Join(t.TempDir(), "schedules")
+	dir := filepath.Join(testenv.TempDir(t), "schedules")
 	clk := &clock{t: epoch}
 	base, err := schedule.Open(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
 	store := base.WithClock(clk.Now)
-	ws := t.TempDir()
+	ws := testenv.TempDir(t)
 	sc, err := store.Create(t.Context(), testPolicy(), schedule.CreateRequest{
 		Trigger: schedule.Trigger{Kind: schedule.TriggerEvery, EverySec: 600}, Target: schedule.Target{Workspace: ws},
 		Prompt: "look around", Model: schedule.Model{Provider: "p", Model: "m"}, ConfirmedBy: schedule.ConfirmedByHuman,
@@ -232,7 +233,7 @@ func TestARunReapedBeforeTheSupervisorStartsIsNotRun(t *testing.T) {
 	if reaped, err := f.store.ReapDead(t.Context(), testPolicy()); err != nil || len(reaped) != 1 {
 		t.Fatalf("ReapDead = %v, %v", reaped, err)
 	}
-	mark := filepath.Join(t.TempDir(), "mark")
+	mark := filepath.Join(testenv.TempDir(t), "mark")
 	_, err := f.supervisor("ok", mark).Run(f.ctx(t), f.run.TriggerID)
 	if !errors.Is(err, schedule.ErrRunSettled) {
 		t.Fatalf("Run = %v, want ErrRunSettled", err)
@@ -244,7 +245,7 @@ func TestARunReapedBeforeTheSupervisorStartsIsNotRun(t *testing.T) {
 
 func TestARunSettledWhileTheChildStartsSpendsNothing(t *testing.T) {
 	f := newFixture(t)
-	mark := filepath.Join(t.TempDir(), "mark")
+	mark := filepath.Join(testenv.TempDir(t), "mark")
 	sup := f.supervisor("ok", mark)
 	inner := sup.Command
 	sup.Command = func(id string) (*exec.Cmd, error) {
@@ -269,7 +270,7 @@ func TestARunSettledWhileTheChildStartsSpendsNothing(t *testing.T) {
 
 func TestTwoSupervisorsOnOneClaimRunItOnce(t *testing.T) {
 	f := newFixture(t)
-	mark := filepath.Join(t.TempDir(), "mark")
+	mark := filepath.Join(testenv.TempDir(t), "mark")
 	var wg sync.WaitGroup
 	errs := make([]error, 2)
 	for i := range errs {
@@ -307,7 +308,7 @@ func TestChildLeavesWhenTheSupervisorCrashesAndTheRunIsReaped(t *testing.T) {
 		t.Fatal(err)
 	}
 	parent := exec.Command(exe)
-	mark := filepath.Join(t.TempDir(), "child-started")
+	mark := filepath.Join(testenv.TempDir(t), "child-started")
 	parent.Env = append(os.Environ(), fakeEnv+"=parent", "SCHEDRUN_STORE="+f.dir, "SCHEDRUN_ID="+f.run.TriggerID, "SCHEDRUN_CHILD_MODE=hold", "SCHEDRUN_MARK="+mark)
 	if err := parent.Start(); err != nil {
 		t.Fatal(err)
@@ -344,7 +345,7 @@ func TestChildLeavesWhenTheSupervisorCrashesAndTheRunIsReaped(t *testing.T) {
 
 func TestKillingTheRunEndsItsWholeProcessTree(t *testing.T) {
 	f := newFixture(t)
-	lock := filepath.Join(t.TempDir(), "grand.lock")
+	lock := filepath.Join(testenv.TempDir(t), "grand.lock")
 	sawHeld := make(chan bool, 1)
 	go func() {
 		for end := time.Now().Add(1200 * time.Millisecond); time.Now().Before(end); time.Sleep(20 * time.Millisecond) {
@@ -407,7 +408,7 @@ func TestAChildRefusedTheLeaseLeavesTheRunUnsettled(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer foreign()
-	mark := filepath.Join(t.TempDir(), "mark")
+	mark := filepath.Join(testenv.TempDir(t), "mark")
 	_, err = f.supervisor("ok", mark).Run(f.ctx(t), f.run.TriggerID)
 	if !errors.Is(err, ErrExecutorRefused) {
 		t.Fatalf("Run = %v, want ErrExecutorRefused", err)

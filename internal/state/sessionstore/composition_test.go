@@ -3,6 +3,7 @@ package sessionstore
 import (
 	"os"
 	"path/filepath"
+	"reasonix/internal/base/testenv"
 	"strings"
 	"testing"
 
@@ -16,7 +17,7 @@ func TestCompositionRoundTripAndProviderBoundary(t *testing.T) {
 	s := NewSession("stable")
 	s.BindComposition(b)
 	s.Add(provider.Message{Role: provider.RoleUser, Content: "review"})
-	path := filepath.Join(t.TempDir(), "session.jsonl")
+	path := filepath.Join(testenv.TempDir(t), "session.jsonl")
 	if err := s.SaveSnapshot(path); err != nil {
 		t.Fatal(err)
 	}

@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"reasonix/internal/base/testenv"
 )
 
 func TestCUAInstalledApplicationRemainsDiscoverableAndLaunchesExplicitly(t *testing.T) {
@@ -13,7 +15,7 @@ func TestCUAInstalledApplicationRemainsDiscoverableAndLaunchesExplicitly(t *test
 		t.Fatal(err)
 	}
 	t.Setenv("REASONIX_CUA_INSTALLED_APP", exe)
-	log := filepath.Join(t.TempDir(), "requests.jsonl")
+	log := filepath.Join(testenv.TempDir(t), "requests.jsonl")
 	t.Setenv("REASONIX_CUA_REQUEST_LOG", log)
 	s := fakeSession(t)
 	apps, err := s.Apps(t.Context())

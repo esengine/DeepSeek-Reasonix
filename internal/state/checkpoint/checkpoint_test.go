@@ -495,7 +495,7 @@ func TestTruncateFromReportsPersistentDeleteFailure(t *testing.T) {
 }
 
 func BenchmarkRestoreGB18030Encoding(b *testing.B) {
-	root := b.TempDir()
+	root := testenv.TempDir(b)
 	a := filepath.Join(root, "gbk.txt")
 	original := strings.Repeat("\u4f60\u597d\u4e16\u754c\n\u65e7\u884c\n", 8192)
 	edited := strings.Repeat("\u4f60\u597d\u4e16\u754c\n\u65b0\u884c\n", 8192)

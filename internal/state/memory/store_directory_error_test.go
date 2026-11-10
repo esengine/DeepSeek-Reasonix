@@ -10,6 +10,8 @@ import (
 	"strings"
 	"syscall"
 	"testing"
+
+	"reasonix/internal/base/testenv"
 )
 
 func denyMemoryDirectory(t *testing.T, path string) {
@@ -25,7 +27,7 @@ func denyMemoryDirectory(t *testing.T, path string) {
 
 func directoryErrorStore(t *testing.T) (Store, Memory, string) {
 	t.Helper()
-	s := Store{Dir: t.TempDir(), GlobalDir: t.TempDir()}
+	s := Store{Dir: testenv.TempDir(t), GlobalDir: testenv.TempDir(t)}
 	if _, err := s.Save(Memory{Name: "global-fact", Scope: FactScopeGlobal, Body: "global"}); err != nil {
 		t.Fatal(err)
 	}
@@ -154,7 +156,7 @@ func TestAllMemoryDirectoryReadsReportFailures(t *testing.T) {
 }
 
 func TestMemoryMissingDirectoriesRemainEmpty(t *testing.T) {
-	s := Store{Dir: filepath.Join(t.TempDir(), "missing"), GlobalDir: filepath.Join(t.TempDir(), "global")}
+	s := Store{Dir: filepath.Join(testenv.TempDir(t), "missing"), GlobalDir: filepath.Join(testenv.TempDir(t), "global")}
 	if list, err := s.ListAll(); list != nil || err != nil {
 		t.Fatalf("ListAll = %v, %v", list, err)
 	}
@@ -212,7 +214,7 @@ func TestRestoreArchivedStopsBeforeWritingOnUnreadableHistory(t *testing.T) {
 }
 
 func TestUnreadableStoreReachesToolsAndRecall(t *testing.T) {
-	opts := Options{CWD: t.TempDir(), UserDir: t.TempDir()}
+	opts := Options{CWD: testenv.TempDir(t), UserDir: testenv.TempDir(t)}
 	s := StoreFor(opts.UserDir, opts.CWD)
 	if _, err := s.Save(Memory{Name: "compiler", Body: "compiler configuration", Activation: ActivationPinned}); err != nil {
 		t.Fatal(err)
@@ -264,7 +266,7 @@ func TestSaveStopsBeforeWritingWhenOtherScopeCannotBeRead(t *testing.T) {
 }
 
 func TestRestoreReportsUnreadableRevisionDirectory(t *testing.T) {
-	s := Store{Dir: t.TempDir()}
+	s := Store{Dir: testenv.TempDir(t)}
 	first, err := s.SaveWithOptions(Memory{Name: "fact", Body: "v1"}, SaveOptions{})
 	if err != nil {
 		t.Fatal(err)

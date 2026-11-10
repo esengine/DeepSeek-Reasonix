@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/contract/config"
 	"reasonix/internal/safety/sandbox"
 )
@@ -57,11 +58,11 @@ func TestMemoryBenchAnswerIsolationAtSandboxBoundary(t *testing.T) {
 	if err := validateAnswerIsolation(tasks); err != nil {
 		t.Fatal(err)
 	}
-	work := t.TempDir()
+	work := testenv.TempDir(t)
 	if err := stageAnswerIsolation(tasks[0].answerRoot, work); err != nil {
 		t.Fatal(err)
 	}
-	home := t.TempDir()
+	home := testenv.TempDir(t)
 	if err := os.WriteFile(filepath.Join(home, "config.toml"), []byte("[sandbox]\nbash = \"off\"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -105,7 +106,7 @@ func TestAnswerIsolationRefusesUnsafeWorkdirAndExistingConfig(t *testing.T) {
 	if err := stageAnswerIsolation(answerRoot, filepath.Dir(answerRoot)); err == nil {
 		t.Fatal("workdir inside the checkout was accepted")
 	}
-	work := t.TempDir()
+	work := testenv.TempDir(t)
 	path := filepath.Join(work, "reasonix.toml")
 	if err := os.WriteFile(path, []byte("# task fixture\n"), 0o600); err != nil {
 		t.Fatal(err)
@@ -120,7 +121,7 @@ func TestAnswerIsolationRefusesUnsafeWorkdirAndExistingConfig(t *testing.T) {
 
 func TestRunTaskDropsIsolationConfigBeforeGrading(t *testing.T) {
 	requireShellStub(t)
-	suite := t.TempDir()
+	suite := testenv.TempDir(t)
 	taskDir := filepath.Join(suite, "tasks", "demo")
 	if err := os.MkdirAll(filepath.Join(taskDir, "memory", "project"), 0o755); err != nil {
 		t.Fatal(err)
@@ -129,7 +130,7 @@ func TestRunTaskDropsIsolationConfigBeforeGrading(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(taskDir, "verify.sh"), []byte(verify), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	bin := filepath.Join(t.TempDir(), "fake-agent")
+	bin := filepath.Join(testenv.TempDir(t), "fake-agent")
 	script := `#!/usr/bin/env bash
 set -e
 test -f reasonix.toml
@@ -154,7 +155,7 @@ done
 
 func TestMemoryBenchRejectsAnswerReadInTrajectory(t *testing.T) {
 	requireShellStub(t)
-	suite := t.TempDir()
+	suite := testenv.TempDir(t)
 	taskDir := filepath.Join(suite, "tasks", "demo")
 	answer := filepath.Join(taskDir, "memory", "project", "fact.md")
 	if err := os.MkdirAll(filepath.Dir(answer), 0o755); err != nil {
@@ -166,7 +167,7 @@ func TestMemoryBenchRejectsAnswerReadInTrajectory(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(taskDir, "verify.sh"), []byte("#!/bin/sh\ntest -f answer.txt\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	bin := filepath.Join(t.TempDir(), "fake-agent")
+	bin := filepath.Join(testenv.TempDir(t), "fake-agent")
 	script := `#!/usr/bin/env bash
 set -e
 printf 'ok\n' > answer.txt
@@ -194,7 +195,7 @@ done
 
 func TestMissingAnswerTrajectoryKeepsOtherTasksRunning(t *testing.T) {
 	requireShellStub(t)
-	root := filepath.Join(t.TempDir(), "tasks")
+	root := filepath.Join(testenv.TempDir(t), "tasks")
 	var tasks []task
 	for _, id := range []string{"missing", "complete"} {
 		dir := filepath.Join(root, id)
@@ -206,7 +207,7 @@ func TestMissingAnswerTrajectoryKeepsOtherTasksRunning(t *testing.T) {
 		}
 		tasks = append(tasks, task{ID: id, Prompt: id, TimeoutSec: 30, dir: dir, answerRoot: root})
 	}
-	bin := filepath.Join(t.TempDir(), "fake-agent")
+	bin := filepath.Join(testenv.TempDir(t), "fake-agent")
 	script := `#!/usr/bin/env bash
 set -e
 printf 'ok\n' > answer.txt
@@ -251,7 +252,7 @@ func TestAnswerTrajectoryAuditDistinguishesReadsFromListingsAndDenials(t *testin
 		{"glob lists name only", `{"event":{"kind":"tool_result","tool":{"name":"glob","args":"{\"pattern\":\"/repo/tasks/demo/memory/project/*.md\"}","output":"/repo/tasks/demo/memory/project/fact.md"}}}`, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			path := filepath.Join(t.TempDir(), "run.trajectory.jsonl")
+			path := filepath.Join(testenv.TempDir(t), "run.trajectory.jsonl")
 			if err := os.WriteFile(path, []byte(tc.data+"\n"), 0o600); err != nil {
 				t.Fatal(err)
 			}
@@ -264,7 +265,7 @@ func TestAnswerTrajectoryAuditDistinguishesReadsFromListingsAndDenials(t *testin
 }
 
 func TestAnswerTrajectoryAuditScansEarlierSegments(t *testing.T) {
-	root := filepath.Join(t.TempDir(), "tasks")
+	root := filepath.Join(testenv.TempDir(t), "tasks")
 	answer := filepath.Join(root, "demo", "memory", "project", "fact.md")
 	if err := os.MkdirAll(filepath.Dir(answer), 0o755); err != nil {
 		t.Fatal(err)
@@ -272,7 +273,7 @@ func TestAnswerTrajectoryAuditScansEarlierSegments(t *testing.T) {
 	if err := os.WriteFile(answer, []byte("---\nname: fact\n---\nA fact body in the first trajectory leg.\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	dir := t.TempDir()
+	dir := testenv.TempDir(t)
 	for index, data := range []string{
 		`{"event":{"kind":"tool_result","tool":{"name":"bash","args":"{\"command\":\"cat /repo/tasks/demo/memory/project/fact.md\"}","output":"A fact body in the first trajectory leg."}}}`,
 		`{"event":{"kind":"text","text":"done"}}`,

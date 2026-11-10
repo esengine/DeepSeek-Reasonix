@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/contract/config"
 	"reasonix/internal/contract/tool"
 	"reasonix/internal/ext/plugin"
@@ -23,7 +24,7 @@ func TestRemoveMCPServerDoesNotDeleteFallbackWhenOwnerCorrupt(t *testing.T) {
 	} {
 		t.Run(source.file, func(t *testing.T) {
 			isolateControlConfigHome(t)
-			workspace := t.TempDir()
+			workspace := testenv.TempDir(t)
 			path := filepath.Join(workspace, source.file)
 			if err := os.WriteFile(path, []byte(source.valid), 0o600); err != nil {
 				t.Fatal(err)
@@ -76,8 +77,8 @@ func TestRemoveMCPServerRequiresClaudeDeclarationToBeAbsent(t *testing.T) {
 			t.Run(scope+"/"+transition, func(t *testing.T) {
 				isolateControlConfigHome(t)
 				t.Setenv("REASONIX_HOME", "")
-				workspace := t.TempDir()
-				claudeDir := t.TempDir()
+				workspace := testenv.TempDir(t)
+				claudeDir := testenv.TempDir(t)
 				t.Setenv("CLAUDE_CONFIG_DIR", claudeDir)
 				path := filepath.Join(claudeDir, ".claude.json")
 				body := `{"mcpServers":{"mock":{"command":"claude-mcp"}}}`
@@ -144,13 +145,13 @@ func TestRemoveMCPServerRequiresClaudeDeclarationToBeAbsent(t *testing.T) {
 func TestRemoveMCPServerNamesMalformedClaudeSourceForProjectDeclaration(t *testing.T) {
 	isolateControlConfigHome(t)
 	t.Setenv("REASONIX_HOME", "")
-	workspace := t.TempDir()
+	workspace := testenv.TempDir(t)
 	projectPath := filepath.Join(workspace, "reasonix.toml")
 	projectBody := []byte("[[plugins]]\nname = \"mock\"\ncommand = \"project-mcp\"\n")
 	if err := os.WriteFile(projectPath, projectBody, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	claudeDir := t.TempDir()
+	claudeDir := testenv.TempDir(t)
 	t.Setenv("CLAUDE_CONFIG_DIR", claudeDir)
 	claudePath := filepath.Join(claudeDir, ".claude.json")
 	if err := os.WriteFile(claudePath, []byte(`{"projects":`), 0o600); err != nil {
@@ -206,7 +207,7 @@ func TestRemoveMCPServerRetainsPluginOwnershipAfterFailedManifestLoss(t *testing
 	home := isolateControlConfigHome(t)
 	reasonixHome := filepath.Join(home, ".reasonix")
 	t.Setenv("REASONIX_HOME", reasonixHome)
-	workspace := t.TempDir()
+	workspace := testenv.TempDir(t)
 	root := pluginpkg.InstallRoot(reasonixHome, "managed")
 	manifest := filepath.Join(root, pluginpkg.NativeManifest)
 	if err := os.MkdirAll(root, 0o755); err != nil {

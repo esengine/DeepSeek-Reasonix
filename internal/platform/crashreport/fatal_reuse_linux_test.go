@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"testing"
 	"time"
+
+	"reasonix/internal/base/testenv"
 )
 
 // otherProcess starts a live process that is not this one and waits until the
@@ -47,7 +49,7 @@ func otherProcess(t *testing.T) int {
 // "its writer is still running" and skipped the file on every start, which is
 // how an empty one sat in `cli-crash-fatal`.
 func TestCaptureFatalDumpsClearsADumpWhosePidWasReused(t *testing.T) {
-	home := t.TempDir()
+	home := testenv.TempDir(t)
 	dir := filepath.Join(home, fatalDirName)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		t.Fatal(err)
@@ -71,7 +73,7 @@ func TestCaptureFatalDumpsClearsADumpWhosePidWasReused(t *testing.T) {
 // live writer, so its file is left alone. A dump is not cleared out from under a
 // kernel that is still running.
 func TestCaptureFatalDumpsKeepsThisProcessesOwnFile(t *testing.T) {
-	home := t.TempDir()
+	home := testenv.TempDir(t)
 	dir := filepath.Join(home, fatalDirName)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		t.Fatal(err)

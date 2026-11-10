@@ -5,11 +5,12 @@ import (
 	"path/filepath"
 	"testing"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/contract/tool"
 )
 
 func TestForkFileViewsPreservesDisabledProtection(t *testing.T) {
-	root := t.TempDir()
+	root := testenv.TempDir(t)
 	path := filepath.Join(root, "a.txt")
 	if err := os.WriteFile(path, []byte("before\n"), 0600); err != nil {
 		t.Fatal(err)

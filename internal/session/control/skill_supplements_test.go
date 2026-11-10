@@ -37,7 +37,7 @@ func TestInvokedSkillCarriesReferencesFromAListing(t *testing.T) {
 }
 
 func TestSkillSetRecordsPathsRelativeToTheWorkspace(t *testing.T) {
-	root := t.TempDir()
+	root := testenv.TempDir(t)
 	set := newSkillSet(nil, nil, nil, nil, false, root)
 	if err := set.pathHits.Observe(filepath.Join(root, "src", "a.go")); err != nil {
 		t.Fatal(err)

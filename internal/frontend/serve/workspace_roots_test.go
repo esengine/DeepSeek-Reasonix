@@ -18,7 +18,7 @@ import (
 )
 
 func TestWorkspaceRootsRoutesAddRebuildAndRemove(t *testing.T) {
-	workspace, extra := t.TempDir(), tempAside(t)()
+	workspace, extra := testenv.TempDir(t), tempAside(t)()
 	s := newProviderEditServer(t, workspace)
 	s.AllowProviderEdit()
 	srv := httptest.NewServer(operatorHandler(s))
@@ -50,7 +50,7 @@ func TestWorkspaceRootsRoutesAddRebuildAndRemove(t *testing.T) {
 }
 
 func TestWorkspaceRootsRefusalsCarryTheirIdentity(t *testing.T) {
-	workspace := t.TempDir()
+	workspace := testenv.TempDir(t)
 	s := newProviderEditServer(t, workspace)
 	s.AllowProviderEdit()
 	srv := httptest.NewServer(operatorHandler(s))
@@ -76,7 +76,7 @@ func TestWorkspaceRootsRefusalsCarryTheirIdentity(t *testing.T) {
 func quote(s string) string { b, _ := json.Marshal(s); return string(b) }
 
 func TestWorkspaceRootsEditingIsGated(t *testing.T) {
-	s := newProviderEditServer(t, t.TempDir())
+	s := newProviderEditServer(t, testenv.TempDir(t))
 	srv := httptest.NewServer(operatorHandler(s))
 	defer srv.Close()
 	resp := postProvider(t, srv.URL, "/workspace/roots", `{"path":`+quote(tempAside(t)())+`}`)
@@ -89,7 +89,7 @@ func TestWorkspaceRootsEditingIsGated(t *testing.T) {
 }
 
 func TestAPairedDeviceCannotGrantARootEvenWhenTheWindowCan(t *testing.T) {
-	s := newProviderEditServer(t, t.TempDir())
+	s := newProviderEditServer(t, testenv.TempDir(t))
 	s.AllowProviderEdit()
 	inner := operatorHandler(s)
 	device := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -116,7 +116,7 @@ func TestEveryWorkspaceRootRefusalIsTranslated(t *testing.T) {
 }
 
 func TestSandboxAllowWriteRefusesWhatARootRefuses(t *testing.T) {
-	s := newProviderEditServer(t, t.TempDir())
+	s := newProviderEditServer(t, testenv.TempDir(t))
 	s.AllowProviderEdit()
 	srv := httptest.NewServer(operatorHandler(s))
 	defer srv.Close()
@@ -134,7 +134,7 @@ func TestSandboxAllowWriteRefusesWhatARootRefuses(t *testing.T) {
 }
 
 func TestWithdrawingARootRebuildsEveryPaneOnTheWorkspace(t *testing.T) {
-	workspace := t.TempDir()
+	workspace := testenv.TempDir(t)
 	extra := tempAside(t)()
 	first := newProviderEditServer(t, workspace)
 	bc := NewBroadcaster()
@@ -166,7 +166,7 @@ func TestWithdrawingARootRebuildsEveryPaneOnTheWorkspace(t *testing.T) {
 }
 
 func TestTwoPanesEditingRootsAtOnceDoNotWaitOnEachOther(t *testing.T) {
-	workspace := t.TempDir()
+	workspace := testenv.TempDir(t)
 	extraFolder := tempAside(t)
 	first := newProviderEditServer(t, workspace)
 	bc := NewBroadcaster()

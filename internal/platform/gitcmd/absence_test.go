@@ -7,11 +7,13 @@ import (
 	"os/exec"
 	"path/filepath"
 	"testing"
+
+	"reasonix/internal/base/testenv"
 )
 
 // A folder git will not open is told apart from one git cannot be asked about.
 func TestAbsenceNamesWhyAMarkedFolderHasNoRepository(t *testing.T) {
-	dir := t.TempDir()
+	dir := testenv.TempDir(t)
 	if err := os.WriteFile(filepath.Join(dir, ".git"), []byte("gitdir: ./nowhere\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -71,7 +73,7 @@ func TestAGitStoppedByTheDeadlineIsNotARefusal(t *testing.T) {
 
 // An ended context never starts a process at all.
 func TestOpenDoesNotAskGitWithAnEndedContext(t *testing.T) {
-	dir := t.TempDir()
+	dir := testenv.TempDir(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	if _, err := Open(ctx, dir); !errors.Is(err, context.Canceled) {

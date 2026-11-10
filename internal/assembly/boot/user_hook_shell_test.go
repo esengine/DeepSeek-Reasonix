@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/contract/config"
 	"reasonix/internal/ext/hook"
 	"reasonix/internal/safety/sandbox"
@@ -18,7 +19,7 @@ import (
 // checkout's [tools.shell] must never reach the resolver or the runtime.
 func TestUserHookRunnerIgnoresCheckoutShell(t *testing.T) {
 	isolateConfigHome(t)
-	checkout := t.TempDir()
+	checkout := testenv.TempDir(t)
 	// An installed-looking path: one where sandboxed commands write is refused
 	// before it could reach the merged config this test starts from.
 	evil := filepath.Join(filepath.VolumeName(os.TempDir())+string(filepath.Separator), "opt", "reasonix-test", "evil-bash")
@@ -65,7 +66,7 @@ func TestUserHookRunnerIgnoresCheckoutShell(t *testing.T) {
 	})
 
 	t.Run("user shell is honoured", func(t *testing.T) {
-		userShell := filepath.Join(t.TempDir(), "user-bash")
+		userShell := filepath.Join(testenv.TempDir(t), "user-bash")
 		userConfig := config.UserConfigPath()
 		if err := os.MkdirAll(filepath.Dir(userConfig), 0o755); err != nil {
 			t.Fatal(err)
@@ -85,7 +86,7 @@ func TestUserHookRunnerIgnoresCheckoutShell(t *testing.T) {
 // python.exe the branch ships before the user's own interpreter.
 func TestUserHookRunnerDisablesCwdExeSearch(t *testing.T) {
 	isolateConfigHome(t)
-	checkout := t.TempDir()
+	checkout := testenv.TempDir(t)
 	if err := hook.Save(hook.ScopeGlobal, "", hook.Settings{Hooks: map[hook.Event][]hook.HookConfig{
 		hook.PreToolUse: {{Match: "read_file", Command: `python C:\hooks\guard.py`}},
 	}}); err != nil {

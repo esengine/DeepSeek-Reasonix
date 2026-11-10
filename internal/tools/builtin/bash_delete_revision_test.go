@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/contract/tool"
 	"reasonix/internal/safety/sandbox"
 	"reasonix/internal/state/sessiontemp"
@@ -84,7 +85,7 @@ func TestDeleteRevisionScope(t *testing.T) {
 			if tc.ps {
 				sh = sandbox.Shell{Kind: sandbox.ShellPowerShell, Path: powershellPath(t)}
 			}
-			root := t.TempDir()
+			root := testenv.TempDir(t)
 			b := bash{workDir: root, sb: sandbox.Spec{WriteRoots: []string{root}}}
 			err := b.refuseDestructiveDelete(t.Context(), sh, tc.source)
 			var r tool.Refusal
@@ -103,7 +104,7 @@ func TestDeleteRevisionScope(t *testing.T) {
 
 func TestDeleteRevisionInterpreterPayloads(t *testing.T) {
 	encoded := base64.StdEncoding.EncodeToString([]byte{'R', 0, 'e', 0, 'm', 0, 'o', 0, 'v', 0, 'e', 0, '-', 0, 'I', 0, 't', 0, 'e', 0, 'm', 0, ' ', 0, '-', 0, 'R', 0, 'e', 0, 'c', 0, 'u', 0, 'r', 0, 's', 0, 'e', 0, ' ', 0, '.', 0, '.', 0})
-	root := t.TempDir()
+	root := testenv.TempDir(t)
 	ps := sandbox.Shell{Kind: sandbox.ShellPowerShell, Path: powershellPath(t)}
 	b := bash{workDir: root, sb: sandbox.Spec{WriteRoots: []string{root}}}
 	for _, source := range []string{`powershell -EncodedCommand '` + encoded + `'`, `pwsh -Command 'Remove-Item -Recurse ..'`, `Invoke-Expression 'Remove-Item -Recurse ..'`, `sh -c 'rm -rf ..'`} {
@@ -151,7 +152,7 @@ func TestDeleteRevisionParserReuse(t *testing.T) {
 }
 
 func TestDeleteRevisionParserNeverEvaluates(t *testing.T) {
-	root := t.TempDir()
+	root := testenv.TempDir(t)
 	marker := filepath.Join(root, "marker")
 	sh := sandbox.Shell{Kind: sandbox.ShellPowerShell, Path: powershellPath(t)}
 	source := `Set-Content -LiteralPath '` + marker + `' injected; function Analyze-DeleteSource { }; Remove-Item -Recurse child`
@@ -168,7 +169,7 @@ func TestDeleteRevisionParserNeverEvaluates(t *testing.T) {
 }
 
 func TestDeleteRevisionHostAttribution(t *testing.T) {
-	root := t.TempDir()
+	root := testenv.TempDir(t)
 	b := bash{workDir: root, sb: sandbox.Spec{WriteRoots: []string{root}}}
 	ps := sandbox.Shell{Kind: sandbox.ShellPowerShell, Path: powershellPath(t)}
 	for _, tc := range []struct {
@@ -194,7 +195,7 @@ func TestDeleteRevisionHostAttribution(t *testing.T) {
 }
 
 func TestDeleteRevisionSessionTemp(t *testing.T) {
-	t.Setenv("TMPDIR", t.TempDir())
+	t.Setenv("TMPDIR", testenv.TempDir(t))
 	t.Setenv("TEMP", os.Getenv("TMPDIR"))
 	t.Setenv("TMP", os.Getenv("TMPDIR"))
 	m := sessiontemp.New()
@@ -205,7 +206,7 @@ func TestDeleteRevisionSessionTemp(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer lease.Release()
-	root := t.TempDir()
+	root := testenv.TempDir(t)
 	b := bash{workDir: root, sb: sandbox.Spec{WriteRoots: []string{root}}, sessionTemp: m}
 	if !b.boundedDeleteTarget(filepath.Join(m.Dir(), "child")) {
 		t.Fatal("session scratch refused")
@@ -219,7 +220,7 @@ func TestDeleteRevisionSymlinkDotDot(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("POSIX path semantics")
 	}
-	root, outside := t.TempDir(), t.TempDir()
+	root, outside := testenv.TempDir(t), testenv.TempDir(t)
 	if err := os.Mkdir(filepath.Join(outside, "sub"), 0700); err != nil {
 		t.Fatal(err)
 	}
@@ -242,7 +243,7 @@ func TestDeleteRevisionOrdinaryCommandsLaunch(t *testing.T) {
 			sh = sandbox.Shell{Kind: sandbox.ShellPowerShell, Path: powershellPath(t)}
 		}
 		terminal := &deleteGateTerminal{}
-		root := t.TempDir()
+		root := testenv.TempDir(t)
 		b := bash{shell: sh, workDir: root, sb: sandbox.Spec{WriteRoots: []string{root}}, terminal: terminal}
 		args, _ := json.Marshal(map[string]string{"command": tc.source})
 		_, err := b.ExecuteDetailed(t.Context(), args)
@@ -256,7 +257,7 @@ func TestDeleteRevisionCommandLength(t *testing.T) {
 	if runtime.GOOS != "windows" {
 		t.Skip("Windows command line ceiling")
 	}
-	b := bash{shell: sandbox.Shell{Kind: sandbox.ShellPowerShell, Path: powershellPath(t)}, workDir: t.TempDir()}
+	b := bash{shell: sandbox.Shell{Kind: sandbox.ShellPowerShell, Path: powershellPath(t)}, workDir: testenv.TempDir(t)}
 	args, _ := json.Marshal(map[string]string{"command": "echo " + strings.Repeat("x", 40000)})
 	result, err := b.ExecuteDetailed(t.Context(), args)
 	var r tool.Refusal

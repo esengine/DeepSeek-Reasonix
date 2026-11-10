@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"testing"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/contract/event"
 )
 
@@ -56,7 +57,7 @@ func assertAttachedImage(t *testing.T, cwd, input string) {
 }
 
 func TestPromptImageBlockReachesTheTurnAsAnAttachment(t *testing.T) {
-	cwd := t.TempDir()
+	cwd := testenv.TempDir(t)
 	input, resp := promptInput(t, cwd, []ContentBlock{
 		{Type: "text", Text: "what is in this picture?"},
 		{Type: "image", MimeType: "image/png", Data: onePixelPNG},
@@ -68,7 +69,7 @@ func TestPromptImageBlockReachesTheTurnAsAnAttachment(t *testing.T) {
 }
 
 func TestPromptEmbeddedBlobResourceReachesTheTurnAsAnAttachment(t *testing.T) {
-	cwd := t.TempDir()
+	cwd := testenv.TempDir(t)
 	input, resp := promptInput(t, cwd, []ContentBlock{
 		{Type: "text", Text: "what is in this picture?"},
 		{Type: "resource", Resource: &ResourceContents{URI: "file:///uploads/image.png", MimeType: "image/png", Blob: onePixelPNG}},
@@ -80,7 +81,7 @@ func TestPromptEmbeddedBlobResourceReachesTheTurnAsAnAttachment(t *testing.T) {
 }
 
 func TestPromptImageOnlyIsATurn(t *testing.T) {
-	cwd := t.TempDir()
+	cwd := testenv.TempDir(t)
 	input, resp := promptInput(t, cwd, []ContentBlock{{Type: "image", MimeType: "image/png", Data: onePixelPNG}})
 	if resp.Error != nil {
 		t.Fatalf("prompt error = %+v", resp.Error)
@@ -89,7 +90,7 @@ func TestPromptImageOnlyIsATurn(t *testing.T) {
 }
 
 func TestPromptUndecodableImageIsRefusedNotDropped(t *testing.T) {
-	_, resp := promptInput(t, t.TempDir(), []ContentBlock{
+	_, resp := promptInput(t, testenv.TempDir(t), []ContentBlock{
 		{Type: "text", Text: "look"},
 		{Type: "image", MimeType: "image/png", Data: "not base64!"},
 	})

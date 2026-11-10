@@ -8,11 +8,13 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"reasonix/internal/base/testenv"
 )
 
 func TestAdmissionPanicReleasesOnlyItsOwnTransaction(t *testing.T) {
-	root := t.TempDir()
-	c, err := New(root, t.TempDir(), nil, Options{AdmissionCheck: func(_ context.Context, intent Intent) error {
+	root := testenv.TempDir(t)
+	c, err := New(root, testenv.TempDir(t), nil, Options{AdmissionCheck: func(_ context.Context, intent Intent) error {
 		if intent.CallID == "panic" {
 			panic("fixture admission failure")
 		}
@@ -48,13 +50,13 @@ func TestAdmissionPanicReleasesOnlyItsOwnTransaction(t *testing.T) {
 func TestNoticePanicClosesWaitAndReleasesTransaction(t *testing.T) {
 	for _, phase := range []string{"waiting", "acquired", "released"} {
 		t.Run(phase, func(t *testing.T) {
-			root := t.TempDir()
+			root := testenv.TempDir(t)
 			waiting := make(chan struct{})
 			var waitingOnce sync.Once
 			var failed atomic.Bool
 			var mu sync.Mutex
 			var states []string
-			c, err := New(root, t.TempDir(), func(notice Notice) {
+			c, err := New(root, testenv.TempDir(t), func(notice Notice) {
 				if notice.CallID != "target" {
 					return
 				}

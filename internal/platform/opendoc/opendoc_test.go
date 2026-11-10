@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"reflect"
 	"testing"
+
+	"reasonix/internal/base/testenv"
 )
 
 // The file is one argument of an argument list on every system: nothing is
@@ -30,7 +32,7 @@ func TestCommandPassesThePathAsOneArgumentToThePlatformOpener(t *testing.T) {
 }
 
 func TestOpenStartsTheOpenerAndReportsWhyItCouldNot(t *testing.T) {
-	doc := filepath.Join(t.TempDir(), "a.html")
+	doc := filepath.Join(testenv.TempDir(t), "a.html")
 	var gotName string
 	var gotArgs []string
 	t.Cleanup(func() { start = realStart })

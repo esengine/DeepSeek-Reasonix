@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"reasonix/internal/assembly/boot"
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/contract/agentcomposition"
 	"reasonix/internal/contract/config"
 	"reasonix/internal/contract/provider"
@@ -24,7 +25,7 @@ func TestLiveCompositionSwitchResourceCost(t *testing.T) {
 	}
 	for _, files := range []int{0, 4096} {
 		t.Run(fmt.Sprintf("files-%d", files), func(t *testing.T) {
-			home, root := t.TempDir(), t.TempDir()
+			home, root := testenv.TempDir(t), testenv.TempDir(t)
 			t.Setenv("REASONIX_HOME", home)
 			t.Chdir(root)
 			closeSharedCatalogsOnCleanup(t)

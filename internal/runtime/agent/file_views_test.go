@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"testing"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/contract/tool"
 	"reasonix/internal/runtime/usecap"
 	"reasonix/internal/tools/builtin"
@@ -42,7 +43,7 @@ func callFileViewTool(t *testing.T, reg *tool.Registry, name string, args map[st
 func TestChildReadsDoNotRefreshParentFileViews(t *testing.T) {
 	for _, readOnly := range []bool{false, true} {
 		t.Run(map[bool]string{false: "writer", true: "reader"}[readOnly], func(t *testing.T) {
-			path := filepath.Join(t.TempDir(), "a.txt")
+			path := filepath.Join(testenv.TempDir(t), "a.txt")
 			if err := os.WriteFile(path, []byte("first"), 0600); err != nil {
 				t.Fatal(err)
 			}
@@ -72,7 +73,7 @@ func TestChildCapabilityReadsKeepActorFileViews(t *testing.T) {
 	for _, depth := range []int{1, 2, 3} {
 		for _, shared := range []bool{false, true} {
 			t.Run(strconv.Itoa(depth)+"/shared="+strconv.FormatBool(shared), func(t *testing.T) {
-				path := filepath.Join(t.TempDir(), "a.txt")
+				path := filepath.Join(testenv.TempDir(t), "a.txt")
 				if err := os.WriteFile(path, []byte("first"), 0600); err != nil {
 					t.Fatal(err)
 				}

@@ -7,6 +7,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"reasonix/internal/base/testenv"
 )
 
 func TestPickLocalFolderHTTPReturnsChosenPath(t *testing.T) {
@@ -54,7 +56,7 @@ func TestHostCapabilitiesReportTheHeadlessFallbackPath(t *testing.T) {
 	old := folderPickerAvailable
 	folderPickerAvailable = func() bool { return false }
 	t.Cleanup(func() { folderPickerAvailable = old })
-	t.Setenv("REASONIX_HOME", t.TempDir())
+	t.Setenv("REASONIX_HOME", testenv.TempDir(t))
 
 	srv := httptest.NewServer(operatorHandler(NewHub(HubOptions{})))
 	t.Cleanup(srv.Close)

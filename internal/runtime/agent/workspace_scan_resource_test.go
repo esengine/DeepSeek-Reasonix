@@ -7,10 +7,12 @@ import (
 	"runtime"
 	"testing"
 	"time"
+
+	"reasonix/internal/base/testenv"
 )
 
 func TestWorkspaceScanGoroutinesBoundedByReaders(t *testing.T) {
-	root := t.TempDir()
+	root := testenv.TempDir(t)
 	for i := range 1024 {
 		path := filepath.Join(root, fmt.Sprintf("d%04d", i), "a", "b", "c")
 		if err := os.MkdirAll(path, 0o755); err != nil {

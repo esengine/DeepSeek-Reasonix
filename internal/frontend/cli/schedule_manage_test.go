@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/contract/config"
 	"reasonix/internal/runtime/schedrun"
 	"reasonix/internal/runtime/scheduler"
@@ -50,7 +51,7 @@ api_key_env = "REASONIX_TEST_KEY"
 		t.Fatal(err)
 	}
 	_ = home
-	w := &schedWorld{t: t, ws: t.TempDir(), now: time.Date(2026, 10, 1, 9, 0, 0, 0, time.UTC), human: true}
+	w := &schedWorld{t: t, ws: testenv.TempDir(t), now: time.Date(2026, 10, 1, 9, 0, 0, 0, time.UTC), human: true}
 	w.trust(w.ws)
 	t.Chdir(w.ws)
 	return w
@@ -284,7 +285,7 @@ func TestScheduleUsageErrors(t *testing.T) {
 func TestScheduleAddOnlyAcceptsATrustedProject(t *testing.T) {
 	w := newSchedWorld(t)
 	parent := filepath.Dir(w.ws)
-	untrusted := t.TempDir()
+	untrusted := testenv.TempDir(t)
 	missing := filepath.Join(w.ws, "no-such-folder")
 	for name, folder := range map[string]string{
 		"its parent directory":       parent,

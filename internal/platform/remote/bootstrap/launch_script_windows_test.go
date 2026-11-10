@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"reasonix/internal/base/testenv"
 )
 
 func init() {
@@ -24,7 +26,7 @@ func init() {
 }
 
 func TestWindowsLaunchScriptRunsUnicodePaths(t *testing.T) {
-	root := filepath.Join(t.TempDir(), "中文 O'Hara & $literal %TEMP%")
+	root := filepath.Join(testenv.TempDir(t), "中文 O'Hara & $literal %TEMP%")
 	if err := os.MkdirAll(root, 0o700); err != nil {
 		t.Fatal(err)
 	}

@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"reasonix/internal/base/testenv"
 )
 
 func TestOpaqueProcessHelper(t *testing.T) {
@@ -36,7 +38,7 @@ func TestOpaqueProcessHelper(t *testing.T) {
 func TestOpaqueWriteCrossProcessAndDeath(t *testing.T) {
 	for _, namedChild := range []string{"0", "1"} {
 		t.Run("named_child_"+namedChild, func(t *testing.T) {
-			root, extra, state := t.TempDir(), t.TempDir(), t.TempDir()
+			root, extra, state := testenv.TempDir(t), testenv.TempDir(t), testenv.TempDir(t)
 			ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
 			defer cancel()
 			cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestOpaqueProcessHelper$")

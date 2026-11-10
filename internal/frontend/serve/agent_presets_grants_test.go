@@ -13,6 +13,7 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/contract/agentcomposition"
 	"reasonix/internal/contract/config"
 	"reasonix/internal/session/control"
@@ -86,8 +87,8 @@ func TestEveryAgentPresetMutationRequiresTheRequestEditGrant(t *testing.T) {
 		paired := client == "paired"
 		for _, route := range []string{"save-user", "save-project", "delete", "default-user", "default-workspace", "import", "select"} {
 			t.Run(route+"/"+client, func(t *testing.T) {
-				t.Setenv("REASONIX_STATE_HOME", t.TempDir())
-				root := t.TempDir()
+				t.Setenv("REASONIX_STATE_HOME", testenv.TempDir(t))
+				root := testenv.TempDir(t)
 				s := newProviderEditServer(t, root)
 				if client != "network" {
 					s.AllowProviderEdit()

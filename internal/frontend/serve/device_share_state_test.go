@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"reasonix/internal/base/testenv"
 )
 
 // lanOnly is the address seam a test uses when it needs Open to succeed without
@@ -18,7 +20,7 @@ func lanOnly(t *testing.T, share *DeviceShare) {
 // TestShareStateRoundTrips covers the file: what was open reopens, and closing
 // records that it is shut.
 func TestShareStateRoundTrips(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "share-state.json")
+	path := filepath.Join(testenv.TempDir(t), "share-state.json")
 	if err := saveShareState(path, persistedShareState{Open: true, Address: "192.168.1.20"}); err != nil {
 		t.Fatal(err)
 	}
@@ -33,7 +35,7 @@ func TestShareStateRoundTrips(t *testing.T) {
 
 // TestMissingShareStateReadsAsClosed covers the first run.
 func TestMissingShareStateReadsAsClosed(t *testing.T) {
-	if got := loadShareState(filepath.Join(t.TempDir(), "nope", "share-state.json")); got.Open {
+	if got := loadShareState(filepath.Join(testenv.TempDir(t), "nope", "share-state.json")); got.Open {
 		t.Fatalf("a missing file read as open: %+v", got)
 	}
 	if got := loadShareState(""); got.Open {

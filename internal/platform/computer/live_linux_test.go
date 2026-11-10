@@ -9,11 +9,13 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"reasonix/internal/base/testenv"
 )
 
 func TestLiveLinuxOperatesAnOwnedGTKApplication(t *testing.T) {
 	s := liveSession(t)
-	dir := t.TempDir()
+	dir := testenv.TempDir(t)
 	exe, log := filepath.Join(dir, "reasonix-cua-target"), filepath.Join(dir, "events.log")
 	flags, err := exec.Command("pkg-config", "--cflags", "--libs", "gtk+-3.0").Output()
 	if err != nil {

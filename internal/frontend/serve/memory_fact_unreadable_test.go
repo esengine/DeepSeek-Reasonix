@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/session/control"
 	"reasonix/internal/state/memory"
 )
@@ -34,7 +35,7 @@ func denyServeFactFile(t *testing.T, path string) {
 // a save over it refuses with a typed code instead of rewriting bytes nobody
 // read.
 func TestTheMemoryPanelShowsAnUnreadableFact(t *testing.T) {
-	store := memory.Store{Dir: t.TempDir()}
+	store := memory.Store{Dir: testenv.TempDir(t)}
 	if _, err := store.Save(memory.Memory{Name: "good", Body: "good body"}); err != nil {
 		t.Fatal(err)
 	}

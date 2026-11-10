@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"slices"
 	"testing"
+
+	"reasonix/internal/base/testenv"
 )
 
 func TestPeersAndDispatchDefaultOnAndRespectExplicitOptOut(t *testing.T) {
@@ -51,7 +53,7 @@ func TestAProjectFileCannotSwitchOffWhatTheUserChose(t *testing.T) {
 }
 
 func TestSavingTheUserFileKeepsEveryPeersSetting(t *testing.T) {
-	t.Setenv("REASONIX_HOME", t.TempDir())
+	t.Setenv("REASONIX_HOME", testenv.TempDir(t))
 	path := UserConfigPath()
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		t.Fatal(err)
@@ -91,7 +93,7 @@ func TestPeersDispatchNeedsPeersAndAProjectFileCannotGrantIt(t *testing.T) {
 }
 
 func TestSavingPeersSettingsWritesThemAndReadsThemBack(t *testing.T) {
-	t.Setenv("REASONIX_HOME", t.TempDir())
+	t.Setenv("REASONIX_HOME", testenv.TempDir(t))
 	path := UserConfigPath()
 	cfg := LoadForEdit(path)
 	cfg.Peers = PeersConfig{Enabled: true, Dispatch: true, ReleaseProjects: []string{"/work/b"}}
@@ -113,7 +115,7 @@ func TestSavingPeersSettingsWritesThemAndReadsThemBack(t *testing.T) {
 }
 
 func TestSavingAnOptOutDoesNotRestorePeerDefaults(t *testing.T) {
-	t.Setenv("REASONIX_HOME", t.TempDir())
+	t.Setenv("REASONIX_HOME", testenv.TempDir(t))
 	path := UserConfigPath()
 	for _, values := range [][2]bool{{false, false}, {true, false}, {false, true}} {
 		cfg := Default()
@@ -151,7 +153,7 @@ func TestTheDispatchCeilingsDefaultToTheNamedValuesAndOnlyTheUserFileMovesThem(t
 }
 
 func TestCeilingsTheUserSetSurviveAnUnrelatedSave(t *testing.T) {
-	t.Setenv("REASONIX_HOME", t.TempDir())
+	t.Setenv("REASONIX_HOME", testenv.TempDir(t))
 	path := UserConfigPath()
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		t.Fatal(err)

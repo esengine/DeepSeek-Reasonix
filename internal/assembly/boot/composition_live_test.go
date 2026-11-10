@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/contract/agentcomposition"
 	"reasonix/internal/contract/config"
 	"reasonix/internal/ext/plugin"
@@ -21,7 +22,7 @@ func TestLiveCompositionDoesNotCaptureUnusedSkillAssets(t *testing.T) {
 	home, root := compositionTestWorkspace(t, "openai")
 	writeFile(t, home, "skills/templates/SKILL.md", "---\nname: templates\ndescription: template library\n---\nRead templates when needed.")
 	// An unused link cannot participate in assembling a capability grant.
-	if err := os.Symlink(t.TempDir(), filepath.Join(home, "skills/templates/unused")); err != nil {
+	if err := os.Symlink(testenv.TempDir(t), filepath.Join(home, "skills/templates/unused")); err != nil {
 		t.Skipf("symlink unavailable: %v", err)
 	}
 	d := agentcomposition.Builtins()[0]

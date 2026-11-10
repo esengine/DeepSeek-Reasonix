@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/contract/config"
 	"reasonix/internal/contract/event"
 	"reasonix/internal/contract/provider"
@@ -35,7 +36,7 @@ func TestDefaultApprovalModeNeedsConfinementAndTrust(t *testing.T) {
 }
 
 func TestControllerReadsTrustFromItsOwnHome(t *testing.T) {
-	home, ws := t.TempDir(), t.TempDir()
+	home, ws := testenv.TempDir(t), testenv.TempDir(t)
 	c := New(Options{WorkspaceRoot: ws, Posture: PostureEvidence{WritesConfined: true, Home: home}})
 	if got := c.DefaultApprovalMode(); got != ToolApprovalAsk {
 		t.Fatalf("an undecided folder opens in %q", got)
@@ -46,7 +47,7 @@ func TestControllerReadsTrustFromItsOwnHome(t *testing.T) {
 	if got := c.DefaultApprovalMode(); got != ToolApprovalAuto {
 		t.Fatalf("a trusted, confined folder opens in %q", got)
 	}
-	if other := New(Options{WorkspaceRoot: t.TempDir(), Posture: PostureEvidence{WritesConfined: true, Home: home}}); other.DefaultApprovalMode() != ToolApprovalAsk {
+	if other := New(Options{WorkspaceRoot: testenv.TempDir(t), Posture: PostureEvidence{WritesConfined: true, Home: home}}); other.DefaultApprovalMode() != ToolApprovalAsk {
 		t.Fatal("trust for one folder carried to another")
 	}
 	if homeless := New(Options{WorkspaceRoot: ws, Posture: PostureEvidence{WritesConfined: true}}); homeless.DefaultApprovalMode() != ToolApprovalAsk {
@@ -166,7 +167,7 @@ func TestHomeDirectoryTrustOpensNothing(t *testing.T) {
 	if err != nil {
 		t.Skip("no user home:", err)
 	}
-	store := t.TempDir()
+	store := testenv.TempDir(t)
 	c := New(Options{WorkspaceRoot: home, Posture: PostureEvidence{WritesConfined: true, Home: store}})
 	if err := c.SetWorkspaceTrust(config.WorkspaceTrusted); err != nil {
 		t.Fatal(err)
@@ -174,7 +175,7 @@ func TestHomeDirectoryTrustOpensNothing(t *testing.T) {
 	if got := c.DefaultApprovalMode(); got != ToolApprovalAsk {
 		t.Fatalf("a trusted home directory opens in %q", got)
 	}
-	if TrustableFolder(string(filepath.Separator)) || TrustableFolder("") || !TrustableFolder(t.TempDir()) {
+	if TrustableFolder(string(filepath.Separator)) || TrustableFolder("") || !TrustableFolder(testenv.TempDir(t)) {
 		t.Fatal("TrustableFolder misjudges a root, an empty path or a project folder")
 	}
 }

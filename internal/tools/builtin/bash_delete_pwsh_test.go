@@ -5,6 +5,7 @@ import (
 	"os/exec"
 	"testing"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/contract/tool"
 	"reasonix/internal/safety/sandbox"
 )
@@ -15,7 +16,7 @@ func TestDeletePowerShellGoldenCauses(t *testing.T) {
 		t.Skip("PowerShell 7 unavailable")
 	}
 	sh := sandbox.Shell{Kind: sandbox.ShellPowerShell, Path: path}
-	root := t.TempDir()
+	root := testenv.TempDir(t)
 	b := bash{workDir: root, sb: sandbox.Spec{WriteRoots: []string{root}}}
 	for _, tc := range []struct {
 		source string

@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"path/filepath"
 	"testing"
+
+	"reasonix/internal/base/testenv"
 )
 
 func TestCompositionMCPContractBlocksRefreshCallsAndReconnectDrift(t *testing.T) {
@@ -18,7 +20,7 @@ func TestCompositionMCPContractBlocksRefreshCallsAndReconnectDrift(t *testing.T)
 func compositionMCPContractScenario(t *testing.T, follow bool) {
 	t.Helper()
 	server, srv := newListChangedServer(t, true, "alpha")
-	h, _ := connectListChanged(t, srv, Spec{Authorized: true, StateDir: filepath.Join(t.TempDir(), "state", "live")})
+	h, _ := connectListChanged(t, srv, Spec{Authorized: true, StateDir: filepath.Join(testenv.TempDir(t), "state", "live")})
 	spec := h.lookupClient("live").spec
 	tools, err := h.ToolsFor(t.Context(), "live")
 	if err != nil {

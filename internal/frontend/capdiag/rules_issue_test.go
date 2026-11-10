@@ -5,10 +5,12 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"reasonix/internal/base/testenv"
 )
 
 func TestARuleFileTheHostSkipsIsReportedAsAnInstructionsIssue(t *testing.T) {
-	root, home := t.TempDir(), t.TempDir()
+	root, home := testenv.TempDir(t), testenv.TempDir(t)
 	dir := filepath.Join(root, ".reasonix", "rules")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)

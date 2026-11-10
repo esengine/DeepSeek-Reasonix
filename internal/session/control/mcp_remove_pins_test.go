@@ -7,13 +7,14 @@ import (
 	"path/filepath"
 	"testing"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/contract/config"
 	"reasonix/internal/ext/plugin"
 )
 
 func TestRemovingAnMCPServerForgetsItsApprovedToolDefinitions(t *testing.T) {
 	isolateControlConfigHome(t)
-	workspace := t.TempDir()
+	workspace := testenv.TempDir(t)
 	stateDir := plugin.MCPStateDir(config.ReasonixHomeDir(), workspace, "gone")
 	sum := sha256.Sum256([]byte("gone"))
 	record := filepath.Join(filepath.Dir(stateDir), ".tool-pins", hex.EncodeToString(sum[:])+".json")

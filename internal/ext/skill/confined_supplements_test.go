@@ -6,12 +6,14 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"reasonix/internal/base/testenv"
 )
 
 func TestLiveSkillReadsOnlyConfinedSupplements(t *testing.T) {
 	for _, outside := range []bool{false, true} {
 		t.Run(map[bool]string{false: "contained", true: "escaped"}[outside], func(t *testing.T) {
-			root := t.TempDir()
+			root := testenv.TempDir(t)
 			if err := os.Mkdir(filepath.Join(root, "references"), 0o700); err != nil {
 				t.Fatal(err)
 			}
@@ -21,7 +23,7 @@ func TestLiveSkillReadsOnlyConfinedSupplements(t *testing.T) {
 			}
 			target := filepath.Join(root, "guide.md")
 			if outside {
-				target = filepath.Join(t.TempDir(), "guide.md")
+				target = filepath.Join(testenv.TempDir(t), "guide.md")
 			}
 			if err := os.WriteFile(target, []byte("REFERENCE BODY"), 0o600); err != nil {
 				t.Fatal(err)

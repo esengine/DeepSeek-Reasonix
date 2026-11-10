@@ -10,6 +10,8 @@ import (
 	"sort"
 	"strings"
 	"testing"
+
+	"reasonix/internal/base/testenv"
 )
 
 // fake is a machine whose disk is a set of paths.
@@ -200,7 +202,7 @@ func TestALinkIntoAProjectIsNeverStarted(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("creating links needs a privilege Windows tests do not hold")
 	}
-	root := t.TempDir()
+	root := testenv.TempDir(t)
 	project := filepath.Join(root, "project")
 	bin := filepath.Join(root, "bin")
 	for _, d := range []string{filepath.Join(project, "node_modules", ".bin"), bin} {

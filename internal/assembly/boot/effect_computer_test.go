@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/contract/provider"
 	"reasonix/internal/platform/computer"
 	"reasonix/internal/safety/evidence"
@@ -93,7 +94,7 @@ func TestEffectComputerUseThroughTheRealAssembly(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv(fakeComputerHelperEnv, "1")
-	log := filepath.Join(t.TempDir(), "native-requests.jsonl")
+	log := filepath.Join(testenv.TempDir(t), "native-requests.jsonl")
 	t.Setenv("REASONIX_BOOT_CUA_REQUEST_LOG", log)
 	driver := computer.NewDriver(exe, os.Environ())
 	t.Cleanup(driver.Close)

@@ -9,6 +9,8 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"reasonix/internal/base/testenv"
 )
 
 // indexAsides lists the stamped copies an unreadable index was moved to.
@@ -56,7 +58,7 @@ func makeIndexUnreadable(t *testing.T, dir, body string) string {
 // return that error and touch nothing, not republish derived lines over bytes
 // that could still be read tomorrow.
 func TestMigrateV2DoesNotRebuildOnATransientIndexReadError(t *testing.T) {
-	dir := t.TempDir()
+	dir := testenv.TempDir(t)
 	store := Store{Dir: dir}
 	auditSeed(t, store, "alpha")
 	index := auditIndexPath(dir)
@@ -86,7 +88,7 @@ func TestMigrateV2DoesNotRebuildOnATransientIndexReadError(t *testing.T) {
 // be read), but they must survive: the rebuild renames the entry to a stamped
 // name first, and a later repair can still read it.
 func TestMigrateV2KeepsTheUnreadableIndexAside(t *testing.T) {
-	dir := t.TempDir()
+	dir := testenv.TempDir(t)
 	store := Store{Dir: dir}
 	auditSeed(t, store, "alpha")
 	hand := "# Memory\n\nMy own note, not a fact.\n"
@@ -116,7 +118,7 @@ func TestMigrateV2KeepsTheUnreadableIndexAside(t *testing.T) {
 // deterministic fault, and a rename moves the whole directory aside without
 // reading it, so the pass repairs the store instead of freezing it.
 func TestMigrateV2RebuildsWhenTheIndexIsADirectory(t *testing.T) {
-	dir := t.TempDir()
+	dir := testenv.TempDir(t)
 	store := Store{Dir: dir}
 	auditSeed(t, store, "alpha")
 	index := auditIndexPath(dir)
@@ -151,7 +153,7 @@ func TestMigrateV2RebuildsWhenTheIndexIsADirectory(t *testing.T) {
 // the pass must report the original read fault and publish nothing, so the old
 // bytes are never replaced when they could not be kept.
 func TestMigrateV2ReturnsTheReadFaultWhenTheAsideRenameFails(t *testing.T) {
-	dir := t.TempDir()
+	dir := testenv.TempDir(t)
 	store := Store{Dir: dir}
 	auditSeed(t, store, "alpha")
 	hand := "# Memory\n\nMy own note, not a fact.\n"

@@ -9,6 +9,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"reasonix/internal/base/testenv"
 )
 
 type withdrawStub struct {
@@ -39,7 +41,7 @@ func withdrawSetup(t *testing.T) (*Service, *withdrawStub) {
 	ws := &withdrawStub{stub: &stub{}}
 	srv := httptest.NewServer(ws.handler())
 	t.Cleanup(srv.Close)
-	svc, err := New(Config{Home: t.TempDir(), Base: srv.URL, HTTP: srv.Client(), Backoff: []time.Duration{}})
+	svc, err := New(Config{Home: testenv.TempDir(t), Base: srv.URL, HTTP: srv.Client(), Backoff: []time.Duration{}})
 	if err != nil {
 		t.Fatal(err)
 	}

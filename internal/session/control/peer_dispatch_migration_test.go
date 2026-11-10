@@ -4,11 +4,12 @@ import (
 	"path/filepath"
 	"testing"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/state/peermail"
 )
 
 func TestDispatchMigrationPreservesSigningAndReplayState(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "session.jsonl")
+	path := filepath.Join(testenv.TempDir(t), "session.jsonl")
 	old := New(Options{SessionPath: path})
 	next := New(Options{SessionPath: path})
 	t.Cleanup(old.Close)
@@ -42,7 +43,7 @@ func TestDispatchMigrationPreservesSigningAndReplayState(t *testing.T) {
 }
 
 func TestDispatchMigrationDoesNotGrantAnotherSessionItsPairings(t *testing.T) {
-	root := t.TempDir()
+	root := testenv.TempDir(t)
 	old := New(Options{SessionPath: filepath.Join(root, "first.jsonl")})
 	t.Cleanup(old.Close)
 	old.MarkOpenedByDispatch("parent", pairSecret, 1)

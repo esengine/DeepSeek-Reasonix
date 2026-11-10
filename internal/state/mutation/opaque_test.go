@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"reasonix/internal/base/testenv"
 )
 
 func opaqueIntent() Intent { return Intent{Effect: Effect("opaque_write")} }
@@ -14,7 +16,7 @@ func opaqueIntent() Intent { return Intent{Effect: Effect("opaque_write")} }
 func TestOpaqueWriteExcludesExternalHardlinkInBothOrders(t *testing.T) {
 	for _, opaqueFirst := range []bool{true, false} {
 		t.Run(map[bool]string{true: "opaque_first", false: "named_first"}[opaqueFirst], func(t *testing.T) {
-			root, extra, state := t.TempDir(), t.TempDir(), t.TempDir()
+			root, extra, state := testenv.TempDir(t), testenv.TempDir(t), testenv.TempDir(t)
 			source, alias := filepath.Join(root, "source"), filepath.Join(extra, "alias")
 			if err := os.WriteFile(source, []byte("original"), 0600); err != nil {
 				t.Fatal(err)
@@ -57,7 +59,7 @@ func TestOpaqueWriteExcludesExternalHardlinkInBothOrders(t *testing.T) {
 }
 
 func TestOpaqueWriteDoesNotSerializeNamedOrModelWork(t *testing.T) {
-	root, extra, state := t.TempDir(), t.TempDir(), t.TempDir()
+	root, extra, state := testenv.TempDir(t), testenv.TempDir(t), testenv.TempDir(t)
 	a, b := testCoordinator(t, root, state), testCoordinator(t, extra, state)
 	held, err := a.Acquire(t.Context(), intent("first"))
 	if err != nil {
@@ -90,7 +92,7 @@ func TestOpaqueWriteDoesNotSerializeNamedOrModelWork(t *testing.T) {
 }
 
 func TestOpaqueWriteNestedCoverageAndContinuation(t *testing.T) {
-	c := testCoordinator(t, t.TempDir(), t.TempDir())
+	c := testCoordinator(t, testenv.TempDir(t), testenv.TempDir(t))
 	for _, parent := range []Intent{{Effect: Workspace}, intent(c.root), opaqueIntent()} {
 		held, err := c.Acquire(t.Context(), parent)
 		if err != nil {
@@ -108,7 +110,7 @@ func TestOpaqueWriteNestedCoverageAndContinuation(t *testing.T) {
 			}
 			child.End(NotExecuted)
 		}
-		if _, err := c.TryAcquire(ctx, intent(filepath.Join(t.TempDir(), "outside"))); !errors.Is(err, ErrInvalidIntent) {
+		if _, err := c.TryAcquire(ctx, intent(filepath.Join(testenv.TempDir(t), "outside"))); !errors.Is(err, ErrInvalidIntent) {
 			t.Fatalf("global exclusion expanded nested authority: %v", err)
 		}
 		held.End(NotExecuted)
@@ -128,7 +130,7 @@ func TestOpaqueWriteNestedCoverageAndContinuation(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer next.End(NotExecuted)
-	other := testCoordinator(t, t.TempDir(), c.compatDir)
+	other := testCoordinator(t, testenv.TempDir(t), c.compatDir)
 	if lease, err := other.TryAcquire(t.Context(), intent("outside")); !errors.Is(err, ErrBusy) {
 		if lease != nil {
 			lease.End(NotExecuted)
@@ -138,14 +140,14 @@ func TestOpaqueWriteNestedCoverageAndContinuation(t *testing.T) {
 }
 
 func TestOpaqueWriteQueueCancellationDoesNotConsumeModelCapacity(t *testing.T) {
-	root, state := t.TempDir(), t.TempDir()
+	root, state := testenv.TempDir(t), testenv.TempDir(t)
 	held, err := testCoordinator(t, root, state).Acquire(t.Context(), intent("held"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer held.End(NotExecuted)
 	notices := make(chan Notice, 8)
-	c, err := New(t.TempDir(), state, func(n Notice) { notices <- n })
+	c, err := New(testenv.TempDir(t), state, func(n Notice) { notices <- n })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -185,7 +187,7 @@ func TestOpaqueWriteQueueCancellationDoesNotConsumeModelCapacity(t *testing.T) {
 }
 
 func TestOpaqueWriteQueuePreventsNamedBypass(t *testing.T) {
-	root, state := t.TempDir(), t.TempDir()
+	root, state := testenv.TempDir(t), testenv.TempDir(t)
 	c := testCoordinator(t, root, state)
 	held, err := c.Acquire(t.Context(), intent("held"))
 	if err != nil {
@@ -193,7 +195,7 @@ func TestOpaqueWriteQueuePreventsNamedBypass(t *testing.T) {
 	}
 	defer held.End(NotExecuted)
 	notices := make(chan Notice, 8)
-	waiter, err := New(t.TempDir(), state, func(n Notice) { notices <- n })
+	waiter, err := New(testenv.TempDir(t), state, func(n Notice) { notices <- n })
 	if err != nil {
 		t.Fatal(err)
 	}

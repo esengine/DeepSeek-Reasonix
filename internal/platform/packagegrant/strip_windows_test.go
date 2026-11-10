@@ -12,6 +12,8 @@ import (
 	"unsafe"
 
 	"golang.org/x/sys/windows"
+
+	"reasonix/internal/base/testenv"
 )
 
 const testPackageSID = "S-1-15-2-1658335055-2853777128-3014724382-1760870658-2056114279-2893136470-138490047"
@@ -59,7 +61,7 @@ func entries(t *testing.T, path string) ([]string, bool) {
 }
 
 func tree(t *testing.T) (parent, root, dll string) {
-	parent = t.TempDir()
+	parent = testenv.TempDir(t)
 	root = filepath.Join(parent, "app")
 	dll = filepath.Join(root, "ffmpeg.dll")
 	if err := os.MkdirAll(filepath.Join(root, "resources"), 0o755); err != nil {

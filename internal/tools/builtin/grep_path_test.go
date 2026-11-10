@@ -6,10 +6,12 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"reasonix/internal/base/testenv"
 )
 
 func TestRipgrepRestoresOnlyTheSearchRootPrefix(t *testing.T) {
-	target := filepath.Join(t.TempDir(), "physical")
+	target := filepath.Join(testenv.TempDir(t), "physical")
 	requested := filepath.Join(filepath.Dir(target), "alias")
 	file := filepath.Join(target, "nested", "hit.txt")
 	text := ":12:keep " + target + "/../content unchanged"
@@ -29,7 +31,7 @@ func TestRipgrepRestoresOnlyTheSearchRootPrefix(t *testing.T) {
 }
 
 func TestRipgrepErrorsPreserveIdentityAndExternalPaths(t *testing.T) {
-	target := filepath.Join(t.TempDir(), "physical")
+	target := filepath.Join(testenv.TempDir(t), "physical")
 	requested := filepath.Join(filepath.Dir(target), "alias")
 	rp := ResolvedPath{Root: requested, DisplayRoot: "external/source", External: true}
 	for _, cause := range []error{

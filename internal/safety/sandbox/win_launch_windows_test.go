@@ -11,6 +11,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"reasonix/internal/base/testenv"
 )
 
 type winHarness struct {
@@ -26,7 +28,7 @@ type winHarness struct {
 // session: a network logon has no logon SID to restrict with.
 func newWinHarness(t *testing.T) *winHarness {
 	t.Helper()
-	base := t.TempDir()
+	base := testenv.TempDir(t)
 	h := &winHarness{t: t, ws: filepath.Join(base, "ws"), out: filepath.Join(base, "outside")}
 	for _, d := range []string{h.ws, h.out} {
 		if err := os.MkdirAll(d, 0o755); err != nil {
@@ -86,7 +88,7 @@ func (h *winHarness) runArgv(args []string) (string, int) {
 // directories, so a test never grants a folder of the machine it runs on.
 func profileEnv(t *testing.T) map[string]string {
 	t.Helper()
-	return map[string]string{"LOCALAPPDATA": t.TempDir(), "USERPROFILE": t.TempDir()}
+	return map[string]string{"LOCALAPPDATA": testenv.TempDir(t), "USERPROFILE": testenv.TempDir(t)}
 }
 
 func exists(p string) bool { _, err := os.Lstat(p); return err == nil }
@@ -183,8 +185,8 @@ func TestRestrictedCommandsRunGitAndPowerShellInsideTheRoot(t *testing.T) {
 // GrantSpec prepares an enforcing spec through the real book: roots granted,
 // token proven, SID set; and a spec that does not enforce is left alone.
 func TestGrantSpecPreparesAnEnforcingSpecAndLeavesAnOffSpecAlone(t *testing.T) {
-	state := t.TempDir()
-	ws := t.TempDir()
+	state := testenv.TempDir(t)
+	ws := testenv.TempDir(t)
 	env := profileEnv(t)
 	off := GrantSpec(Spec{Mode: "off", WriteRoots: []string{ws}, ShellEnv: env}, state)
 	if off.GrantSID != "" || off.GrantFault != nil {
@@ -209,11 +211,11 @@ func TestGrantSpecPreparesAnEnforcingSpecAndLeavesAnOffSpecAlone(t *testing.T) {
 
 // A damaged record is a typed fault with its own stable code, never a fresh start.
 func TestGrantSpecReportsADamagedRecordAsATypedFault(t *testing.T) {
-	state := t.TempDir()
+	state := testenv.TempDir(t)
 	if err := os.WriteFile(filepath.Join(state, "windows-grants.json"), []byte("{broken"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	spec := GrantSpec(Spec{Mode: "enforce", WriteRoots: []string{t.TempDir()}, ShellEnv: profileEnv(t)}, state)
+	spec := GrantSpec(Spec{Mode: "enforce", WriteRoots: []string{testenv.TempDir(t)}, ShellEnv: profileEnv(t)}, state)
 	if !errors.Is(spec.GrantFault, ErrWinGrantUnreadable) || spec.GrantSID != "" {
 		t.Fatalf("spec = fault %v sid %q", spec.GrantFault, spec.GrantSID)
 	}
@@ -263,7 +265,7 @@ func TestKnownGapDeleteOutsideTheRootIsNotBounded(t *testing.T) {
 }
 
 func TestGrantedRootsListsWhatGrantSpecGrantedAndRevokeGrantsTakesItBack(t *testing.T) {
-	state, ws := t.TempDir(), t.TempDir()
+	state, ws := testenv.TempDir(t), testenv.TempDir(t)
 	spec := GrantSpec(Spec{Mode: "enforce", WriteRoots: []string{ws}, ShellEnv: profileEnv(t)}, state)
 	if spec.GrantFault != nil {
 		t.Fatal(spec.GrantFault)
@@ -291,7 +293,7 @@ func TestGrantedRootsListsWhatGrantSpecGrantedAndRevokeGrantsTakesItBack(t *test
 // A workspace that contains the grant record would let a command rewrite what the
 // host grants next, so enforcement is refused with its own typed fault.
 func TestGrantSpecRefusesARecordInsideAWritableRoot(t *testing.T) {
-	home := t.TempDir()
+	home := testenv.TempDir(t)
 	state := filepath.Join(home, "AppData", "reasonix", "sandbox")
 	if err := os.MkdirAll(state, 0o700); err != nil {
 		t.Fatal(err)
@@ -306,7 +308,7 @@ func TestGrantSpecRefusesARecordInsideAWritableRoot(t *testing.T) {
 	if ok, _ := WindowsGrantOps().Granted(home, newSyntheticSID()); ok {
 		t.Fatal("something was granted before the refusal")
 	}
-	beside := GrantSpec(Spec{Mode: "enforce", WriteRoots: []string{t.TempDir()}, ShellEnv: profileEnv(t)}, state)
+	beside := GrantSpec(Spec{Mode: "enforce", WriteRoots: []string{testenv.TempDir(t)}, ShellEnv: profileEnv(t)}, state)
 	if beside.GrantFault != nil {
 		t.Fatalf("a workspace beside the record was refused: %v", beside.GrantFault)
 	}

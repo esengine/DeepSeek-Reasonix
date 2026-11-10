@@ -4,10 +4,12 @@ import (
 	"errors"
 	"path/filepath"
 	"testing"
+
+	"reasonix/internal/base/testenv"
 )
 
 func TestTryAcquireRefusesConflictsAndLeavesNoNewOccupancy(t *testing.T) {
-	root, state := t.TempDir(), t.TempDir()
+	root, state := testenv.TempDir(t), testenv.TempDir(t)
 	coordinator := testCoordinator(t, root, state)
 	held, err := coordinator.Acquire(t.Context(), intent(filepath.Join(root, "a")))
 	if err != nil {

@@ -6,12 +6,13 @@ import (
 	"path/filepath"
 	"testing"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/ext/pluginpkg"
 )
 
 func packageWith(t *testing.T, hooks string, files map[string]string) pluginpkg.InstalledPackage {
 	t.Helper()
-	root := t.TempDir()
+	root := testenv.TempDir(t)
 	if hooks != "" {
 		if err := os.MkdirAll(filepath.Join(root, "hooks"), 0o755); err != nil {
 			t.Fatal(err)
@@ -41,7 +42,7 @@ func TestAPackageWithAModulesListIsAMod(t *testing.T) {
 }
 
 func TestAModulePathThatLeavesThePackageOrIsNotAFileIsRefused(t *testing.T) {
-	outside := filepath.Join(t.TempDir(), "evil.js")
+	outside := filepath.Join(testenv.TempDir(t), "evil.js")
 	if err := os.WriteFile(outside, []byte("x"), 0o600); err != nil {
 		t.Fatal(err)
 	}

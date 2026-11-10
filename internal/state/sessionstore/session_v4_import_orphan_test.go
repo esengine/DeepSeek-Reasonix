@@ -3,6 +3,7 @@ package sessionstore
 import (
 	"os"
 	"path/filepath"
+	"reasonix/internal/base/testenv"
 	"testing"
 
 	"reasonix/internal/state/store"
@@ -18,7 +19,7 @@ func TestImportV4FromIgnoresIndexesWhoseTranscriptIsGone(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer root.Close()
-	dest := filepath.Join(t.TempDir(), "ws")
+	dest := filepath.Join(testenv.TempDir(t), "ws")
 	if err := os.MkdirAll(dest, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -62,7 +63,7 @@ func TestImportV4FromKeepsIndexesBesideAnExistingTranscript(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer root.Close()
-	dest := filepath.Join(t.TempDir(), "ws")
+	dest := filepath.Join(testenv.TempDir(t), "ws")
 	if n, _, err := ImportV4From(root.FS(), dest, nil, nil); n != 1 || err != nil {
 		t.Fatalf("first import = %d, %v", n, err)
 	}

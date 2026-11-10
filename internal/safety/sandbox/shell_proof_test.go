@@ -9,16 +9,18 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"reasonix/internal/base/testenv"
 )
 
 var proofStore *shellProofStore
 
 func proofFixture(t *testing.T) (dir, exe string, launches *atomic.Int32) {
 	t.Helper()
-	dir = t.TempDir()
+	dir = testenv.TempDir(t)
 	proofStore = newShellProofStore(dir)
 	restart()
-	exe = filepath.Join(t.TempDir(), "bash.exe")
+	exe = filepath.Join(testenv.TempDir(t), "bash.exe")
 	if err := os.WriteFile(exe, []byte("one"), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -183,7 +185,7 @@ func TestShellProofExpires(t *testing.T) {
 func TestShellProofIgnoresALinkedStore(t *testing.T) {
 	dir, exe, n := proofFixture(t)
 	prove(exe, countingRun(n, true))
-	real := t.TempDir()
+	real := testenv.TempDir(t)
 	if err := os.Rename(proofFile(dir), filepath.Join(real, "bash-proofs.json")); err != nil {
 		t.Fatal(err)
 	}
@@ -214,7 +216,7 @@ func TestShellProofIgnoresALinkedStore(t *testing.T) {
 
 func TestShellProofKeepsOtherExecutables(t *testing.T) {
 	_, exe, n := proofFixture(t)
-	other := filepath.Join(t.TempDir(), "bash.exe")
+	other := filepath.Join(testenv.TempDir(t), "bash.exe")
 	if err := os.WriteFile(other, []byte("zz"), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -297,7 +299,7 @@ func TestBashDiscoveryFallsBackToPowerShellWithATimeoutReason(t *testing.T) {
 }
 
 func TestShellDiscoveryResolveProvesOnceAcrossRestarts(t *testing.T) {
-	bin := t.TempDir()
+	bin := testenv.TempDir(t)
 	name := "bash"
 	if runtime.GOOS == "windows" {
 		name = "bash.exe"
@@ -308,7 +310,7 @@ func TestShellDiscoveryResolveProvesOnceAcrossRestarts(t *testing.T) {
 	}
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 	var n atomic.Int32
-	d := ShellDiscovery{Prefer: "bash", ProofDir: t.TempDir(), Probe: countingRun(&n, true)}
+	d := ShellDiscovery{Prefer: "bash", ProofDir: testenv.TempDir(t), Probe: countingRun(&n, true)}
 	for range 2 {
 		if sh := d.Resolve(); sh.Kind != ShellBash || !strings.EqualFold(sh.Path, exe) {
 			t.Fatalf("resolved %+v, want %s", sh, exe)
@@ -333,7 +335,7 @@ func TestShellProofStoreWithoutADirectoryHoldsNothing(t *testing.T) {
 }
 
 func TestDigestFileOfAMissingPathFails(t *testing.T) {
-	if _, ok := digestFile(filepath.Join(t.TempDir(), "absent")); ok {
+	if _, ok := digestFile(filepath.Join(testenv.TempDir(t), "absent")); ok {
 		t.Fatal("digest of a missing file reported ok")
 	}
 }

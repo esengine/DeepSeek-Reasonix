@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/ext/skilllock"
 )
 
@@ -34,7 +35,7 @@ func read(t *testing.T, path string) string {
 // source and in the skills folder, and a lock entry holding their digest.
 func install(t *testing.T) (Updater, string, string) {
 	t.Helper()
-	home, src := t.TempDir(), t.TempDir()
+	home, src := testenv.TempDir(t), testenv.TempDir(t)
 	installed := filepath.Join(home, "skills", "mine")
 	for _, dir := range []string{src, installed} {
 		put(t, filepath.Join(dir, "SKILL.md"), "---\nname: mine\ndescription: d\n---\nv1\n")
@@ -124,7 +125,7 @@ func TestAPlanGoesStaleWhenAnySideMovesAfterItWasShown(t *testing.T) {
 			put(t, filepath.Join(installed, "SKILL.md"), "edited\n")
 		},
 		"the record was swapped to another folder": func(t *testing.T, u Updater, src, _ string) {
-			other := t.TempDir()
+			other := testenv.TempDir(t)
 			for _, f := range []string{"SKILL.md", "scripts/run.sh"} {
 				put(t, filepath.Join(other, f), read(t, filepath.Join(src, f)))
 			}
@@ -239,7 +240,7 @@ func TestOnlyACopyFromALocalFolderCanBeUpdated(t *testing.T) {
 			t.Errorf("%s: Plan = %v, want ErrNotLocal", name, err)
 		}
 	}
-	e.Source = filepath.Join(t.TempDir(), "gone")
+	e.Source = filepath.Join(testenv.TempDir(t), "gone")
 	_ = skilllock.Record(u.Home, e)
 	if _, err := u.Plan("mine"); !errors.Is(err, ErrSourceMissing) {
 		t.Errorf("a vanished source: %v", err)
@@ -248,7 +249,7 @@ func TestOnlyACopyFromALocalFolderCanBeUpdated(t *testing.T) {
 
 func TestAnUpdateNeverCopiesWhatAnInstallWouldNot(t *testing.T) {
 	u, src, installed := install(t)
-	outside := t.TempDir()
+	outside := testenv.TempDir(t)
 	put(t, filepath.Join(outside, "secret"), "secret")
 	put(t, filepath.Join(src, ".git", "HEAD"), "ref")
 	if os.Symlink(filepath.Join(outside, "secret"), filepath.Join(src, "escape")) != nil {

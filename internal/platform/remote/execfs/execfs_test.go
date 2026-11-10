@@ -13,6 +13,7 @@ import (
 	"strings"
 	"testing"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/platform/remote/execfs/fstest"
 )
 
@@ -54,12 +55,12 @@ func needGNUStat(t *testing.T) {
 
 func TestFileLayerThroughArgvAgainstALocalPOSIXShell(t *testing.T) {
 	needGNUStat(t)
-	fstest.RunScenario(t, New(local{}), t.TempDir())
+	fstest.RunScenario(t, New(local{}), testenv.TempDir(t))
 }
 
 func TestFileLayerThroughACommandLineAgainstALocalPOSIXShell(t *testing.T) {
 	needGNUStat(t)
-	fstest.RunScenario(t, New(viaCommandLine{}), t.TempDir())
+	fstest.RunScenario(t, New(viaCommandLine{}), testenv.TempDir(t))
 }
 
 func TestAMissingToolIsNamedNotSwallowed(t *testing.T) {
@@ -80,7 +81,7 @@ func TestAFileOverTheTransferLimitIsRefusedByTypeBothWays(t *testing.T) {
 	transferCap = 1024
 	t.Cleanup(func() { transferCap = old })
 	ctx := context.Background()
-	dir := t.TempDir()
+	dir := testenv.TempDir(t)
 	fsys := New(local{})
 
 	if _, err := fsys.UploadAtomic(ctx, dir+"/up", bytes.NewReader(make([]byte, 1025)), 0o600); !errors.Is(err, ErrTooLarge) {
@@ -105,7 +106,7 @@ func TestAFileOverTheTransferLimitIsRefusedByTypeBothWays(t *testing.T) {
 func TestATruncatedUploadIsNotPublished(t *testing.T) {
 	needGNUStat(t)
 	ctx := context.Background()
-	dir := t.TempDir()
+	dir := testenv.TempDir(t)
 	fsys := New(shortWrite{local{}})
 	if err := fsys.WriteFileAtomic(ctx, dir+"/f", []byte("complete"), 0o600); err == nil {
 		t.Fatal("a write whose bytes did not all arrive was published")
@@ -129,7 +130,7 @@ func (s shortWrite) Script(ctx context.Context, stdin io.Reader, body string, ar
 
 func TestAWriteWillNotFollowALinkPlantedAtTheTempName(t *testing.T) {
 	needGNUStat(t)
-	dir := t.TempDir()
+	dir := testenv.TempDir(t)
 	victim := filepath.Join(dir, "victim")
 	if err := os.WriteFile(victim, []byte("keep"), 0o600); err != nil {
 		t.Fatal(err)

@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"reasonix/internal/base/secrets"
+	"reasonix/internal/base/testenv"
 )
 
 func TestWindowsPowerShellCandidatesIncludeStoreAlias(t *testing.T) {
@@ -75,7 +76,7 @@ func TestPowerShellLaunchesProbesOnlyAliases(t *testing.T) {
 	aliasLaunches = &launchProbes{seen: map[string]launchProbe{}, run: func(string) bool { probed++; return false }}
 	t.Cleanup(func() { aliasLaunches = saved })
 
-	regular := filepath.Join(t.TempDir(), "pwsh.exe")
+	regular := filepath.Join(testenv.TempDir(t), "pwsh.exe")
 	if err := os.WriteFile(regular, []byte("MZ"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -100,7 +101,7 @@ func TestLaunchProbesAnswerRepeatedDiscoveryOnce(t *testing.T) {
 // A missing path is not a launchable Store alias; callers that gate on this
 // helper must not keep an interpreter that the host does not have.
 func TestPowerShellLaunchesRejectsMissingPath(t *testing.T) {
-	if powerShellLaunches(filepath.Join(t.TempDir(), "missing-pwsh.exe")) {
+	if powerShellLaunches(filepath.Join(testenv.TempDir(t), "missing-pwsh.exe")) {
 		t.Fatal("missing PowerShell reported as launchable")
 	}
 }

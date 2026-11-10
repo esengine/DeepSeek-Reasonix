@@ -5,10 +5,12 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"reasonix/internal/base/testenv"
 )
 
 func TestMarkUntrackedKeepsAnExistingMarker(t *testing.T) {
-	dir := t.TempDir()
+	dir := testenv.TempDir(t)
 	marker := filepath.Join(dir, ".gitignore")
 	if err := os.WriteFile(marker, []byte("keep.me\n"), 0o644); err != nil {
 		t.Fatal(err)
@@ -22,7 +24,7 @@ func TestMarkUntrackedKeepsAnExistingMarker(t *testing.T) {
 }
 
 func TestMarkUntrackedIsIdempotent(t *testing.T) {
-	dir := t.TempDir()
+	dir := testenv.TempDir(t)
 	for range 2 {
 		if err := MarkUntracked(dir); err != nil {
 			t.Fatal(err)
@@ -34,7 +36,7 @@ func TestMarkUntrackedIsIdempotent(t *testing.T) {
 }
 
 func TestMarkUntrackedLeavesNothingWhenTheWriteFails(t *testing.T) {
-	dir := t.TempDir()
+	dir := testenv.TempDir(t)
 	orig := writeMarker
 	writeMarker = func(*os.File) error { return errors.New("disk full") }
 	err := MarkUntracked(dir)
@@ -54,7 +56,7 @@ func TestMarkUntrackedLeavesNothingWhenTheWriteFails(t *testing.T) {
 }
 
 func TestMarkUntrackedDoesNotFollowASymlinkedMarker(t *testing.T) {
-	dir, outside := t.TempDir(), t.TempDir()
+	dir, outside := testenv.TempDir(t), testenv.TempDir(t)
 	target := filepath.Join(outside, "victim")
 	if err := os.Symlink(target, filepath.Join(dir, ".gitignore")); err != nil {
 		t.Skipf("symlinks unavailable: %v", err)

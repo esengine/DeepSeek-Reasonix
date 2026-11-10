@@ -4,6 +4,8 @@ import (
 	"path/filepath"
 	"runtime"
 	"testing"
+
+	"reasonix/internal/base/testenv"
 )
 
 // A workspace at a drive root splits to the bare volume, and every match the
@@ -32,7 +34,7 @@ func TestAGlobRootedAtADriveWalksTheDriveRoot(t *testing.T) {
 // The repair applies to exactly one shape: a pattern whose root already names a
 // directory reaches the walk unchanged.
 func TestAGlobRootThatNamesADirectoryIsUntouched(t *testing.T) {
-	dir := t.TempDir()
+	dir := testenv.TempDir(t)
 	root, rel := globWalkRoot(filepath.Join(dir, "**", "*.go"))
 	if root != dir {
 		t.Fatalf("root = %q, want %q", root, dir)

@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/contract/event"
 	"reasonix/internal/contract/provider"
 	"reasonix/internal/ext/hook"
@@ -73,7 +74,7 @@ func TestEffectHookWritesInvalidateWorkspaceWithoutExecutingDeniedTool(t *testin
 			}
 			t.Run(name, func(t *testing.T) {
 				home := statedBootHome(t)
-				root := t.TempDir()
+				root := testenv.TempDir(t)
 				marker := filepath.Join(root, "hook-side.txt")
 				writeFile(t, root, "note.txt", "original")
 				kind := "hook-workspace-" + strings.ReplaceAll(t.Name(), "/", "-")

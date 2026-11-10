@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/contract/config"
 	"reasonix/internal/contract/event"
 	"reasonix/internal/ext/extension"
@@ -16,7 +17,7 @@ import (
 // notice naming the extension, the point and the reason — and it does so once.
 func TestMissingSidecarReachesTheSinkAsATypedNotice(t *testing.T) {
 	sink := &noticeSink{}
-	stage, err := startExtensions(context.Background(), Options{}, config.RootsForHome(t.TempDir()), t.TempDir(), nil, sink)
+	stage, err := startExtensions(context.Background(), Options{}, config.RootsForHome(testenv.TempDir(t)), testenv.TempDir(t), nil, sink)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -48,7 +49,7 @@ func TestMissingSidecarReachesTheSinkAsATypedNotice(t *testing.T) {
 // sidecar missing right after an extension was installed still reaches the sink.
 func TestRebuiltDispatcherKeepsTheMissingSidecarNotice(t *testing.T) {
 	sink := &noticeSink{}
-	stage, err := startExtensions(context.Background(), Options{}, config.RootsForHome(t.TempDir()), t.TempDir(), nil, sink)
+	stage, err := startExtensions(context.Background(), Options{}, config.RootsForHome(testenv.TempDir(t)), testenv.TempDir(t), nil, sink)
 	if err != nil {
 		t.Fatal(err)
 	}

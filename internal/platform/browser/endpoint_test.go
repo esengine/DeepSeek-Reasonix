@@ -8,6 +8,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"reasonix/internal/base/testenv"
 )
 
 // hostedBrowser is the smallest host a Session can drive: the commands Open
@@ -125,12 +127,12 @@ func TestSessionDrivesAHostedBrowserWithoutLaunchingOne(t *testing.T) {
 func TestNoHostFallsBackToLaunching(t *testing.T) {
 	pool := &Pool{}
 	pool.SetEndpoint(func(context.Context, string) (Endpoint, error) { return nil, ErrNoHost })
-	s := NewSession(Config{Launch: LaunchSpec{Executable: "/nonexistent/chrome", ProfileDir: t.TempDir()}, Pool: pool})
+	s := NewSession(Config{Launch: LaunchSpec{Executable: "/nonexistent/chrome", ProfileDir: testenv.TempDir(t)}, Pool: pool})
 	if _, err := s.Open(context.Background(), "https://example.com/", "", false); CodeOf(err) != CodeEngineMissing {
 		t.Fatalf("with no host attached = %v, want the launch path's %s", err, CodeEngineMissing)
 	}
 	pool.SetEndpoint(func(context.Context, string) (Endpoint, error) { return nil, errors.New("refused") })
-	s = NewSession(Config{Launch: LaunchSpec{Executable: "/nonexistent/chrome", ProfileDir: t.TempDir()}, Pool: pool})
+	s = NewSession(Config{Launch: LaunchSpec{Executable: "/nonexistent/chrome", ProfileDir: testenv.TempDir(t)}, Pool: pool})
 	if _, err := s.Open(context.Background(), "https://example.com/", "", false); CodeOf(err) != CodeEngineFailed {
 		t.Fatalf("a host that refuses = %v, want %s rather than a silent launch", err, CodeEngineFailed)
 	}

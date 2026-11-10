@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reasonix/internal/base/testenv"
 	"strings"
 	"testing"
 	"time"
@@ -154,7 +155,7 @@ func TestImportV4FromCopiesAndIsIdempotent(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer root.Close()
-	dest := filepath.Join(t.TempDir(), "ws")
+	dest := filepath.Join(testenv.TempDir(t), "ws")
 	if n, skipped, err := ImportV4From(root.FS(), dest, nil, nil); n != 1 || len(skipped) != 0 || err != nil {
 		t.Fatalf("first import = %d, %v", n, err)
 	}
@@ -257,7 +258,7 @@ func TestImportV4FromCarriesTheArchivedMark(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer root.Close()
-	dest := filepath.Join(t.TempDir(), "ws")
+	dest := filepath.Join(testenv.TempDir(t), "ws")
 
 	n, skipped, err := ImportV4From(root.FS(), dest, nil, func(string) BranchMeta {
 		return BranchMeta{Archived: true}
@@ -284,7 +285,7 @@ func TestImportV4FromLeavesTheMarkOffWhenUnasked(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer root.Close()
-	dest := filepath.Join(t.TempDir(), "ws")
+	dest := filepath.Join(testenv.TempDir(t), "ws")
 
 	if n, skipped, err := ImportV4From(root.FS(), dest, nil, nil); n != 1 || len(skipped) != 0 || err != nil {
 		t.Fatalf("import = %d, %v", n, err)

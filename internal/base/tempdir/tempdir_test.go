@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"reasonix/internal/base/testenv"
 )
 
 const sentinel = "late-write.txt"
@@ -17,7 +19,7 @@ const sentinel = "late-write.txt"
 // raced, because a producer driven by a sleep would sometimes lose and make
 // this test the flaky one.
 func TestContentThatOutlivesTheDeadlineIsReported(t *testing.T) {
-	dir := t.TempDir()
+	dir := testenv.TempDir(t)
 	if err := os.WriteFile(filepath.Join(dir, sentinel), []byte("still running"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -34,7 +36,7 @@ func TestContentThatOutlivesTheDeadlineIsReported(t *testing.T) {
 // And the behaviour that motivated the wait: a refusal that stops is not a
 // leak. Reporting the first frame of one is what made the gate flap.
 func TestARefusalThatStopsLetsTheDirectoryQuiesce(t *testing.T) {
-	dir := filepath.Join(t.TempDir(), "settling")
+	dir := filepath.Join(testenv.TempDir(t), "settling")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -58,7 +60,7 @@ func TestARefusalThatStopsLetsTheDirectoryQuiesce(t *testing.T) {
 }
 
 func TestAnOrdinaryTreeIsRemovedWithoutWaiting(t *testing.T) {
-	root := filepath.Join(t.TempDir(), "root")
+	root := filepath.Join(testenv.TempDir(t), "root")
 	if err := os.MkdirAll(filepath.Join(root, "nested"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -75,7 +77,7 @@ func TestAnOrdinaryTreeIsRemovedWithoutWaiting(t *testing.T) {
 
 // A directory already gone is not a failure: the test may have removed it.
 func TestARemovalOfSomethingAlreadyGoneIsNotReported(t *testing.T) {
-	if err := removeDir(filepath.Join(t.TempDir(), "never-existed")); err != nil {
+	if err := removeDir(filepath.Join(testenv.TempDir(t), "never-existed")); err != nil {
 		t.Fatalf("removeDir: %v", err)
 	}
 }

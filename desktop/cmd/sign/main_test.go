@@ -10,6 +10,7 @@ import (
 
 	"aead.dev/minisign"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/platform/update"
 )
 
@@ -28,7 +29,7 @@ func TestSignFiles(t *testing.T) {
 	t.Setenv("MINISIGN_PRIVATE_KEY", string(enc))
 	t.Setenv("MINISIGN_PASSWORD", "pw")
 
-	dir := t.TempDir()
+	dir := testenv.TempDir(t)
 	artifact := filepath.Join(dir, "Reasonix-linux-amd64.tar.gz")
 	payload := []byte("pretend this is a release tarball")
 	if err := os.WriteFile(artifact, payload, 0o644); err != nil {
@@ -51,7 +52,7 @@ func TestSignFiles(t *testing.T) {
 // every platform is listed with a download URL, a parallel .minisig URL, and a
 // non-empty digest. The .minisig and latest.json files must be ignored.
 func TestGenManifest(t *testing.T) {
-	dir := t.TempDir()
+	dir := testenv.TempDir(t)
 	names := []string{
 		"Reasonix-darwin-arm64.zip",
 		"Reasonix-darwin-amd64.zip",
@@ -158,7 +159,7 @@ func TestGenManifest(t *testing.T) {
 }
 
 func TestGenManifestCanReuseStableNotesForStandaloneRC(t *testing.T) {
-	dir := t.TempDir()
+	dir := testenv.TempDir(t)
 	if err := os.WriteFile(filepath.Join(dir, "Reasonix-linux-amd64.tar.gz"), []byte("rc"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -181,7 +182,7 @@ func TestGenManifestCanReuseStableNotesForStandaloneRC(t *testing.T) {
 // TestGenManifestIgnoresUnknownNativePackages ensures a .deb without a known
 // platform key is skipped rather than inventing a native_packages entry.
 func TestGenManifestIgnoresUnknownNativePackages(t *testing.T) {
-	dir := t.TempDir()
+	dir := testenv.TempDir(t)
 	for _, n := range []string{
 		"Reasonix-linux-amd64.tar.gz",
 		"Reasonix-mystery.deb",

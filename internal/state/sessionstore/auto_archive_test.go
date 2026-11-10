@@ -3,6 +3,7 @@ package sessionstore
 import (
 	"os"
 	"path/filepath"
+	"reasonix/internal/base/testenv"
 	"testing"
 	"time"
 
@@ -43,7 +44,7 @@ func archivedOf(t *testing.T, path string) bool {
 }
 
 func TestArchiveInactiveSessionsSkipsWhatMustStay(t *testing.T) {
-	dir := t.TempDir()
+	dir := testenv.TempDir(t)
 	idle := writeIdleSession(t, dir, "idle")
 	pinned := writeIdleSession(t, dir, "pinned")
 	held := writeIdleSession(t, dir, "held")
@@ -77,7 +78,7 @@ func TestArchiveInactiveSessionsSkipsWhatMustStay(t *testing.T) {
 }
 
 func TestArchiveInactiveSessionsLeavesRecentAndIsReversible(t *testing.T) {
-	dir := t.TempDir()
+	dir := testenv.TempDir(t)
 	path := writeIdleSession(t, dir, "a")
 	n, err := ArchiveInactiveSessions(dir, time.Now(), 3*24*time.Hour, nil)
 	if err != nil || n != 0 || archivedOf(t, path) {
@@ -99,7 +100,7 @@ func TestArchiveInactiveSessionsLeavesRecentAndIsReversible(t *testing.T) {
 }
 
 func TestPinSessionsKeepsThemFromTheSweep(t *testing.T) {
-	dir := t.TempDir()
+	dir := testenv.TempDir(t)
 	path := writeIdleSession(t, dir, "a")
 	if err := PinSessions([]string{path}); err != nil {
 		t.Fatal(err)
@@ -110,7 +111,7 @@ func TestPinSessionsKeepsThemFromTheSweep(t *testing.T) {
 }
 
 func TestArchiveInactiveSessionsGuards(t *testing.T) {
-	dir := t.TempDir()
+	dir := testenv.TempDir(t)
 	later := time.Now().Add(10 * 24 * time.Hour)
 	week := 3 * 24 * time.Hour
 
@@ -134,7 +135,7 @@ func TestArchiveInactiveSessionsGuards(t *testing.T) {
 }
 
 func TestArchiveInactiveSessionsTrustsTheSidecarClock(t *testing.T) {
-	dir := t.TempDir()
+	dir := testenv.TempDir(t)
 	path := writeIdleSession(t, dir, "a")
 	ageFiles(t, path, 30*24*time.Hour)
 	if err := UpdateBranchMeta(path, false, func(m *BranchMeta) error {
@@ -164,7 +165,7 @@ func TestArchiveInactiveSessionsRechecksUnderTheLock(t *testing.T) {
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
-			dir := t.TempDir()
+			dir := testenv.TempDir(t)
 			path := writeIdleSession(t, dir, "a")
 			beforeArchiveLock = func(p string) {
 				if err := write(p); err != nil {
@@ -180,7 +181,7 @@ func TestArchiveInactiveSessionsRechecksUnderTheLock(t *testing.T) {
 }
 
 func TestAutoArchiveMarksAndRestoreClears(t *testing.T) {
-	dir := t.TempDir()
+	dir := testenv.TempDir(t)
 	path := writeIdleSession(t, dir, "a")
 	later := time.Now().Add(10 * 24 * time.Hour)
 	if n, _ := ArchiveInactiveSessions(dir, later, time.Hour, nil); n != 1 {
@@ -199,7 +200,7 @@ func TestAutoArchiveMarksAndRestoreClears(t *testing.T) {
 }
 
 func TestArchiveInactiveSessionsWaitsForAnUnreadFinish(t *testing.T) {
-	dir := t.TempDir()
+	dir := testenv.TempDir(t)
 	unread := writeIdleSession(t, dir, "unread")
 	ageFiles(t, unread, 20*24*time.Hour)
 	finished := time.Now().Add(-20 * 24 * time.Hour)

@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/contract/config"
 	"reasonix/internal/platform/remote"
 	"reasonix/internal/platform/wsl"
@@ -62,7 +63,7 @@ func detach(l Link) func(context.Context, string) (remote.ExecResult, error) {
 }
 
 func TestALaunchRunsInARealSessionAndKeepsItsOwnStatus(t *testing.T) {
-	l := localLink(t, t.TempDir())
+	l := localLink(t, testenv.TempDir(t))
 	if err := l.Start(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -97,7 +98,7 @@ func TestAScratchDirectoryOthersCouldUseIsRefused(t *testing.T) {
 			if err := os.MkdirAll(filepath.Dir(dir), 0o755); err != nil {
 				t.Fatal(err)
 			}
-			elsewhere := t.TempDir()
+			elsewhere := testenv.TempDir(t)
 			if err := os.Chmod(elsewhere, 0o700); err != nil {
 				t.Fatal(err)
 			}
@@ -107,7 +108,7 @@ func TestAScratchDirectoryOthersCouldUseIsRefused(t *testing.T) {
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
-			home := t.TempDir()
+			home := testenv.TempDir(t)
 			prepare(t, filepath.Join(home, ".reasonix", "link"))
 			l := localLink(t, home)
 			if err := l.Start(t.Context()); err != nil {

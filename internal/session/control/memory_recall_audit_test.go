@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/contract/event"
 	"reasonix/internal/contract/tool"
 	"reasonix/internal/runtime/agent"
@@ -40,7 +41,7 @@ func TestComposeEmitsMemoryRecallAudit(t *testing.T) {
 }
 
 func TestMemoryRecallTrajectoryDistinguishesOmissionReasons(t *testing.T) {
-	store := memory.Store{Dir: t.TempDir()}
+	store := memory.Store{Dir: testenv.TempDir(t)}
 	for i := range 8 {
 		if _, err := store.Save(memory.Memory{
 			Name: fmt.Sprintf("audit-%d", i), Title: fmt.Sprintf("Audit fact %d", i),
@@ -63,7 +64,7 @@ func TestMemoryRecallTrajectoryDistinguishesOmissionReasons(t *testing.T) {
 	if byLimit.Block() != byBudget.Block() {
 		t.Fatal("fixture must produce identical provider-visible recall blocks")
 	}
-	path := filepath.Join(t.TempDir(), "recall.jsonl")
+	path := filepath.Join(testenv.TempDir(t), "recall.jsonl")
 	inner := &recallAuditSink{Sink: event.Discard}
 	recorder, err := trajectory.New(inner, path, nil)
 	if err != nil {

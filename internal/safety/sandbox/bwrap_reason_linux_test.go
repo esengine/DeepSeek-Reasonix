@@ -8,12 +8,14 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"reasonix/internal/base/testenv"
 )
 
 // fakeBwrap puts a bwrap on PATH that exits with code, and nothing else.
 func fakeBwrap(t *testing.T, code string) {
 	t.Helper()
-	dir := t.TempDir()
+	dir := testenv.TempDir(t)
 	script := "#!/bin/sh\nexit " + code + "\n"
 	if err := os.WriteFile(filepath.Join(dir, "bwrap"), []byte(script), 0o755); err != nil {
 		t.Fatal(err)
@@ -47,7 +49,7 @@ func TestAnInstalledBwrapThatCannotEnterANamespaceIsNotReportedMissing(t *testin
 }
 
 func TestNoBwrapOnPathIsReportedMissing(t *testing.T) {
-	t.Setenv("PATH", t.TempDir())
+	t.Setenv("PATH", testenv.TempDir(t))
 	if Available() {
 		t.Fatal("an absent bwrap was reported available")
 	}
@@ -85,7 +87,7 @@ func TestADeniedNamespaceStillLeavesTheCommandUnwrapped(t *testing.T) {
 // A bwrap that cannot even be started (a bad interpreter, a failed exec) never
 // reached the point of creating a namespace, so it is not a denied one.
 func TestABwrapThatCannotBeStartedIsNotReportedAsADeniedNamespace(t *testing.T) {
-	dir := t.TempDir()
+	dir := testenv.TempDir(t)
 	if err := os.WriteFile(filepath.Join(dir, "bwrap"), []byte("#!/no/such/interpreter\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}

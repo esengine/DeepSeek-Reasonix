@@ -61,7 +61,7 @@ func TestTrustHeldMCPToolsConfirmation(t *testing.T) {
 	srv := trustTestServer(t, &desc)
 	spec := plugin.Spec{
 		Name: "srv", Type: "http", URL: srv.URL, Authorized: true, ConfigSource: "user_config",
-		StateDir: filepath.Join(t.TempDir(), "ws", "srv"),
+		StateDir: filepath.Join(testenv.TempDir(t), "ws", "srv"),
 	}
 	host := plugin.NewHost()
 	if _, err := host.EnsureConnected(t.Context(), spec); err != nil {

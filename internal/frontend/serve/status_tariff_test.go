@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/contract/config"
 	"reasonix/internal/contract/pricing"
 	"reasonix/internal/session/control"
@@ -13,7 +14,7 @@ import (
 func tariffStatus(t *testing.T, tariff func(time.Time) (pricing.Tariff, bool)) map[string]any {
 	t.Helper()
 	bc := NewBroadcaster()
-	ctrl := control.New(control.Options{Sink: bc, SessionDir: t.TempDir(), Tariff: tariff})
+	ctrl := control.New(control.Options{Sink: bc, SessionDir: testenv.TempDir(t), Tariff: tariff})
 	srv := httptest.NewServer(operatorHandler(New(ctrl, bc, config.ServeConfig{})))
 	t.Cleanup(srv.Close)
 	return readStatus(t, srv)

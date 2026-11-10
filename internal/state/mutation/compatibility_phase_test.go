@@ -8,11 +8,12 @@ import (
 	"testing"
 
 	"reasonix/internal/base/filelock"
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/state/workspacelease"
 )
 
 func TestCompatibilityPreparationDoesNotHoldTheGlobalRegistry(t *testing.T) {
-	root, state := t.TempDir(), t.TempDir()
+	root, state := testenv.TempDir(t), testenv.TempDir(t)
 	first := testCoordinator(t, root, state)
 	a, b := filepath.Join(root, "a"), filepath.Join(root, "b")
 	entered, resume := make(chan struct{}), make(chan struct{})
@@ -53,7 +54,7 @@ func TestCompatibilityPreparationDoesNotHoldTheGlobalRegistry(t *testing.T) {
 }
 
 func TestPreparingCompatibilityClaimRetainsCapacityQueuePriority(t *testing.T) {
-	root, state := t.TempDir(), t.TempDir()
+	root, state := testenv.TempDir(t), testenv.TempDir(t)
 	first := testCoordinator(t, root, state)
 	claimed, resume := make(chan struct{}), make(chan struct{})
 	first.compatClaim = func(root, dir, session string, paths []string) (func(), *workspacelease.ConflictError, error) {
@@ -107,7 +108,7 @@ func TestPreparingCompatibilityClaimRetainsCapacityQueuePriority(t *testing.T) {
 }
 
 func TestCancellationAfterCompatibilityGrantLeavesNoClaims(t *testing.T) {
-	root, state := t.TempDir(), t.TempDir()
+	root, state := testenv.TempDir(t), testenv.TempDir(t)
 	c := testCoordinator(t, root, state)
 	path := filepath.Join(root, "a")
 	ctx, cancel := context.WithCancel(t.Context())

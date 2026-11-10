@@ -27,7 +27,7 @@ func (r rootCtl) WorkspaceRoot() string { return r.root }
 
 func terminalServer(t *testing.T) (*Server, *http.ServeMux) {
 	t.Helper()
-	s := &Server{ctrl: rootCtl{root: t.TempDir()}, terminals: terminal.NewManager()}
+	s := &Server{ctrl: rootCtl{root: testenv.TempDir(t)}, terminals: terminal.NewManager()}
 	t.Cleanup(s.terminals.CloseAll)
 	mux := http.NewServeMux()
 	s.registerTerminalRoutes(mux)
@@ -192,7 +192,7 @@ func TestARemotePanesTerminalsAreForwardedForTheHostAndNeverForADevice(t *testin
 }
 
 func TestAMissingProjectFolderIsRefusedByCodeNotByTheSystemsSentence(t *testing.T) {
-	_, err := resolveWorkspaceDir(filepath.Join(t.TempDir(), "gone", "worktree"))
+	_, err := resolveWorkspaceDir(filepath.Join(testenv.TempDir(t), "gone", "worktree"))
 	var c *coded
 	if !errors.As(err, &c) || c.reason.Code != codeWorkspaceMissing || c.status != http.StatusBadRequest {
 		t.Fatalf("a folder that is not there = %v, want a %s refusal with 400", err, codeWorkspaceMissing)

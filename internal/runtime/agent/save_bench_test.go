@@ -7,13 +7,14 @@ import (
 	"strings"
 	"testing"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/contract/provider"
 )
 
 // One more turn onto an already-saved session of n messages: the shape every
 // real turn takes, and the one the autosave path pays on each of them.
 func benchIncrementalSave(b *testing.B, n int) {
-	dir := b.TempDir()
+	dir := testenv.TempDir(b)
 	path := filepath.Join(dir, "s.jsonl")
 	s := sessionstore.NewSession("sys")
 	for i := range n / 2 {

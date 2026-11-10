@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/contract/config"
 	"reasonix/internal/contract/event"
 	"reasonix/internal/contract/provider"
@@ -20,7 +21,7 @@ import (
 )
 
 func TestHistoryPagesMatchFullProjectionAndRejectRewrittenCursor(t *testing.T) {
-	t.Setenv("REASONIX_HOME", t.TempDir())
+	t.Setenv("REASONIX_HOME", testenv.TempDir(t))
 	session := sessionstore.NewSession("system")
 	session.Add(provider.Message{Role: provider.RoleUser, Content: "question", CreatedAt: 123})
 	session.Add(provider.Message{Role: provider.RoleAssistant, ToolCalls: []provider.ToolCall{{ID: "call", Name: "read_file", Arguments: `{"path":"a"}`}}})
@@ -104,7 +105,7 @@ func BenchmarkHistoryPageResponse(b *testing.B) {
 	for _, n := range []int{1000, 10000, 50000} {
 		for _, mode := range []string{"full", "page", "not-modified"} {
 			b.Run(fmt.Sprintf("%d/%s", n, mode), func(b *testing.B) {
-				b.Setenv("REASONIX_HOME", b.TempDir())
+				b.Setenv("REASONIX_HOME", testenv.TempDir(b))
 				session := sessionstore.NewSession("")
 				for i := range n {
 					role := provider.RoleUser

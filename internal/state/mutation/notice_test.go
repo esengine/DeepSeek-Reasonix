@@ -8,11 +8,12 @@ import (
 	"slices"
 	"testing"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/state/workspacelease"
 )
 
 func TestLegacyWaitClosesWithoutPrematureAcquisition(t *testing.T) {
-	root, state := t.TempDir(), t.TempDir()
+	root, state := testenv.TempDir(t), testenv.TempDir(t)
 	legacy, err := workspacelease.New(root, state, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -52,7 +53,7 @@ func TestLegacyWaitClosesWithoutPrematureAcquisition(t *testing.T) {
 func TestWaitNoticesRetainIdentityAndTerminationReason(t *testing.T) {
 	for _, finish := range []string{"acquired", "cancelled", "conflict"} {
 		t.Run(finish, func(t *testing.T) {
-			root, state := t.TempDir(), t.TempDir()
+			root, state := testenv.TempDir(t), testenv.TempDir(t)
 			path := filepath.Join(root, "a")
 			holder := testCoordinator(t, root, state)
 			held, err := holder.Acquire(t.Context(), intent(path))

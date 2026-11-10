@@ -5,6 +5,8 @@ import (
 	"errors"
 	"testing"
 	"testing/synctest"
+
+	"reasonix/internal/base/testenv"
 )
 
 func TestCancelledObserverAdmissionKeepsDurableUndo(t *testing.T) {
@@ -66,7 +68,7 @@ func TestObserverCancellationAfterDurablePreparationDoesNotReviveUndo(t *testing
 }
 
 func TestObserverReleaseDoesNotReleaseAnotherWriter(t *testing.T) {
-	s := New("", t.TempDir())
+	s := New("", testenv.TempDir(t))
 	o := NewMutationObserver(ObserverOptions{Store: s})
 	first, err := o.BeginWrite()
 	if err != nil {

@@ -6,11 +6,12 @@ import (
 	"path/filepath"
 	"testing"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/contract/delivery"
 )
 
 func TestPresentFilesValidatesEveryFileBeforeReturning(t *testing.T) {
-	root := t.TempDir()
+	root := testenv.TempDir(t)
 	if err := os.WriteFile(filepath.Join(root, "report.md"), []byte("# Report"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -32,7 +33,7 @@ func TestPresentFilesValidatesEveryFileBeforeReturning(t *testing.T) {
 }
 
 func TestPresentFilesHonorsReadPolicyAndGrantedRoots(t *testing.T) {
-	roots := realRoots([]string{t.TempDir(), t.TempDir()})
+	roots := realRoots([]string{testenv.TempDir(t), testenv.TempDir(t)})
 	root, extra := roots[0], roots[1]
 	path := filepath.Join(extra, "report 100%.md")
 	if err := os.WriteFile(path, []byte("# Report"), 0o600); err != nil {

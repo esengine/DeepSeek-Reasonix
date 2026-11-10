@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"reasonix/internal/assembly/boot"
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/contract/agentcomposition"
 	"reasonix/internal/contract/config"
 	"reasonix/internal/contract/event"
@@ -21,7 +22,7 @@ import (
 
 func compositionSwitchFixture(t *testing.T) (*Server, *control.Controller) {
 	t.Helper()
-	home, root, dir := t.TempDir(), t.TempDir(), t.TempDir()
+	home, root, dir := testenv.TempDir(t), testenv.TempDir(t), testenv.TempDir(t)
 	t.Setenv("REASONIX_HOME", home)
 	d := agentcomposition.Builtins()[0]
 	d.ID = "user:alternate"

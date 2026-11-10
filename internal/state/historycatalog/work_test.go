@@ -8,12 +8,13 @@ import (
 	"testing"
 
 	"reasonix/internal/base/backgroundwork"
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/contract/provider"
 	"reasonix/internal/state/sessionstore"
 )
 
 func TestInterruptedScanDoesNotMarkUnvisitedSourcesMissing(t *testing.T) {
-	root := Root{Path: t.TempDir(), Source: "project", Scope: "project"}
+	root := Root{Path: testenv.TempDir(t), Source: "project", Scope: "project"}
 	root.WorkspaceRoot = root.Path
 	a, b := filepath.Join(root.Path, "a.jsonl"), filepath.Join(root.Path, "b.jsonl")
 	saveMessages(t, a, provider.Message{Role: provider.RoleUser, Content: "first marker"})
@@ -70,7 +71,7 @@ func TestCanceledIndexDoesNotClassifyHealthySourceAsCorrupt(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = c.Close(context.Background()) })
-	root := Root{Path: t.TempDir()}
+	root := Root{Path: testenv.TempDir(t)}
 	path := filepath.Join(root.Path, "history.jsonl")
 	saveMessages(t, path, provider.Message{Role: provider.RoleUser, Content: "healthy history"})
 	if err := c.indexPath(context.Background(), root, path, 0, -1); err != nil {

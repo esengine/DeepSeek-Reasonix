@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"reasonix/internal/base/testenv"
 )
 
 func TestDiscardUnpublishedRejectsWrongManagedBoundary(t *testing.T) {
@@ -11,12 +13,12 @@ func TestDiscardUnpublishedRejectsWrongManagedBoundary(t *testing.T) {
 	for _, name := range []string{"outside", "root itself", "shared prefix"} {
 		t.Run(name, func(t *testing.T) {
 			repo := opened(t, initRepo(t))
-			managed := filepath.Join(t.TempDir(), "managed-extra")
+			managed := filepath.Join(testenv.TempDir(t), "managed-extra")
 			result, err := Create(t.Context(), repo, managed)
 			if err != nil {
 				t.Fatal(err)
 			}
-			wrong := t.TempDir()
+			wrong := testenv.TempDir(t)
 			switch name {
 			case "root itself":
 				wrong = result.WorktreeRoot

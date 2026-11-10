@@ -6,6 +6,7 @@ import (
 	"slices"
 	"testing"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/state/trustedstate"
 )
 
@@ -46,7 +47,7 @@ func TestHostPolicyAcceptsOnlyTightening(t *testing.T) {
 }
 
 func TestSealAndLoadRoundTrip(t *testing.T) {
-	store := trustedstate.Open(t.TempDir(), nil)
+	store := trustedstate.Open(testenv.TempDir(t), nil)
 	c, _ := Accept(nil, "", Derive(Sources{Checks: []string{"A"}}), "task-1")
 	rec, err := Seal(context.Background(), store, "ws", c)
 	if err != nil {
@@ -59,7 +60,7 @@ func TestSealAndLoadRoundTrip(t *testing.T) {
 }
 
 func TestLoadRefusesARecordOfAnotherKind(t *testing.T) {
-	store := trustedstate.Open(t.TempDir(), nil)
+	store := trustedstate.Open(testenv.TempDir(t), nil)
 	_, d, err := store.Append(context.Background(), "ws", "shadow_bundle/1", []byte(`{"criteria":[]}`))
 	if err != nil {
 		t.Fatal(err)

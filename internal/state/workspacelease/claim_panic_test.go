@@ -7,10 +7,11 @@ import (
 	"testing"
 
 	"reasonix/internal/base/fileutil"
+	"reasonix/internal/base/testenv"
 )
 
 func TestCompatibilityClaimPanicBeforeHandoffReleasesItsNewLocks(t *testing.T) {
-	root, state := t.TempDir(), t.TempDir()
+	root, state := testenv.TempDir(t), testenv.TempDir(t)
 	path := filepath.Join(root, "a")
 	before := fileutil.CrashPoint
 	fileutil.CrashPoint = func(op, target string) {

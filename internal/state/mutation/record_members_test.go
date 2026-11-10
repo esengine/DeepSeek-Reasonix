@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"reasonix/internal/base/filelock"
+	"reasonix/internal/base/testenv"
 )
 
 func TestAmbiguousRecordMembersCannotGrantOrScavenge(t *testing.T) {
@@ -18,7 +19,7 @@ func TestAmbiguousRecordMembersCannotGrantOrScavenge(t *testing.T) {
 			"active_duplicate", "effect_duplicate", "capacity_duplicate", "capacity_case",
 		} {
 			t.Run(shape+map[bool]string{false: "/dead", true: "/live"}[live], func(t *testing.T) {
-				c := testCoordinator(t, t.TempDir(), t.TempDir())
+				c := testCoordinator(t, testenv.TempDir(t), testenv.TempDir(t))
 				r := record{Version: 1, ID: "ambiguous", Order: 1, Active: true,
 					Paths: []string{filepath.Join(c.root, "reserved")}, Effect: NamedPaths}
 				if strings.HasPrefix(shape, "capacity_") {

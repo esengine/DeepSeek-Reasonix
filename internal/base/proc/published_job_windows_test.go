@@ -12,6 +12,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"reasonix/internal/base/testenv"
 )
 
 const publishedJobMarker = "REASONIX_PUBLISHED_JOB_TASKKILL_MARKER"
@@ -51,7 +53,7 @@ func TestPublishedJobRecorderAlias(t *testing.T) {
 
 func publishedJobStub(t *testing.T) string {
 	t.Helper()
-	dir := t.TempDir()
+	dir := testenv.TempDir(t)
 	exe, err := os.Executable()
 	if err != nil {
 		t.Fatal(err)

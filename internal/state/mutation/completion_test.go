@@ -5,10 +5,12 @@ import (
 	"errors"
 	"testing"
 	"time"
+
+	"reasonix/internal/base/testenv"
 )
 
 func TestEndedTransactionRetainsResourcesUntilAllExecutionsSettle(t *testing.T) {
-	root, state := t.TempDir(), t.TempDir()
+	root, state := testenv.TempDir(t), testenv.TempDir(t)
 	first, second := testCoordinator(t, root, state), testCoordinator(t, root, state)
 	l, err := first.Acquire(t.Context(), Intent{Effect: Workspace})
 	if err != nil {

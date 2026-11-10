@@ -4,6 +4,8 @@ import (
 	"errors"
 	"maps"
 	"testing"
+
+	"reasonix/internal/base/testenv"
 )
 
 // An enable on a repository-declared server is the user's answer for the
@@ -76,7 +78,7 @@ func TestEnableHoldsOnlyForTheDeclarationItWasGivenFor(t *testing.T) {
 // upgrade must not make every enabled project server ask again.
 func TestEnableSurvivesChangesTheRepositoryDoesNotControl(t *testing.T) {
 	store, root := bindingHome(t)
-	userBin := t.TempDir()
+	userBin := testenv.TempDir(t)
 	writeProjectFiles(t, userBin, map[string]string{"rx-fake-node": "v1"})
 	t.Setenv("PATH", userBin)
 	writeProjectFiles(t, root, map[string]string{
@@ -136,7 +138,7 @@ func TestEnableRecordedWithoutADeclarationAsksAgain(t *testing.T) {
 // depend on where the checkout sits.
 func TestDeclarationDigestDoesNotDependOnTheCheckoutPath(t *testing.T) {
 	_, first := bindingHome(t)
-	second := t.TempDir()
+	second := testenv.TempDir(t)
 	files := map[string]string{
 		".mcp.json":     mcpJSON(t, map[string]any{"command": "./bin/server.sh"}),
 		"bin/server.sh": "#!/bin/sh\n",

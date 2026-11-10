@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/contract/config"
 	"reasonix/internal/contract/event"
 	"reasonix/internal/contract/eventwire"
@@ -111,7 +112,7 @@ func TestAnIllegalPartitionRefusesRatherThanReports(t *testing.T) {
 // Eligibility is the protocol's, not the reader's: a turn the host never named
 // is a synthetic continuation, and a truncated log is a prefix.
 func TestOnlyNamedTurnsInACompleteLogAreEligible(t *testing.T) {
-	dir := t.TempDir()
+	dir := testenv.TempDir(t)
 	name := time.Now().Format("20060102-150405") + ".000000000-m.wire.jsonl"
 	path := filepath.Join(dir, name)
 	authored := 1

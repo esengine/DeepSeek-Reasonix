@@ -6,6 +6,8 @@ import (
 	"regexp"
 	"slices"
 	"testing"
+
+	"reasonix/internal/base/testenv"
 )
 
 // The tree's two copies agree today. This is the check's own regression: both
@@ -30,7 +32,7 @@ func TestTransientTagParityIsCleanInTree(t *testing.T) {
 // exists for, and it has to be named per missing tag — a count would not say
 // which block is about to be printed at the reader.
 func TestTransientTagParityReportsBothDirections(t *testing.T) {
-	root := t.TempDir()
+	root := testenv.TempDir(t)
 	write := func(rel, body string) {
 		path := filepath.Join(root, rel)
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -60,7 +62,7 @@ func TestTransientTagParityReportsBothDirections(t *testing.T) {
 // A declaration the check can no longer find must fail loudly. Returning an
 // empty set would read as parity and put the drift back where it started.
 func TestTransientTagParityFailsWhenDeclarationMoves(t *testing.T) {
-	root := t.TempDir()
+	root := testenv.TempDir(t)
 	path := filepath.Join(root, goTagFile)
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		t.Fatal(err)

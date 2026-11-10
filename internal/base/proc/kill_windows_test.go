@@ -11,6 +11,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"reasonix/internal/base/testenv"
 )
 
 // A launcher (cmd.exe) that spawns a long-lived grandchild (ping) which inherits
@@ -99,7 +101,7 @@ func TestStartTrackedResumesSuspendedChild(t *testing.T) {
 // wedged system tool (a busy WMI, security software holding the call) behaves.
 func slowTaskkill(t *testing.T) {
 	t.Helper()
-	dir := t.TempDir()
+	dir := testenv.TempDir(t)
 	src := filepath.Join(dir, "main.go")
 	if err := os.WriteFile(src, []byte("package main\nimport \"time\"\nfunc main() { time.Sleep(10 * time.Minute) }\n"), 0o644); err != nil {
 		t.Fatal(err)

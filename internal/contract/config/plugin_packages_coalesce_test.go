@@ -5,6 +5,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"reasonix/internal/base/testenv"
 )
 
 func withPackageSource(t *testing.T, src func(home string) []InstalledPackage) {
@@ -20,7 +22,7 @@ func TestEnabledPackagesConcurrentCallersShareParses(t *testing.T) {
 		time.Sleep(40 * time.Millisecond)
 		return []InstalledPackage{{Name: "ecc"}}
 	})
-	r := RootsForHome(t.TempDir())
+	r := RootsForHome(testenv.TempDir(t))
 
 	const callers = 16
 	var wg sync.WaitGroup
@@ -51,7 +53,7 @@ func TestEnabledPackagesCallerNeverReadsStateOlderThanItsArrival(t *testing.T) {
 		<-release
 		return []InstalledPackage{{Name: "gen", Version: string(rune('0' + seen))}}
 	})
-	r := RootsForHome(t.TempDir())
+	r := RootsForHome(testenv.TempDir(t))
 
 	first := make(chan []InstalledPackage, 1)
 	go func() { first <- r.enabledPackages() }()
@@ -81,7 +83,7 @@ func TestEnabledPackagesCallersDoNotShareMutableResults(t *testing.T) {
 			MCPServers: map[string]PackageMCPServer{"a": {Args: []string{"x"}}},
 		}}
 	})
-	r := RootsForHome(t.TempDir())
+	r := RootsForHome(testenv.TempDir(t))
 
 	one := r.enabledPackages()
 	one[0].SkillRoots[0] = "changed"

@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"reasonix/internal/base/testenv"
 )
 
 // Host git never runs a program named by the repository's own configuration.
@@ -40,7 +42,7 @@ func newRepoFixture(t *testing.T, attributes string, files map[string]string) *r
 	requirePOSIXGit(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	t.Cleanup(cancel)
-	f := &repoFixture{t: t, dir: t.TempDir(), marker: filepath.Join(t.TempDir(), "executed"), ctx: ctx}
+	f := &repoFixture{t: t, dir: testenv.TempDir(t), marker: filepath.Join(testenv.TempDir(t), "executed"), ctx: ctx}
 	f.plain("init", "--quiet", "-b", "main")
 	f.plain("config", "user.email", "test@example.com")
 	f.plain("config", "user.name", "test")
@@ -94,7 +96,7 @@ func (f *repoFixture) appendConfig(rel, text string) {
 // run that is not stopped still produces plausible git output.
 func (f *repoFixture) payload() string {
 	f.t.Helper()
-	path := filepath.Join(f.t.TempDir(), "payload.sh")
+	path := filepath.Join(testenv.TempDir(f.t), "payload.sh")
 	script := "#!/bin/sh\necho ran >> '" + f.marker + "'\ncat\n"
 	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
 		f.t.Fatal(err)
@@ -255,7 +257,7 @@ func TestHostRepositoryMutationsDoNotRunRepositoryPrograms(t *testing.T) {
 	f.appendConfig("config", "[filter \"pwn\"]\n\tclean = "+p+"\n\tsmudge = "+p+"\n\tprocess = "+p+
 		"\n[merge \"pwn\"]\n\tdriver = "+p+" %O %A %B\n")
 
-	linked := filepath.Join(t.TempDir(), "linked")
+	linked := filepath.Join(testenv.TempDir(t), "linked")
 	f.mustRun("worktree", "add", "--quiet", "--detach", linked, "HEAD")
 	if data, err := os.ReadFile(filepath.Join(linked, "f.txt")); err != nil || string(data) != "Y\nb\nc\n" {
 		t.Fatalf("worktree checkout = %q, %v; want the committed bytes", data, err)

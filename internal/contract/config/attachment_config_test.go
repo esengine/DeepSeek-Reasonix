@@ -8,6 +8,8 @@ import (
 	"testing"
 
 	"github.com/BurntSushi/toml"
+
+	"reasonix/internal/base/testenv"
 )
 
 func TestAttachmentLimitIsHeldAtUserScope(t *testing.T) {
@@ -48,7 +50,7 @@ func TestAttachmentLimitUserRenderAndSaveRoundTrip(t *testing.T) {
 		if strings.Contains(RenderTOMLForScope(cfg, RenderScopeProject), "max_stream_bytes") || strings.Contains(RenderTOMLProjectDelta(cfg), "max_stream_bytes") {
 			t.Fatal("user-only limit leaked into project config")
 		}
-		home := t.TempDir()
+		home := testenv.TempDir(t)
 		t.Setenv("REASONIX_HOME", home)
 		path := filepath.Join(home, "config.toml")
 		if err := os.WriteFile(path, []byte("# user's comment\n[future_feature]\nkeep=42\n"), 0o600); err != nil {
@@ -69,7 +71,7 @@ func TestAttachmentLimitUserRenderAndSaveRoundTrip(t *testing.T) {
 }
 
 func TestAttachmentLimitStrictReadRejectsMalformedUserFile(t *testing.T) {
-	home := t.TempDir()
+	home := testenv.TempDir(t)
 	t.Setenv("REASONIX_HOME", home)
 	if got, err := LoadAttachmentStreamLimit(); err != nil || got.Bytes != DefaultAttachmentStreamBytes || got.Source != "default" {
 		t.Fatalf("missing user config: %+v %v", got, err)

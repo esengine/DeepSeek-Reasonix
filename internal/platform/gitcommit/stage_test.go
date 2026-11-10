@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/platform/gitstatus"
 )
 
@@ -87,7 +88,7 @@ func TestUnstagingRestoresTheIndexAndKeepsTheWork(t *testing.T) {
 
 func TestUnstagingInARepositoryWithNoCommitYet(t *testing.T) {
 	isolate(t)
-	dir := t.TempDir()
+	dir := testenv.TempDir(t)
 	run(t, dir, "init", "-q")
 	write(t, dir, "first.go", "package f\n")
 	run(t, dir, "add", "first.go")
@@ -135,7 +136,7 @@ func TestOnlyChangedPathsAreAcceptedAndTheyAreLiteral(t *testing.T) {
 }
 
 func TestStagingWithoutARepositoryOrAnythingToDo(t *testing.T) {
-	if err := Stage(context.Background(), reopen(t, t.TempDir()), nil, true); !errors.Is(err, ErrNoRepository) {
+	if err := Stage(context.Background(), reopen(t, testenv.TempDir(t)), nil, true); !errors.Is(err, ErrNoRepository) {
 		t.Fatalf("no repo: %v", err)
 	}
 	_, repo := fixture(t)

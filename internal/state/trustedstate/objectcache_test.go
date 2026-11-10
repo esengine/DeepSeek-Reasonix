@@ -7,6 +7,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"reasonix/internal/base/testenv"
 )
 
 // settled backdates an object's modification time past the racy window, so the
@@ -25,7 +27,7 @@ func settled(t *testing.T, path string) fs.FileInfo {
 }
 
 func countingStore(t *testing.T) (*Store, *atomic.Int32) {
-	s := Open(t.TempDir(), nil)
+	s := Open(testenv.TempDir(t), nil)
 	var reads atomic.Int32
 	s.readFile = func(p string) ([]byte, error) { reads.Add(1); return os.ReadFile(p) }
 	return s, &reads

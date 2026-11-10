@@ -4,10 +4,12 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"reasonix/internal/base/testenv"
 )
 
 func TestCarryDraftAttachmentsConfinesAndPreservesFiles(t *testing.T) {
-	source, target := t.TempDir(), t.TempDir()
+	source, target := testenv.TempDir(t), testenv.TempDir(t)
 	path, err := SaveTextAttachmentInRoot(source, "draft context")
 	if err != nil {
 		t.Fatal(err)
@@ -27,7 +29,7 @@ func TestCarryDraftAttachmentsConfinesAndPreservesFiles(t *testing.T) {
 	if string(out) != "existing" {
 		t.Fatal("destination changed")
 	}
-	outside := filepath.Join(t.TempDir(), "secret")
+	outside := filepath.Join(testenv.TempDir(t), "secret")
 	if err := os.WriteFile(outside, []byte("private"), 0o600); err != nil {
 		t.Fatal(err)
 	}

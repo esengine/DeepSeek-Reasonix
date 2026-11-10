@@ -1,9 +1,13 @@
 package plugin
 
-import "testing"
+import (
+	"testing"
+
+	"reasonix/internal/base/testenv"
+)
 
 func TestLazyCacheWriteRetainsHandshakeAfterHostClose(t *testing.T) {
-	t.Setenv("REASONIX_HOME", t.TempDir())
+	t.Setenv("REASONIX_HOME", testenv.TempDir(t))
 	spec := Spec{Name: "docs", Type: "http", URL: "https://example.test/mcp"}
 	host := resourceHost(&resourceTransport{}, true)
 	host.clients[0].hasTools = true

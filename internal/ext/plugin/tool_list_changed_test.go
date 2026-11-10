@@ -574,7 +574,7 @@ func TestToolListChangedCannotSelfAuthorize(t *testing.T) {
 func TestToolListChangedJudgesWhatTheRefreshBrings(t *testing.T) {
 	server, srv := newListChangedServer(t, true, "alpha")
 	h, published := connectListChanged(t, srv,
-		Spec{Authorized: true, StateDir: filepath.Join(t.TempDir(), "ws", "live")})
+		Spec{Authorized: true, StateDir: filepath.Join(testenv.TempDir(t), "ws", "live")})
 
 	// Startup recorded alpha as the approved definition; gamma arrives after.
 	server.announce(1, "alpha", "gamma")

@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"reasonix/internal/base/testenv"
 )
 
 func TestWilsonAndNewcombeMatchKnownValues(t *testing.T) {
@@ -42,7 +44,7 @@ func writeReport(t *testing.T, dir, name, capability string, pass int, n int) st
 }
 
 func TestReproductionSection(t *testing.T) {
-	dir := t.TempDir()
+	dir := testenv.TempDir(t)
 	a := writeReport(t, dir, "a.json", "sha256:aaaaaaaaaaaaaaaa", 40, 50)
 	same := writeReport(t, dir, "b.json", "sha256:aaaaaaaaaaaaaaaa", 38, 50)
 	got := reproductionSection(a, same)

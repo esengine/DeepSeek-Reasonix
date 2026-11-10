@@ -11,6 +11,8 @@ import (
 	"path/filepath"
 	"sync/atomic"
 	"testing"
+
+	"reasonix/internal/base/testenv"
 )
 
 // cacheServer serves one release and counts what was asked of it, which is the
@@ -38,7 +40,7 @@ func cacheServer(t *testing.T, archive []byte) (*httptest.Server, *atomic.Int32)
 func TestCachedDownloadServesTheSecondCallFromDisk(t *testing.T) {
 	binary := []byte("reasonix-binary")
 	server, hits := cacheServer(t, testCLIArchive(t, binary))
-	dir := t.TempDir()
+	dir := testenv.TempDir(t)
 
 	for i := range 3 {
 		got, err := cachedDownloadFromBase(context.Background(), server.Client(), server.URL, dir,
@@ -60,7 +62,7 @@ func TestCachedDownloadServesTheSecondCallFromDisk(t *testing.T) {
 func TestCachedDownloadRefusesAMismatchedCopy(t *testing.T) {
 	binary := []byte("reasonix-binary")
 	server, hits := cacheServer(t, testCLIArchive(t, binary))
-	dir := t.TempDir()
+	dir := testenv.TempDir(t)
 
 	if _, err := cachedDownloadFromBase(context.Background(), server.Client(), server.URL, dir,
 		StudioLine, "v2.11.0", "linux", "arm64", false); err != nil {
@@ -87,7 +89,7 @@ func TestCachedDownloadRefusesAMismatchedCopy(t *testing.T) {
 // would hand a Studio kernel to a caller that asked the other line for one.
 func TestCachedDownloadKeepsLinesAndTargetsApart(t *testing.T) {
 	server, _ := cacheServer(t, testCLIArchive(t, []byte("reasonix-binary")))
-	dir := t.TempDir()
+	dir := testenv.TempDir(t)
 	if _, err := cachedDownloadFromBase(context.Background(), server.Client(), server.URL, dir,
 		StudioLine, "v2.11.0", "linux", "arm64", false); err != nil {
 		t.Fatal(err)
@@ -104,7 +106,7 @@ func TestCachedDownloadKeepsLinesAndTargetsApart(t *testing.T) {
 // A version with no release names no directory: the refusal comes before dir is
 // joined with anything the caller supplied.
 func TestCachedDownloadRefusesAnUnreleasableVersionWithoutTouchingTheCache(t *testing.T) {
-	dir := t.TempDir()
+	dir := testenv.TempDir(t)
 	if _, err := DownloadCLI(context.Background(), http.DefaultClient, dir,
 		StudioLine, "dev", "linux", "arm64"); err == nil {
 		t.Fatal("a source build was accepted")

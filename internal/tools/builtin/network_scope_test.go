@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"reasonix/internal/base/diff"
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/contract/tool"
 	"reasonix/internal/safety/sandbox"
 )
@@ -68,7 +69,7 @@ func mustJSON(t *testing.T, v any) json.RawMessage {
 
 func TestReadToolsRefuseNetworkPathBeforeAnyLookup(t *testing.T) {
 	lookups := holdWindowsPaths(t)
-	tools := workspaceTools(t, t.TempDir())
+	tools := workspaceTools(t, testenv.TempDir(t))
 	for _, target := range networkTargets {
 		calls := []struct {
 			tool string
@@ -97,14 +98,14 @@ func TestReadToolsRefuseNetworkPathBeforeAnyLookup(t *testing.T) {
 
 func TestWriteToolsRefuseNetworkPathBeforeAnyLookup(t *testing.T) {
 	lookups := holdWindowsPaths(t)
-	tools := workspaceTools(t, t.TempDir())
+	tools := workspaceTools(t, testenv.TempDir(t))
 	for _, target := range networkTargets {
 		calls := map[string]map[string]any{
 			"write_file":    {"path": target, "content": "x"},
 			"edit_file":     {"path": target, "old_string": "a", "new_string": "b"},
 			"multi_edit":    {"path": target, "edits": []map[string]any{{"old_string": "a", "new_string": "b"}}},
 			"notebook_edit": {"path": target, "cell_number": 0, "new_source": "x", "edit_mode": "replace"},
-			"move_file":     {"source_path": target, "destination_path": filepath.Join(t.TempDir(), "d")},
+			"move_file":     {"source_path": target, "destination_path": filepath.Join(testenv.TempDir(t), "d")},
 			"delete_range":  {"path": target, "start_anchor": "a", "end_anchor": "b"},
 			"delete_symbol": {"path": target, "name": "f"},
 		}
@@ -134,7 +135,7 @@ func TestWriteToolsRefuseNetworkPathBeforeAnyLookup(t *testing.T) {
 
 func TestMoveFileRefusesNetworkDestination(t *testing.T) {
 	lookups := holdWindowsPaths(t)
-	dir := t.TempDir()
+	dir := testenv.TempDir(t)
 	src := filepath.Join(dir, "a.txt")
 	if err := os.WriteFile(src, []byte("x"), 0o600); err != nil {
 		t.Fatal(err)
@@ -185,7 +186,7 @@ func TestRegisteredNetworkFolderRefIsReadable(t *testing.T) {
 	holdWindowsPaths(t)
 	resolver := NewPathResolver()
 	resolver.RegisterReadRoot("ext1", "//dropped/share/folder")
-	tools := workspaceTools(t, t.TempDir(), func(w *Workspace) { w.ReadPaths = resolver })
+	tools := workspaceTools(t, testenv.TempDir(t), func(w *Workspace) { w.ReadPaths = resolver })
 	_, err := tools["read_file"].Execute(context.Background(), mustJSON(t, map[string]any{"path": "ext1/a.txt"}))
 	if isNetworkCode(err) {
 		t.Fatalf("a folder the user registered must stay readable: %v", err)
@@ -198,7 +199,7 @@ func TestRegisteredNetworkFolderRefIsReadable(t *testing.T) {
 
 func TestLocalPathsAreUnaffectedByTheNetworkRule(t *testing.T) {
 	holdWindowsPaths(t)
-	dir := t.TempDir()
+	dir := testenv.TempDir(t)
 	file := filepath.Join(dir, "a.txt")
 	if err := os.WriteFile(file, []byte("hello\n"), 0o600); err != nil {
 		t.Fatal(err)
@@ -229,7 +230,7 @@ func TestNetworkRuleIsWindowsOnly(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("the path rules cannot be turned off on Windows")
 	}
-	_, err := workspaceTools(t, t.TempDir())["read_file"].Execute(context.Background(),
+	_, err := workspaceTools(t, testenv.TempDir(t))["read_file"].Execute(context.Background(),
 		mustJSON(t, map[string]any{"path": "//evil/share/x.txt"}))
 	if isNetworkCode(err) {
 		t.Fatalf("`//x` is a local path off Windows, got %v", err)
@@ -238,7 +239,7 @@ func TestNetworkRuleIsWindowsOnly(t *testing.T) {
 
 func TestBoundedDeleteTargetDoesNotLookUpANetworkPath(t *testing.T) {
 	lookups := holdWindowsPaths(t)
-	root := t.TempDir()
+	root := testenv.TempDir(t)
 	b := bash{workDir: root, sb: sandbox.Spec{WriteRoots: []string{root}}}
 	for _, target := range networkTargets {
 		*lookups = 0
@@ -262,14 +263,14 @@ func TestUnconfinedWritersStillRefuseANetworkPath(t *testing.T) {
 			t.Errorf("confine(nil, %q): %d lookups, want 0", target, *lookups)
 		}
 	}
-	if err := confine(nil, filepath.Join(t.TempDir(), "x")); err != nil {
+	if err := confine(nil, filepath.Join(testenv.TempDir(t), "x")); err != nil {
 		t.Errorf("unconfined local path refused: %v", err)
 	}
 }
 
 func TestTargetAccessRefusesNetworkPathBeforeLookup(t *testing.T) {
 	lookups := holdWindowsPaths(t)
-	dir := t.TempDir()
+	dir := testenv.TempDir(t)
 	ws := Workspace{Dir: dir, ReadRoots: []string{dir}, ForbidReadRoots: []string{filepath.Join(dir, "private")}}
 	tools := ws.Tools("read_file", "grep", "write_file")
 	check := ws.TargetAccessCheck()
@@ -291,7 +292,7 @@ func TestTargetAccessKeepsAuthorizedNetworkReads(t *testing.T) {
 	lookupExisting = func(path string) (string, error) { return filepath.Clean(path), nil }
 	resolver := NewPathResolver()
 	resolver.RegisterReadRoot("ext1", "//dropped/share/folder")
-	ws := Workspace{Dir: t.TempDir(), ReadPaths: resolver}
+	ws := Workspace{Dir: testenv.TempDir(t), ReadPaths: resolver}
 	reader := ws.Tools("read_file")[0]
 	check := ws.TargetAccessCheck()
 	if err := check(context.Background(), reader, mustJSON(t, map[string]any{"path": "ext1/a.txt"})); err != nil {

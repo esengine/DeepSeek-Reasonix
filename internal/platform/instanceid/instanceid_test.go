@@ -4,10 +4,12 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"reasonix/internal/base/testenv"
 )
 
 func TestInstanceIDScopesToTheDataHome(t *testing.T) {
-	first, second := t.TempDir(), t.TempDir()
+	first, second := testenv.TempDir(t), testenv.TempDir(t)
 	t.Setenv("REASONIX_HOME", first)
 	want := Current()
 	t.Setenv("REASONIX_HOME", filepath.Join(first, "."))
@@ -23,7 +25,7 @@ func TestInstanceIDScopesToTheDataHome(t *testing.T) {
 // A home that has not been created yet is the first launch, and it must hash to
 // the same place the second one will find.
 func TestInstanceIDResolvesAMissingHomeThroughASymlink(t *testing.T) {
-	root := t.TempDir()
+	root := testenv.TempDir(t)
 	real := filepath.Join(root, "real")
 	if err := os.MkdirAll(real, 0o755); err != nil {
 		t.Fatal(err)

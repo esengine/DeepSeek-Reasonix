@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"reasonix/internal/base/testenv"
 	"testing"
 
 	"reasonix/internal/contract/agentcomposition"
@@ -17,7 +18,7 @@ func TestNativeArchivePreservesBindingResourcesAndVersionBoundary(t *testing.T) 
 	s := NewSession("original prompt")
 	s.BindComposition(b)
 	s.Add(provider.Message{Role: provider.RoleUser, Content: "first turn"})
-	path := filepath.Join(t.TempDir(), "original.jsonl")
+	path := filepath.Join(testenv.TempDir(t), "original.jsonl")
 	if err := s.Save(path); err != nil {
 		t.Fatal(err)
 	}
@@ -32,7 +33,7 @@ func TestNativeArchivePreservesBindingResourcesAndVersionBoundary(t *testing.T) 
 	if copy.Composition().Digest != b.Digest || !copy.Composition().Started || !bytes.Contains(copy.Composition().Resources[0].Data, []byte("immutable source")) {
 		t.Fatal("archive lost binding")
 	}
-	dest := filepath.Join(t.TempDir(), "imported.jsonl")
+	dest := filepath.Join(testenv.TempDir(t), "imported.jsonl")
 	if err := copy.SaveIfAbsent(dest); err != nil {
 		t.Fatal(err)
 	}

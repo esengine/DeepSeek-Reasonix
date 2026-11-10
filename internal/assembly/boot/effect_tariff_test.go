@@ -7,6 +7,7 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/contract/event"
 	"reasonix/internal/contract/provider"
 )
@@ -16,7 +17,7 @@ var tariffKinds atomic.Int64
 func tariffOf(t *testing.T, baseURL string, price string) bool {
 	t.Helper()
 	home := statedBootHome(t)
-	dir := t.TempDir()
+	dir := testenv.TempDir(t)
 	kind := fmt.Sprintf("boot-tariff-%s-%d", strings.ReplaceAll(t.Name(), "/", "-"), tariffKinds.Add(1))
 	provider.Register(kind, func(provider.Config) (provider.Provider, error) { return &peerRecorder{}, nil })
 	body := `

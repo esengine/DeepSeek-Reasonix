@@ -12,6 +12,7 @@ import (
 	"testing"
 	"testing/fstest"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/contract/config"
 )
 
@@ -81,10 +82,10 @@ func TestPageIsBehindTheAuthGate(t *testing.T) {
 // An explicit directory holding no page is a launch that would open on nothing,
 // and it fails where the reader can still act on it rather than at first paint.
 func TestFindPageRefusesADirectoryWithNoIndex(t *testing.T) {
-	if _, err := FindPage(t.TempDir()); err == nil {
+	if _, err := FindPage(testenv.TempDir(t)); err == nil {
 		t.Fatal("a directory with no index.html was accepted as a page")
 	}
-	dir := t.TempDir()
+	dir := testenv.TempDir(t)
 	if err := os.WriteFile(filepath.Join(dir, "index.html"), []byte("<title>x</title>"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -131,7 +132,7 @@ func TestThePagesFilesKeepTheirTypeWhateverTheMachineRegistered(t *testing.T) {
 // A package manager that puts a link on the PATH leaves the page beside the
 // real executable, not beside the link. Homebrew's cask does exactly that.
 func TestPageIsFoundBesideTheRealExecutableOfALink(t *testing.T) {
-	root := t.TempDir()
+	root := testenv.TempDir(t)
 	real := filepath.Join(root, "Caskroom", "reasonix", "2.0.0")
 	dist := filepath.Join(real, "frontend-next", "dist")
 	if err := os.MkdirAll(dist, 0o755); err != nil {
@@ -165,7 +166,7 @@ func TestPageIsFoundBesideTheRealExecutableOfALink(t *testing.T) {
 // A page beside the link itself still wins over one beside its target, so an
 // install that never used a link resolves as it always did.
 func TestPageBesideTheLinkComesFirst(t *testing.T) {
-	root := t.TempDir()
+	root := testenv.TempDir(t)
 	for _, d := range []string{"here", "there"} {
 		dist := filepath.Join(root, d, "frontend-next", "dist")
 		if err := os.MkdirAll(dist, 0o755); err != nil {
@@ -194,7 +195,7 @@ func TestPageBesideTheLinkComesFirst(t *testing.T) {
 }
 
 func TestNoPageBesideAnExecutableIsNil(t *testing.T) {
-	if page := pageBeside(filepath.Join(t.TempDir(), "reasonix")); page != nil {
+	if page := pageBeside(filepath.Join(testenv.TempDir(t), "reasonix")); page != nil {
 		t.Errorf("found a page where none exists")
 	}
 }

@@ -6,6 +6,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"reasonix/internal/base/testenv"
 )
 
 // The tree's boundaries name every condition today, in both frontends. This is
@@ -275,7 +277,7 @@ func fakeLeaseTree(t *testing.T, family, acpWriter string) string {
 
 func fakeRefusalTree(t *testing.T, files map[string]string) string {
 	t.Helper()
-	root := t.TempDir()
+	root := testenv.TempDir(t)
 	for rel, body := range files {
 		path := filepath.Join(root, filepath.FromSlash(rel))
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {

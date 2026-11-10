@@ -1,6 +1,7 @@
 package sessionstore
 
 import (
+	"reasonix/internal/base/testenv"
 	"sync"
 	"testing"
 	"time"
@@ -10,7 +11,7 @@ import (
 // at once, never more than the bound, and the listing is the one a single
 // reader would have produced.
 func TestAColdFolderIsReadByABoundedPoolAndListsTheSame(t *testing.T) {
-	dir := t.TempDir()
+	dir := testenv.TempDir(t)
 	writeSessions(t, dir, 200)
 
 	var mu sync.Mutex

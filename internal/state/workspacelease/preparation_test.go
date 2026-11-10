@@ -10,6 +10,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"reasonix/internal/base/testenv"
 )
 
 func prepareCall(t *testing.T, o *Owner, paths []string) (context.Context, *PreparedCall) {
@@ -248,7 +250,7 @@ func TestPreparedProbeProcess(t *testing.T) {
 }
 
 func TestPreparedCleanupPublishesToOtherProcesses(t *testing.T) {
-	root, locks := t.TempDir(), t.TempDir()
+	root, locks := testenv.TempDir(t), testenv.TempDir(t)
 	a, err := New(root, locks, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -447,7 +449,7 @@ func TestRepeatedResumePreservesAFailedRestoration(t *testing.T) {
 
 func TestPreparedCallClosedDuringReholdCannotReportSuccessfulRestoration(t *testing.T) {
 	withWaitGrace(t, time.Nanosecond)
-	root, locks := t.TempDir(), t.TempDir()
+	root, locks := testenv.TempDir(t), testenv.TempDir(t)
 	waiting := make(chan struct{})
 	var once sync.Once
 	a, err := New(root, locks, func(w Wait) {
@@ -499,7 +501,7 @@ func TestPreparedRegistrarWaitClosesForCleanupAndRefusedUpgrade(t *testing.T) {
 	for _, refused := range []bool{false, true} {
 		t.Run(map[bool]string{false: "cleanup", true: "upgrade_refused"}[refused], func(t *testing.T) {
 			withWaitGrace(t, time.Nanosecond)
-			root, locks := t.TempDir(), t.TempDir()
+			root, locks := testenv.TempDir(t), testenv.TempDir(t)
 			log := &waitLog{}
 			waiting := make(chan struct{})
 			var noticeOnce sync.Once
@@ -625,7 +627,7 @@ func TestPreparedAbortDoesNotRetakePathsParkedForAUser(t *testing.T) {
 
 func TestPreparedQueuedInAnEndedRunCannotPinTheNextRun(t *testing.T) {
 	withWaitGrace(t, time.Nanosecond)
-	root, locks := t.TempDir(), t.TempDir()
+	root, locks := testenv.TempDir(t), testenv.TempDir(t)
 	waiting := make(chan struct{})
 	var once sync.Once
 	a, err := New(root, locks, func(w Wait) {
@@ -748,7 +750,7 @@ func TestPendingUserWaitParksRetentionWhenTheLastWriterEnds(t *testing.T) {
 
 func TestUserWaitArrivingDuringRestorationStaysYielded(t *testing.T) {
 	withWaitGrace(t, time.Nanosecond)
-	root, locks := t.TempDir(), t.TempDir()
+	root, locks := testenv.TempDir(t), testenv.TempDir(t)
 	waiting := make(chan struct{})
 	var once sync.Once
 	a, err := New(root, locks, func(w Wait) {

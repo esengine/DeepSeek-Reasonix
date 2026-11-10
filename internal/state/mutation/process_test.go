@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"reasonix/internal/base/testenv"
 )
 
 func TestMutationProcessHelper(t *testing.T) {
@@ -30,7 +32,7 @@ func TestMutationProcessHelper(t *testing.T) {
 }
 
 func TestCrossProcessClaimAndCrashRecovery(t *testing.T) {
-	root, state := t.TempDir(), t.TempDir()
+	root, state := testenv.TempDir(t), testenv.TempDir(t)
 	path := filepath.Join(root, "a")
 	cmd := exec.Command(os.Args[0], "-test.run=^TestMutationProcessHelper$")
 	cmd.Env = append(os.Environ(), "REASONIX_MUTATION_TEST_HELPER=1", "REASONIX_MUTATION_TEST_ROOT="+root,

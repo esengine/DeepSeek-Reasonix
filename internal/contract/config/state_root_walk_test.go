@@ -7,12 +7,14 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"reasonix/internal/base/testenv"
 )
 
 // A directory another test creates and removes while the guard walks the tree
 // must not fail the walk, and a join in a stable file is still found.
 func TestStateRootJoinsSurvivesDirectoriesVanishingMidWalk(t *testing.T) {
-	root := t.TempDir()
+	root := testenv.TempDir(t)
 	src := "package x\n\nfunc f() { _ = filepath.Join(userSupportDir(), \"kept\") }\n"
 	if err := os.WriteFile(filepath.Join(root, "kept.go"), []byte(src), 0o644); err != nil {
 		t.Fatal(err)

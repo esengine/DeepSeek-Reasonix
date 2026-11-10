@@ -29,7 +29,7 @@ printf '%%s' "$metrics" > metrics-path.txt
 printf '%%s' '%s' > "$metrics%s"
 exit %d
 `, body, suffix, code)
-	path := filepath.Join(t.TempDir(), name)
+	path := filepath.Join(testenv.TempDir(t), name)
 	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
 		t.Fatalf("write stub: %v", err)
 	}
@@ -73,7 +73,7 @@ case "$metrics" in
 esac
 exit 0
 `
-	path := filepath.Join(t.TempDir(), name)
+	path := filepath.Join(testenv.TempDir(t), name)
 	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
 		t.Fatalf("write stub: %v", err)
 	}

@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/state/store"
 )
 
@@ -59,7 +60,7 @@ func blobBodies(t *testing.T, dir string) []string {
 
 func newInboxSession(t *testing.T) string {
 	t.Helper()
-	session := filepath.Join(t.TempDir(), "s.jsonl")
+	session := filepath.Join(testenv.TempDir(t), "s.jsonl")
 	if err := os.WriteFile(session, []byte("{}\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}

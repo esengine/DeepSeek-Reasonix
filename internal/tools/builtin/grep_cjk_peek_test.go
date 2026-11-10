@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"reasonix/internal/base/testenv"
 )
 
 // A UTF-8 file bigger than grep's 8 KiB peek used to be detected by that peek
@@ -14,7 +16,7 @@ import (
 // in three: utf8.Valid failed on the cut byte, GB18030 accepted the bytes, and
 // every matched line came back as mojibake.
 func TestGrepReadsALargeCJKFileAsWhatItIs(t *testing.T) {
-	dir := t.TempDir()
+	dir := testenv.TempDir(t)
 	const needle = "skin_manifest"
 	body := strings.Repeat("美术给的那包图 "+needle+"\n", 2000)
 	if len(body) <= 8*1024 {

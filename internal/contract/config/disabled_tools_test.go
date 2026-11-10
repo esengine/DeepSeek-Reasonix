@@ -7,6 +7,8 @@ import (
 	"testing"
 
 	"github.com/BurntSushi/toml"
+
+	"reasonix/internal/base/testenv"
 )
 
 func TestDisabledToolsSurviveEveryTOMLRenderScope(t *testing.T) {
@@ -38,7 +40,7 @@ func TestDisabledToolsSurviveEveryTOMLRenderScope(t *testing.T) {
 }
 
 func TestDisabledToolsSurviveMCPJSONEdits(t *testing.T) {
-	path := filepath.Join(t.TempDir(), ".mcp.json")
+	path := filepath.Join(testenv.TempDir(t), ".mcp.json")
 	entry := PluginEntry{Name: "server", Command: "mcp", DisabledTools: []string{"write_file", "delete_file"}}
 	for _, names := range [][]string{entry.DisabledTools, {}} {
 		entry.DisabledTools = names

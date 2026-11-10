@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"reasonix/internal/base/testenv"
 )
 
 type localPathCase struct {
@@ -31,12 +33,12 @@ func TestLocalPathURLTable(t *testing.T) {
 }
 
 func TestCheckURLReadsATypedLocalPath(t *testing.T) {
-	root := t.TempDir()
+	root := testenv.TempDir(t)
 	page := filepath.Join(root, "页面 1.html")
 	if err := os.WriteFile(page, []byte("<p>x</p>"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	outside := filepath.Join(t.TempDir(), "o.html")
+	outside := filepath.Join(testenv.TempDir(t), "o.html")
 	if err := os.WriteFile(outside, nil, 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -65,7 +67,7 @@ func TestOriginOfReadsAPathAsItsFileURL(t *testing.T) {
 			t.Errorf("OriginOf(%q) = %q, want %q", in, got, want)
 		}
 	}
-	s := &Session{cfg: Config{Roots: []string{t.TempDir()}}}
+	s := &Session{cfg: Config{Roots: []string{testenv.TempDir(t)}}}
 	if s.ServesWorkspace(`\\nas\share\x.html`) || s.ServesWorkspace("file:////host/x") {
 		t.Error("a share counted as the workspace's own page")
 	}

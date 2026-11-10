@@ -5,10 +5,12 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+
+	"reasonix/internal/base/testenv"
 )
 
 func TestIssue4038ChineseNamedSkillLoads(t *testing.T) {
-	home := t.TempDir()
+	home := testenv.TempDir(t)
 	writeSkill(t, home, ".reasonix/skills/中文技能/SKILL.md", "---\nname: 中文技能\ndescription: Chinese skill fixture\n---\nfixture body")
 	store := New(Options{HomeDir: home, DisableBuiltins: true})
 	if _, ok := find(store.List(), "中文技能"); !ok {
@@ -24,7 +26,7 @@ func TestIssue4038ChineseNamedSkillLoads(t *testing.T) {
 }
 
 func TestIssue4038NFDDirectoryMatchesNFCName(t *testing.T) {
-	home := t.TempDir()
+	home := testenv.TempDir(t)
 	writeSkill(t, home, ".reasonix/skills/cafe\u0301/SKILL.md", "---\ndescription: normalized skill fixture\n---\nfixture body")
 	store := New(Options{HomeDir: home, DisableBuiltins: true})
 	if _, ok := find(store.List(), "caf\u00e9"); !ok {
@@ -40,7 +42,7 @@ func TestIssue4038NFDDirectoryMatchesNFCName(t *testing.T) {
 }
 
 func TestIssue4038ExistingASCIIIDSurvivesUnicodeFrontmatter(t *testing.T) {
-	home := t.TempDir()
+	home := testenv.TempDir(t)
 	writeSkill(t, home, ".reasonix/skills/code-review/SKILL.md", "---\nname: 代码审查\ndescription: compatibility fixture\n---\nfixture body")
 	store := New(Options{HomeDir: home, DisableBuiltins: true})
 	if _, ok := store.Read("code-review"); !ok {
@@ -56,7 +58,7 @@ func TestIssue4038ExistingASCIIIDSurvivesUnicodeFrontmatter(t *testing.T) {
 }
 
 func TestIssue4038CreateUsesNFCFolderName(t *testing.T) {
-	store := New(Options{HomeDir: t.TempDir(), DisableBuiltins: true})
+	store := New(Options{HomeDir: testenv.TempDir(t), DisableBuiltins: true})
 	path, err := store.CreateWithContent("cafe\u0301", ScopeGlobal, "---\ndescription: fixture\n---\nbody")
 	if err != nil {
 		t.Fatal(err)

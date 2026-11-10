@@ -1,6 +1,7 @@
 package sessionstore
 
 import (
+	"reasonix/internal/base/testenv"
 	"testing"
 	"time"
 
@@ -11,7 +12,7 @@ import (
 // already told apart, finding the few versions must not open every session's
 // sidecar again.
 func TestFindingVersionsInAnIndexedFolderOpensOnlyWhatMightBeOne(t *testing.T) {
-	dir := t.TempDir()
+	dir := testenv.TempDir(t)
 	writeSessions(t, dir, 300)
 	parent := sessionPath(dir, 7)
 	v1, err := SaveSupersededVersion(parent, []provider.Message{{Role: provider.RoleUser, Content: "first take"}})
@@ -37,7 +38,7 @@ func TestFindingVersionsInAnIndexedFolderOpensOnlyWhatMightBeOne(t *testing.T) {
 // A sidecar changed since the listing was remembered is read again: the stamps
 // are what the shortcut trusts.
 func TestAVersionMadeAfterTheListingIsStillFound(t *testing.T) {
-	dir := t.TempDir()
+	dir := testenv.TempDir(t)
 	writeSessions(t, dir, 300)
 	list(t, dir)
 	parent := sessionPath(dir, 11)

@@ -9,6 +9,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"reasonix/internal/base/testenv"
 )
 
 func repoWithUnaddressableDriver(t *testing.T) string {
@@ -16,7 +18,7 @@ func repoWithUnaddressableDriver(t *testing.T) string {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not installed")
 	}
-	dir := t.TempDir()
+	dir := testenv.TempDir(t)
 	if out, err := exec.Command("git", "-C", dir, "init", "--quiet").CombinedOutput(); err != nil {
 		t.Fatalf("git init: %v: %s", err, out)
 	}
@@ -72,7 +74,7 @@ func TestSubcommandIndexAgreesWithGitGlobalOptions(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not installed")
 	}
-	dir := t.TempDir()
+	dir := testenv.TempDir(t)
 	forms := [][]string{
 		{"-C", dir}, {"-c", "x.y=z"}, {"--git-dir", filepath.Join(dir, ".git")}, {"--git-dir=" + filepath.Join(dir, ".git")},
 		{"--work-tree", dir}, {"--work-tree=" + dir}, {"--namespace", "ns"}, {"--namespace=ns"},

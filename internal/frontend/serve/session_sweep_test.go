@@ -21,7 +21,7 @@ func TestSessionSweepDoesNotHoldTheBuild(t *testing.T) {
 	}
 	t.Cleanup(func() { sweepSessionDir = prev })
 
-	dir := t.TempDir()
+	dir := testenv.TempDir(t)
 	returned := make(chan struct{})
 	go func() {
 		_ = BackgroundCleanupReconciler(dir)
@@ -56,7 +56,7 @@ func TestSessionSweepRunsOncePerDirectoryAtATime(t *testing.T) {
 	}
 	t.Cleanup(func() { sweepSessionDir = prev })
 
-	d1, d2 := t.TempDir(), t.TempDir()
+	d1, d2 := testenv.TempDir(t), testenv.TempDir(t)
 	_ = BackgroundCleanupReconciler(d1)
 	<-started
 	_ = BackgroundCleanupReconciler(d1)
@@ -78,7 +78,7 @@ func TestEveryRuntimeBuildSweepsInTheBackground(t *testing.T) {
 	if s.rebuildOptions(nil, "").CleanupPendingReconciler == nil {
 		t.Error("a model or effort rebuild sweeps session history inline")
 	}
-	if s.workspaceOptions(t.TempDir(), "").CleanupPendingReconciler == nil {
+	if s.workspaceOptions(testenv.TempDir(t), "").CleanupPendingReconciler == nil {
 		t.Error("a workspace switch sweeps session history inline")
 	}
 }

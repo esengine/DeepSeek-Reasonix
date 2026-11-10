@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/platform/remote/execfs/fstest"
 	"reasonix/internal/platform/wsl"
 )
@@ -44,7 +45,7 @@ func TestFileLayerAgainstALocalPOSIXShell(t *testing.T) {
 		t.Skip("needs GNU stat")
 	}
 	c := &Conn{distro: "local", run: localCommand(t)}
-	fstest.RunScenario(t, c.Volume(), t.TempDir())
+	fstest.RunScenario(t, c.Volume(), testenv.TempDir(t))
 }
 
 func TestExecRunsUnderTheShellInTheDistribution(t *testing.T) {

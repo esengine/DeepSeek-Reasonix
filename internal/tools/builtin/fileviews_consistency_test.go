@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	fileenc "reasonix/internal/base/fileutil/encoding"
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/contract/tool"
 )
 
@@ -32,7 +33,7 @@ func (o *changingReadOverlay) WriteTextFile(context.Context, string, string) (bo
 }
 
 func TestFileViewTracksTheReturnedReadRatherThanASecondRead(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "a.txt")
+	path := filepath.Join(testenv.TempDir(t), "a.txt")
 	if err := os.WriteFile(path, []byte("before\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -53,7 +54,7 @@ func TestPagedReadDoesNotCertifyUnseenFileContent(t *testing.T) {
 		`{"path":"a.txt","offset":99}`,
 	} {
 		t.Run(page, func(t *testing.T) {
-			root := t.TempDir()
+			root := testenv.TempDir(t)
 			path := filepath.Join(root, "a.txt")
 			if err := os.WriteFile(path, []byte("header\noriginal tail\n"), 0600); err != nil {
 				t.Fatal(err)
@@ -82,7 +83,7 @@ func TestPagedReadDoesNotCertifyUnseenFileContent(t *testing.T) {
 }
 
 func TestOversizeReadDoesNotForgetAnEarlierFileView(t *testing.T) {
-	root := t.TempDir()
+	root := testenv.TempDir(t)
 	path := filepath.Join(root, "a.txt")
 	if err := os.WriteFile(path, []byte("before\n"), 0600); err != nil {
 		t.Fatal(err)
@@ -120,7 +121,7 @@ func TestWholeReadRefreshesTheFileView(t *testing.T) {
 		{name: "nested verbatim", content: "new\r\n", nested: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			path := filepath.Join(t.TempDir(), "a.txt")
+			path := filepath.Join(testenv.TempDir(t), "a.txt")
 			if err := writeFileEncoded(path, tc.content, tc.enc); err != nil {
 				t.Fatal(err)
 			}
@@ -167,7 +168,7 @@ func TestFirstIncompleteReadCannotPermitALaterStaleOverwrite(t *testing.T) {
 		`{"path":"a.txt","offset":1}`,
 	} {
 		t.Run(args, func(t *testing.T) {
-			root := t.TempDir()
+			root := testenv.TempDir(t)
 			path := filepath.Join(root, "a.txt")
 			if err := os.WriteFile(path, []byte("before\ntail\n"), 0600); err != nil {
 				t.Fatal(err)
@@ -188,7 +189,7 @@ func TestFirstIncompleteReadCannotPermitALaterStaleOverwrite(t *testing.T) {
 }
 
 func TestFirstPartialReadRequiresAWholeReread(t *testing.T) {
-	root := t.TempDir()
+	root := testenv.TempDir(t)
 	path := filepath.Join(root, "a.txt")
 	if err := os.WriteFile(path, []byte("header\nunseen tail\n"), 0600); err != nil {
 		t.Fatal(err)
@@ -212,7 +213,7 @@ func TestFirstPartialReadRequiresAWholeReread(t *testing.T) {
 }
 
 func TestDefaultLimitedReadNamesTheReadThatCertifiesReplacement(t *testing.T) {
-	root := t.TempDir()
+	root := testenv.TempDir(t)
 	path := filepath.Join(root, "long.txt")
 	lines := readFileDefaultLimit + 500
 	if err := os.WriteFile(path, []byte(strings.Repeat("line\n", lines)), 0600); err != nil {

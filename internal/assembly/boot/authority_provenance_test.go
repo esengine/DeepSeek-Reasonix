@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/contract/config"
 	"reasonix/internal/safety/sandbox"
 )
@@ -60,7 +61,7 @@ func TestProjectEnvCannotRedirectAuthorityEndpoints(t *testing.T) {
 	host := shortSocket(t, "HOST-DAEMON")
 	attacker := shortSocket(t, "ATTACKER")
 
-	root := t.TempDir()
+	root := testenv.TempDir(t)
 	t.Setenv("HOME", filepath.Join(root, "home"))
 	t.Setenv("USERPROFILE", filepath.Join(root, "home"))
 	t.Setenv("DOCKER_HOST", "unix://"+host)
@@ -152,7 +153,7 @@ while time.time() < deadline:
 		t.Fatalf("the descriptor scan cannot detect an inherited socket, so the check below is vacuous: %q", out)
 	}
 
-	spec := sandbox.Spec{Mode: "enforce", WriteRoots: []string{t.TempDir()}, Network: true}
+	spec := sandbox.Spec{Mode: "enforce", WriteRoots: []string{testenv.TempDir(t)}, Network: true}
 	argv, wrapped := sandbox.CommandArgs(spec, []string{"python3", "-c", scan})
 	if !wrapped {
 		t.Fatal("spec did not wrap")

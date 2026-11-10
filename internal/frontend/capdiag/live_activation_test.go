@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/contract/config"
 )
 
@@ -17,10 +18,10 @@ func TestLiveProbeStartsOnlyWhatASessionWould(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("the probe command is POSIX shell")
 	}
-	home := t.TempDir()
+	home := testenv.TempDir(t)
 	t.Setenv("REASONIX_HOME", home)
-	root := t.TempDir()
-	marker := filepath.Join(t.TempDir(), "started")
+	root := testenv.TempDir(t)
+	marker := filepath.Join(testenv.TempDir(t), "started")
 	off := config.PluginEntry{Name: "off", Command: "sh", Args: []string{"-c", "echo off >> " + marker}, Source: config.MCPSourceUserConfig}
 	repo := config.PluginEntry{Name: "repo", Command: "sh", Args: []string{"-c", "echo repo >> " + marker}, Source: config.MCPSourceProjectMCPJSON}
 	store := config.DefaultActivationStore()

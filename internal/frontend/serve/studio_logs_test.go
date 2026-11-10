@@ -13,7 +13,7 @@ import (
 
 func TestStudioLogsNamesTheDirectoryAndTheCrashFilesWaitingThere(t *testing.T) {
 	t.Setenv("REASONIX_HOME", testenv.TempDir(t))
-	logs := t.TempDir()
+	logs := testenv.TempDir(t)
 	crash := filepath.Join(logs, "crash")
 	if err := os.MkdirAll(crash, 0o700); err != nil {
 		t.Fatal(err)

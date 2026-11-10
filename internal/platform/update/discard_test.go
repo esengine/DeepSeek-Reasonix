@@ -6,10 +6,12 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"reasonix/internal/base/testenv"
 )
 
 func TestDiscardDownloadRemovesPartialsAndTheNamedVersion(t *testing.T) {
-	dir := t.TempDir()
+	dir := testenv.TempDir(t)
 	for _, name := range []string{
 		partialPrefix + "aaaa" + partialSuffix,
 		partialPrefix + "bbbb" + partialSuffix,
@@ -59,5 +61,5 @@ func TestDiscardDownloadRemovesPartialsAndTheNamedVersion(t *testing.T) {
 
 func TestDiscardDownloadToleratesAnEmptyDirectory(t *testing.T) {
 	DiscardDownload("", "2.21.0")
-	DiscardDownload(t.TempDir(), "2.21.0")
+	DiscardDownload(testenv.TempDir(t), "2.21.0")
 }

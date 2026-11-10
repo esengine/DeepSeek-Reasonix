@@ -13,6 +13,7 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/contract/config"
 	"reasonix/internal/model/providerhealth"
 )
@@ -35,7 +36,7 @@ func TestProviderHealthAuthorizationAndOptIn(t *testing.T) {
 	if err := os.WriteFile(config.UserConfigPath(), []byte(body), 0600); err != nil {
 		t.Fatal(err)
 	}
-	project := t.TempDir()
+	project := testenv.TempDir(t)
 	t.Chdir(project)
 	if err := os.WriteFile(filepath.Join(project, "reasonix.toml"), []byte("[desktop]\nprovider_health_checks = true\nprovider_access = ['project']\n"+strings.ReplaceAll(body, "'existing'", "'project'")), 0600); err != nil {
 		t.Fatal(err)

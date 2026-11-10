@@ -4,11 +4,13 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"reasonix/internal/base/testenv"
 )
 
 func TestRetainedDirectorySurvivesSourceChanges(t *testing.T) {
-	s := New(t.TempDir(), t.TempDir())
-	source := t.TempDir()
+	s := New(testenv.TempDir(t), testenv.TempDir(t))
+	source := testenv.TempDir(t)
 	if err := os.WriteFile(filepath.Join(source, ".git"), []byte("gitdir: private worktree metadata"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -36,7 +38,7 @@ func TestRetainedDirectorySurvivesSourceChanges(t *testing.T) {
 }
 
 func TestAssetCannotEscapeItsManagedDirectory(t *testing.T) {
-	s := New(t.TempDir(), t.TempDir())
+	s := New(testenv.TempDir(t), testenv.TempDir(t))
 	for _, file := range []AssetFile{{Path: "../outside", Data: []byte("bad")}, {Path: "link", Link: "../../outside"}} {
 		if _, err := s.Materialize(DirectorySnapshot{Files: []AssetFile{file}}); err == nil {
 			t.Fatalf("escaped asset: %+v", file)
@@ -45,7 +47,7 @@ func TestAssetCannotEscapeItsManagedDirectory(t *testing.T) {
 }
 
 func TestHookBundleRetainsSiblingImportsAfterSourceDeletion(t *testing.T) {
-	source := t.TempDir()
+	source := testenv.TempDir(t)
 	if err := os.MkdirAll(filepath.Join(source, ".git"), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -69,7 +71,7 @@ func TestHookBundleRetainsSiblingImportsAfterSourceDeletion(t *testing.T) {
 	if err := os.RemoveAll(source); err != nil {
 		t.Fatal(err)
 	}
-	root, err := New(t.TempDir(), t.TempDir()).Materialize(asset)
+	root, err := New(testenv.TempDir(t), testenv.TempDir(t)).Materialize(asset)
 	if err != nil {
 		t.Fatal(err)
 	}

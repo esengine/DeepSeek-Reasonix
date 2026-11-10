@@ -8,13 +8,14 @@ import (
 	"path/filepath"
 	"testing"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/contract/agentcomposition"
 )
 
 func TestPersonalDeclarationReadsStayWithinTheStoreRoot(t *testing.T) {
 	for _, external := range []bool{false, true} {
 		t.Run(fmt.Sprint(external), func(t *testing.T) {
-			s := New(t.TempDir(), t.TempDir())
+			s := New(testenv.TempDir(t), testenv.TempDir(t))
 			if err := os.MkdirAll(filepath.Join(s.UserDirectory(), "definitions"), 0o700); err != nil {
 				t.Fatal(err)
 			}
@@ -27,7 +28,7 @@ func TestPersonalDeclarationReadsStayWithinTheStoreRoot(t *testing.T) {
 			target := filepath.Join(s.UserDirectory(), "payload.json")
 			link := "../payload.json"
 			if external {
-				target = filepath.Join(t.TempDir(), "payload.json")
+				target = filepath.Join(testenv.TempDir(t), "payload.json")
 				link = target
 			}
 			if err := os.WriteFile(target, data, 0o600); err != nil {
@@ -45,8 +46,8 @@ func TestPersonalDeclarationReadsStayWithinTheStoreRoot(t *testing.T) {
 }
 
 func TestProjectDeclarationCannotFollowSymlinkOutsideWorkspace(t *testing.T) {
-	s := New(t.TempDir(), t.TempDir())
-	outside := t.TempDir()
+	s := New(testenv.TempDir(t), testenv.TempDir(t))
+	outside := testenv.TempDir(t)
 	if err := os.Symlink(outside, filepath.Join(s.Workspace, ".reasonix")); err != nil {
 		t.Fatal(err)
 	}
@@ -64,7 +65,7 @@ func TestProjectDeclarationCannotFollowSymlinkOutsideWorkspace(t *testing.T) {
 }
 
 func TestDeclarationSizeBoundAndExplicitDefault(t *testing.T) {
-	s := New(t.TempDir(), t.TempDir())
+	s := New(testenv.TempDir(t), testenv.TempDir(t))
 	path, err := s.declarationPath("user:large")
 	if err != nil {
 		t.Fatal(err)

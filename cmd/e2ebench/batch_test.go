@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"reasonix/internal/base/testenv"
 )
 
 // fixtureRows is a synthetic batch: three solvable tasks, one of them solved on
@@ -64,7 +66,7 @@ func timeAt(s string) time.Time {
 
 func writeFixtureBatch(t *testing.T) (string, batchManifest) {
 	t.Helper()
-	dir := t.TempDir()
+	dir := testenv.TempDir(t)
 	if err := writeBatch(fixtureProvenance(dir), fixtureRows()); err != nil {
 		t.Fatalf("write batch: %v", err)
 	}
@@ -174,7 +176,7 @@ func TestBatchAuditRoundTrip(t *testing.T) {
 // The axes carry what changes a figure's meaning, never the operator's machine:
 // meter/tape/trajectory paths and steer text stay out of the manifest.
 func TestBatchAxesKeepPathsAndFreeTextOut(t *testing.T) {
-	dir := t.TempDir()
+	dir := testenv.TempDir(t)
 	prov := fixtureProvenance(dir)
 	prov.axes = batchAxes(suiteConfig{
 		profile: "delivery", cacheArm: "warm", effort: "high", anchor: "blind",
@@ -260,7 +262,7 @@ func TestBatchAuditNamesTheFigureThatMoved(t *testing.T) {
 // manifest, no commit to tie the figures to, and rows cut short.
 func TestBatchAuditRefusesUnverifiableBatches(t *testing.T) {
 	t.Run("missing manifest", func(t *testing.T) {
-		dir := t.TempDir()
+		dir := testenv.TempDir(t)
 		writeRows(t, dir, fixtureRows())
 		out, err := auditBatch(dir)
 		if err == nil {
@@ -387,7 +389,7 @@ const manifestWithoutOptionals = `{
 `
 
 func TestBatchAuditReadsAbsentFieldsAsUnknown(t *testing.T) {
-	dir := t.TempDir()
+	dir := testenv.TempDir(t)
 	writeRows(t, dir, fixtureRows())
 	_, canonical, err := readBatch(filepath.Join(dir, batchResultsName))
 	if err != nil {

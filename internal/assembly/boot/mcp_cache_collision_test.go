@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/contract/ablation"
 	"reasonix/internal/contract/event"
 	"reasonix/internal/contract/tool"
@@ -26,7 +27,7 @@ func TestRejectedMCPCacheDiscoversWithoutPinning(t *testing.T) {
 		{"always_after_handshake", true, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			t.Setenv("REASONIX_CACHE_HOME", t.TempDir())
+			t.Setenv("REASONIX_CACHE_HOME", testenv.TempDir(t))
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
 			listed, release := make(chan struct{}), make(chan struct{})

@@ -10,11 +10,13 @@ import (
 	"testing"
 
 	"golang.org/x/sys/windows"
+
+	"reasonix/internal/base/testenv"
 )
 
 // Every spelling Windows has for one place has to reach one comparison.
 func TestRealPathSettlesEveryWindowsSpelling(t *testing.T) {
-	base, err := filepath.EvalSymlinks(t.TempDir())
+	base, err := filepath.EvalSymlinks(testenv.TempDir(t))
 	if err != nil {
 		t.Fatal(err)
 	}

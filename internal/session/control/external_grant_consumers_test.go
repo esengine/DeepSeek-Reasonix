@@ -8,12 +8,13 @@ import (
 	"strings"
 	"testing"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/tools/builtin"
 )
 
 func droppedGrantConsumers(t *testing.T) (*Controller, *builtin.PathResolver, string) {
 	t.Helper()
-	workspace := t.TempDir()
+	workspace := testenv.TempDir(t)
 	paths := builtin.NewPathResolver()
 	c := New(Options{WorkspaceRoot: workspace, ExternalFolderToolRefs: paths})
 	t.Cleanup(c.Close)
@@ -73,7 +74,7 @@ func assertDroppedGrantRefs(t *testing.T, c *Controller, token, content string, 
 
 func TestDroppedSingleFileGrantRejectsSiblingAcrossConsumers(t *testing.T) {
 	c, paths, workspace := droppedGrantConsumers(t)
-	outside := t.TempDir()
+	outside := testenv.TempDir(t)
 	selected := filepath.Join(outside, "selected.txt")
 	sibling := filepath.Join(outside, "sibling.txt")
 	const selectedBody = "SELECTED-FILE-CONTENT"
@@ -120,7 +121,7 @@ func TestDroppedSingleFileGrantRejectsSiblingAcrossConsumers(t *testing.T) {
 
 func TestDroppedDirectoryGrantRejectsEscapingLinkAcrossConsumers(t *testing.T) {
 	c, paths, workspace := droppedGrantConsumers(t)
-	allowed, outside := t.TempDir(), t.TempDir()
+	allowed, outside := testenv.TempDir(t), testenv.TempDir(t)
 	const childBody = "SELECTED-DIRECTORY-DESCENDANT"
 	const outsideBody = "OUTSIDE-DIRECTORY-PRIVATE-CONTENT"
 	writeGrantFixture(t, filepath.Join(allowed, "sub", "child.txt"), childBody)

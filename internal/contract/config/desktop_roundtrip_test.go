@@ -9,6 +9,8 @@ import (
 	"testing"
 
 	"github.com/BurntSushi/toml"
+
+	"reasonix/internal/base/testenv"
 )
 
 // The [desktop] table is written by hand, one line per field, so a field added
@@ -114,7 +116,7 @@ func TestEveryDesktopSettingSurvivesASave(t *testing.T) {
 		}
 		want := set.Interface()
 
-		path := filepath.Join(t.TempDir(), "config.toml")
+		path := filepath.Join(testenv.TempDir(t), "config.toml")
 		if err := os.WriteFile(path, []byte(RenderTOMLForScope(cfg, RenderScopeUser)), 0o600); err != nil {
 			t.Fatal(err)
 		}

@@ -6,10 +6,12 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"reasonix/internal/base/testenv"
 )
 
 func BenchmarkWarmQueryTenYears(b *testing.B) {
-	catalog, err := Open(context.Background(), filepath.Join(b.TempDir(), "usage.sqlite"))
+	catalog, err := Open(context.Background(), filepath.Join(testenv.TempDir(b), "usage.sqlite"))
 	if err != nil {
 		b.Fatal(err)
 	}

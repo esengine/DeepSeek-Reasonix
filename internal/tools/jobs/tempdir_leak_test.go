@@ -7,12 +7,14 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"reasonix/internal/base/testenv"
 )
 
 const jobsHolderEnv = "REASONIX_JOBS_HOLDER"
 
 func TestKilledKernelsJobTempDirIsCollectedByNextManager(t *testing.T) {
-	root := t.TempDir()
+	root := testenv.TempDir(t)
 	t.Setenv("TMPDIR", root)
 	t.Setenv("TMP", root)
 	t.Setenv("TEMP", root)

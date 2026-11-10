@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"reasonix/internal/base/secrets"
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/contract/config"
 	"reasonix/internal/safety/sandbox"
 )
@@ -26,11 +27,11 @@ const probeSecret = "REASONIX-PROBE-PRIVATE-KEY-a7f3c1"
 // fakeHome plants files under a temporary HOME, returning the write root that
 // must be bound for them to be visible inside the sandbox, a workspace under
 // it, and the forbid-read roots. The HOME has to sit under the bound root:
-// bubblewrap swaps /tmp for a fresh tmpfs, so a t.TempDir() home is absent
+// bubblewrap swaps /tmp for a fresh tmpfs, so a testenv.TempDir(t) home is absent
 // inside the sandbox and every deny assertion would pass without denying.
 func fakeHome(t *testing.T, files map[string]string) (bound, ws string, forbid []string) {
 	t.Helper()
-	bound = t.TempDir()
+	bound = testenv.TempDir(t)
 	home := filepath.Join(bound, "home")
 	ws = filepath.Join(bound, "ws")
 	if err := os.MkdirAll(ws, 0o700); err != nil {
@@ -222,7 +223,7 @@ func TestOrdinaryDevWorkIsUnaffected(t *testing.T) {
 // invocation fails at startup, and npm silently relocates its global prefix —
 // so they are the broker's problem, not the denylist's.
 func TestMixedConfigCredentialFilesStayReadable(t *testing.T) {
-	home := t.TempDir()
+	home := testenv.TempDir(t)
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
 	for _, rel := range []string{".config/gh/hosts.yml", ".npmrc", ".docker/config.json"} {

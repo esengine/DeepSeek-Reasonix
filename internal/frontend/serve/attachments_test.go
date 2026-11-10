@@ -146,8 +146,8 @@ func TestAttachmentRefusalsCarryTheirClass(t *testing.T) {
 		{"file over 25 MB", map[string]string{"mime": "text/plain", "name": "a.txt", "data": b64(make([]byte, 25<<20+1))}, http.StatusRequestEntityTooLarge, "attachment.too_large", 25},
 		{"body over the cap", map[string]string{"mime": "text/plain", "name": "a.txt", "data": strings.Repeat("A", 40<<20)}, http.StatusRequestEntityTooLarge, "attachment.too_large", 25},
 		{"not base64", map[string]string{"mime": "text/plain", "name": "a.txt", "data": "***"}, http.StatusBadRequest, "request.bad_body", 0},
-		{"missing path", map[string]string{"path": filepath.Join(t.TempDir(), "gone.png")}, http.StatusBadRequest, "attachment.unreadable", 0},
-		{"directory", map[string]string{"path": t.TempDir()}, http.StatusBadRequest, "attachment.unreadable", 0},
+		{"missing path", map[string]string{"path": filepath.Join(testenv.TempDir(t), "gone.png")}, http.StatusBadRequest, "attachment.unreadable", 0},
+		{"directory", map[string]string{"path": testenv.TempDir(t)}, http.StatusBadRequest, "attachment.unreadable", 0},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

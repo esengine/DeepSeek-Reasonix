@@ -3,6 +3,7 @@ package sidecar
 import (
 	"testing"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/ext/extension/protocol"
 	"reasonix/internal/ext/pluginpkg"
 )
@@ -15,7 +16,7 @@ func TestToolOnlyRuntimeIsDeferredWithoutCopyingPackage(t *testing.T) {
 		Command: "/must-not-start",
 		Tools:   []pluginpkg.RuntimeTool{{Name: "echo"}},
 	}
-	m, _, err := StartLivePackages(t.Context(), t.TempDir(), []pluginpkg.InstalledPackage{p}, protocol.SessionContext{}, nil)
+	m, _, err := StartLivePackages(t.Context(), testenv.TempDir(t), []pluginpkg.InstalledPackage{p}, protocol.SessionContext{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

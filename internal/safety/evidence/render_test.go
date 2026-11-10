@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"reasonix/internal/base/testenv"
 )
 
 func writeReceipt(path string) Receipt {
@@ -30,7 +32,7 @@ func TestRendersInBrowserReadsTheExtensionOnly(t *testing.T) {
 // Writing a page owes a look; a screenshot of that file after the write settles
 // it; writing it again owes a new one, because the look was of the old bytes.
 func TestUnseenRendersFollowWritesAndLooks(t *testing.T) {
-	root := t.TempDir()
+	root := testenv.TempDir(t)
 	abs := filepath.Join(root, "Pelican.svg")
 	var l Ledger
 	l.Record(writeReceipt("Pelican.svg"))
@@ -60,7 +62,7 @@ func TestUnseenRendersFollowWritesAndLooks(t *testing.T) {
 // A look at a different file, a failed write, and a look taken before the
 // write all leave the debt standing.
 func TestUnseenRendersIgnoresLooksThatAreNotAtTheWrittenFile(t *testing.T) {
-	root := t.TempDir()
+	root := testenv.TempDir(t)
 	var l Ledger
 	l.Record(screenshotOf(ViewedPath(FileURL(filepath.Join(root, "page.html")))))
 	l.Record(writeReceipt("page.html"))
@@ -77,7 +79,7 @@ func TestUnseenRendersIgnoresLooksThatAreNotAtTheWrittenFile(t *testing.T) {
 // A shell that creates the file is a writer too, or `cat > x.svg` would owe
 // nothing a write_file owes.
 func TestUnseenRendersCountsFilesACommandCreated(t *testing.T) {
-	root := t.TempDir()
+	root := testenv.TempDir(t)
 	abs := filepath.Join(root, "out.svg")
 	var l Ledger
 	l.Record(Receipt{ToolName: "bash", Command: "python draw.py", Success: true, Mutation: true, Created: []string{abs}})
@@ -87,7 +89,7 @@ func TestUnseenRendersCountsFilesACommandCreated(t *testing.T) {
 }
 
 func TestViewedPathReadsOnlyLocalFiles(t *testing.T) {
-	abs := filepath.Join(t.TempDir(), "a.svg")
+	abs := filepath.Join(testenv.TempDir(t), "a.svg")
 	if got, want := ViewedPath(FileURL(abs)), NormalizePath(abs); got != want {
 		t.Fatalf("ViewedPath(file url) = %q, want %q", got, want)
 	}
@@ -101,7 +103,7 @@ func TestViewedPathReadsOnlyLocalFiles(t *testing.T) {
 // A task that only drew pages is checked by looking at them; one that also
 // changed anything else, or changed something it could not name, is not.
 func TestOnlyRendersSeenCoversDrawingAlone(t *testing.T) {
-	root := t.TempDir()
+	root := testenv.TempDir(t)
 	look := screenshotOf(ViewedPath(FileURL(filepath.Join(root, "pelican.svg"))))
 	cases := map[string]struct {
 		receipts []Receipt

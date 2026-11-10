@@ -3,6 +3,8 @@ package diskhealth
 import (
 	"testing"
 	"time"
+
+	"reasonix/internal/base/testenv"
 )
 
 const gib = int64(1) << 30
@@ -92,7 +94,7 @@ func TestAnUnreadableFolderIsLeftAlone(t *testing.T) {
 }
 
 func TestReadAnswersForARealFolder(t *testing.T) {
-	v, ok := Read(t.TempDir())
+	v, ok := Read(testenv.TempDir(t))
 	if !ok || v.Total <= 0 || v.Free < 0 || v.Free > v.Total {
 		t.Fatalf("Read(temp dir) = %+v, %v, want a volume with a total and a free count within it", v, ok)
 	}

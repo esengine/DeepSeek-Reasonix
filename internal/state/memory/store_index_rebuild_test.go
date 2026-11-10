@@ -5,12 +5,14 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"reasonix/internal/base/testenv"
 )
 
 // A readable index is still repaired line by line: a stale line is refreshed and
 // a missing one is appended, without a full rebuild.
 func TestMigrateV2RepairsAStaleReadableIndex(t *testing.T) {
-	dir := t.TempDir()
+	dir := testenv.TempDir(t)
 	store := Store{Dir: dir}
 	auditSeed(t, store, "alpha", "beta")
 
@@ -34,7 +36,7 @@ func TestMigrateV2RepairsAStaleReadableIndex(t *testing.T) {
 // A hand-written section is not managed state: a pass that rewrites managed
 // lines must leave it byte for byte.
 func TestMigrateV2KeepsHandWrittenTextWhenTheIndexIsReadable(t *testing.T) {
-	dir := t.TempDir()
+	dir := testenv.TempDir(t)
 	store := Store{Dir: dir}
 	auditSeed(t, store, "alpha")
 
@@ -58,7 +60,7 @@ func TestMigrateV2KeepsHandWrittenTextWhenTheIndexIsReadable(t *testing.T) {
 // Booting a healthy store must not churn the derived file: when every managed
 // line is already right, the bytes on disk stay identical.
 func TestMigrateV2LeavesAHealthyIndexByteIdentical(t *testing.T) {
-	dir := t.TempDir()
+	dir := testenv.TempDir(t)
 	store := Store{Dir: dir}
 	auditSeed(t, store, "alpha", "beta")
 
@@ -73,7 +75,7 @@ func TestMigrateV2LeavesAHealthyIndexByteIdentical(t *testing.T) {
 
 // A missing index is derived data too: the pass recreates it from the facts.
 func TestMigrateV2RebuildsAMissingIndex(t *testing.T) {
-	dir := t.TempDir()
+	dir := testenv.TempDir(t)
 	store := Store{Dir: dir}
 	auditSeed(t, store, "alpha", "beta")
 	index := auditIndexPath(dir)
@@ -105,7 +107,7 @@ func TestIndexRebuildUnblocksLaterSaves(t *testing.T) {
 	if os.Geteuid() == 0 {
 		t.Skip("permission faults do not apply to root")
 	}
-	dir := t.TempDir()
+	dir := testenv.TempDir(t)
 	store := Store{Dir: dir}
 	auditSeed(t, store, "alpha", "gamma")
 

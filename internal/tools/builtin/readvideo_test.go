@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/contract/tool"
 )
 
@@ -41,7 +42,7 @@ const goodProbe = `{"streams":[{"codec_type":"audio","codec_name":"aac"},{"codec
 
 func videoTool(t *testing.T, media *fakeMedia) (readVideo, string) {
 	t.Helper()
-	dir := t.TempDir()
+	dir := testenv.TempDir(t)
 	if err := os.WriteFile(filepath.Join(dir, "clip.mp4"), mp4Head(), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -224,7 +225,7 @@ func TestReadVideoRefusesWhatTheReadBoundaryRefuses(t *testing.T) {
 		t.Fatal("a forbidden folder was read")
 	}
 	v.forbidRoots = nil
-	other := t.TempDir()
+	other := testenv.TempDir(t)
 	v.readRoots = realRoots([]string{other})
 	_, _, err := callVideo(t, v, map[string]any{"path": "clip.mp4"})
 	if refusalCode(err) != CodeReadOutsideScope {

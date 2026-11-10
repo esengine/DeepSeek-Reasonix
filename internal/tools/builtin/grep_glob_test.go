@@ -66,7 +66,7 @@ func TestGrepGlobWithSlashMatchesPath(t *testing.T) {
 
 func TestGrepSlashGlobThroughSymlinkedParent(t *testing.T) {
 	root := grepGlobTree(t)
-	alias := filepath.Join(t.TempDir(), "alias")
+	alias := filepath.Join(testenv.TempDir(t), "alias")
 	if err := os.Symlink(filepath.Dir(root), alias); err != nil {
 		t.Skipf("directory symlinks unavailable: %v", err)
 	}

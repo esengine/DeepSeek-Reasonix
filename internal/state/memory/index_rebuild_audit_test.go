@@ -6,6 +6,8 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"reasonix/internal/base/testenv"
 )
 
 // Copied from the audit worktree (audit/memory-index-recomputable): MEMORY.md is
@@ -43,7 +45,7 @@ func TestAuditIndexRebuildRunsWhenTheIndexIsUnreadable(t *testing.T) {
 	if os.Geteuid() == 0 {
 		t.Skip("permission faults do not apply to root")
 	}
-	dir := t.TempDir()
+	dir := testenv.TempDir(t)
 	store := Store{Dir: dir}
 	auditSeed(t, store, "alpha")
 

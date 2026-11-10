@@ -5,12 +5,14 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"reasonix/internal/base/testenv"
 )
 
 func TestUnknownOrCorruptCoordinationRecordIsPreserved(t *testing.T) {
 	for _, raw := range []string{`{"version":2,"id":"future","order":1,"paths":["/future"]}`, `{"version":`} {
 		t.Run(raw, func(t *testing.T) {
-			root, state := t.TempDir(), t.TempDir()
+			root, state := testenv.TempDir(t), testenv.TempDir(t)
 			c := testCoordinator(t, root, state)
 			path := c.recordPath("future")
 			if err := os.WriteFile(path, []byte(raw), 0600); err != nil {

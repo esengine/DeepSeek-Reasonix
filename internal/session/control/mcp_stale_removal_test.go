@@ -7,6 +7,7 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/contract/config"
 	"reasonix/internal/contract/tool"
 	"reasonix/internal/ext/plugin"
@@ -17,7 +18,7 @@ func TestRemoveMCPServerAfterSourceDirectoryDeleted(t *testing.T) {
 	for _, mode := range []string{"on-demand", "failed", "without-runtime", "failed-without-runtime", "disabled"} {
 		t.Run(mode, func(t *testing.T) {
 			isolateControlConfigHome(t)
-			workspace := t.TempDir()
+			workspace := testenv.TempDir(t)
 			sourceDir := filepath.Join(workspace, ".reasonix")
 			if err := os.MkdirAll(sourceDir, 0o755); err != nil {
 				t.Fatal(err)
@@ -93,7 +94,7 @@ func TestRemoveMCPServerPreservesStaleStateWhenConfigReadFails(t *testing.T) {
 	} {
 		t.Run(source.file, func(t *testing.T) {
 			isolateControlConfigHome(t)
-			workspace := t.TempDir()
+			workspace := testenv.TempDir(t)
 			path := filepath.Join(workspace, source.file)
 			if err := os.WriteFile(path, []byte(source.valid), 0o600); err != nil {
 				t.Fatal(err)
@@ -129,7 +130,7 @@ func TestRemoveMCPServerPreservesStaleStateWhenConfigReadFails(t *testing.T) {
 
 func TestRemoveMCPServerKeepsLowerPriorityDeclaration(t *testing.T) {
 	isolateControlConfigHome(t)
-	workspace := t.TempDir()
+	workspace := testenv.TempDir(t)
 	if err := os.WriteFile(filepath.Join(workspace, "reasonix.toml"), []byte("[[plugins]]\nname = \"shared\"\ncommand = \"project-mcp\"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -201,7 +202,7 @@ func TestRemoveStaleMCPServerClearsOAuthAndRememberedConsent(t *testing.T) {
 
 func TestRemoveMCPServerPreservesRuntimeWhenPersistenceFails(t *testing.T) {
 	isolateControlConfigHome(t)
-	workspace := t.TempDir()
+	workspace := testenv.TempDir(t)
 	sourceDir := filepath.Join(workspace, ".reasonix")
 	if err := os.MkdirAll(sourceDir, 0o755); err != nil {
 		t.Fatal(err)

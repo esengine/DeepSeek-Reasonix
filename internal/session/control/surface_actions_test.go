@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"path/filepath"
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/contract/event"
 	"reasonix/internal/contract/provider"
 	"reasonix/internal/contract/surfacespec"
@@ -65,7 +66,7 @@ func testSurfaceActionQueueRetryWithdrawReplay(t *testing.T, proxy bool, format 
 	sess.Add(provider.Message{Role: provider.RoleUser, Content: "task"})
 	sess.Add(provider.Message{Role: provider.RoleAssistant, ToolCalls: []provider.ToolCall{call}})
 	sess.Add(provider.Message{Role: provider.RoleTool, ToolCallID: "call-1", Content: `{"surface_id":"s","nonblocking":true}`})
-	path := filepath.Join(t.TempDir(), "session.jsonl")
+	path := filepath.Join(testenv.TempDir(t), "session.jsonl")
 	exec := agent.New(nil, registry, sess, agent.Options{}, event.Discard)
 	c := New(Options{Registry: registry, Executor: exec, Runner: exec, SessionPath: path, Sink: event.Discard})
 	defer c.Close()

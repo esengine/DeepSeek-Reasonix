@@ -16,12 +16,13 @@ import (
 	"testing"
 	"time"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/contract/provider"
 )
 
 func grantedVideo(t *testing.T, content []byte) provider.VideoRef {
 	t.Helper()
-	path := filepath.Join(t.TempDir(), "clip.mp4")
+	path := filepath.Join(testenv.TempDir(t), "clip.mp4")
 	if err := os.WriteFile(path, content, 0o644); err != nil {
 		t.Fatal(err)
 	}

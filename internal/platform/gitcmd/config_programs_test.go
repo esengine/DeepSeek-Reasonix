@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"reasonix/internal/base/testenv"
 )
 
 // Each probe builds a repository whose own config names a marker script, runs
@@ -13,7 +15,7 @@ import (
 
 func (f *repoFixture) payloadExit() string {
 	f.t.Helper()
-	path := filepath.Join(f.t.TempDir(), "payload-exit.sh")
+	path := filepath.Join(testenv.TempDir(f.t), "payload-exit.sh")
 	script := "#!/bin/sh\necho ran >> '" + f.marker + "'\nexit 1\n"
 	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
 		f.t.Fatal(err)
@@ -58,7 +60,7 @@ func TestReviewGapLazyFetchRunsRepoUploadPack(t *testing.T) {
 		{"diff HEAD", func(f *repoFixture) { _, _ = f.run("diff", "HEAD", "--", "f.txt") }},
 		{"diff --numstat HEAD", func(f *repoFixture) { _, _ = f.run("diff", "--numstat", "HEAD", "--") }},
 		{"worktree add", func(f *repoFixture) {
-			_, _ = f.run("worktree", "add", "--detach", filepath.Join(f.t.TempDir(), "wt"), "HEAD")
+			_, _ = f.run("worktree", "add", "--detach", filepath.Join(testenv.TempDir(f.t), "wt"), "HEAD")
 		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -69,7 +71,7 @@ func TestReviewGapLazyFetchRunsRepoUploadPack(t *testing.T) {
 			}
 			p := f.payloadExit()
 			f.appendConfig("config", "[core]\n\trepositoryformatversion = 1\n[extensions]\n\tpartialClone = origin\n"+
-				"[remote \"origin\"]\n\turl = "+t.TempDir()+"\n\tpromisor = true\n\tuploadpack = "+p+"\n")
+				"[remote \"origin\"]\n\turl = "+testenv.TempDir(t)+"\n\tpromisor = true\n\tuploadpack = "+p+"\n")
 			f.write("f.txt", "two\n")
 			tc.run(f)
 			f.assertNotExecuted()
@@ -128,7 +130,7 @@ func TestReviewGapPluginCloneFromRepositoryCwd(t *testing.T) {
 	f.appendConfig("config", "[url \"ext::"+p+" \"]\n\tinsteadOf = https://github.com/\n[protocol \"ext\"]\n\tallow = always\n"+
 		"[credential]\n\thelper = !"+p+"\n[core]\n\tsshCommand = "+p+"\n\taskPass = "+p+"\n")
 	t.Chdir(f.dir)
-	cmd := CommandWithConfig(f.ctx, "", []string{"core.autocrlf=false"}, "clone", "--depth=1", "https://github.com/example/none.git", filepath.Join(t.TempDir(), "c"))
+	cmd := CommandWithConfig(f.ctx, "", []string{"core.autocrlf=false"}, "clone", "--depth=1", "https://github.com/example/none.git", filepath.Join(testenv.TempDir(t), "c"))
 	cmd.Env = append(cmd.Env, "GIT_TERMINAL_PROMPT=0")
 	_, _ = cmd.CombinedOutput()
 	f.assertNotExecuted()

@@ -6,12 +6,14 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"reasonix/internal/base/testenv"
 )
 
 // TestDeviceTrustSurvivesARestart is the whole point of the file: a phone that
 // scanned once still holds a credential the next process accepts.
 func TestDeviceTrustSurvivesARestart(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "state", "device-trust.json")
+	path := filepath.Join(testenv.TempDir(t), "state", "device-trust.json")
 	first := newDeviceRegistryAt(time.Now)
 	first.persist = func(devices []persistedDevice) { _ = saveDeviceTrust(path, devices) }
 
@@ -36,7 +38,7 @@ func TestDeviceTrustSurvivesARestart(t *testing.T) {
 // for: closing the share unpairs every device, and removing one leaves nothing
 // behind to be adopted at the next start.
 func TestUnpairingForgetsTheDeviceOnDisk(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "device-trust.json")
+	path := filepath.Join(testenv.TempDir(t), "device-trust.json")
 	reg := newDeviceRegistryAt(time.Now)
 	reg.persist = func(devices []persistedDevice) { _ = saveDeviceTrust(path, devices) }
 
@@ -69,7 +71,7 @@ func TestUnpairingForgetsTheDeviceOnDisk(t *testing.T) {
 // TestTrustFileWithoutUsableDigestsIsIgnored keeps a damaged or hand-edited file
 // from pairing something it cannot authenticate: it reads as no devices.
 func TestTrustFileWithoutUsableDigestsIsIgnored(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "device-trust.json")
+	path := filepath.Join(testenv.TempDir(t), "device-trust.json")
 	body := `[{"id":"a","digest":"not-hex"},{"id":"","digest":"00"},{"id":"b"},{"id":"c","digest":"0011"}]`
 	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 		t.Fatal(err)
@@ -84,7 +86,7 @@ func TestTrustFileWithoutUsableDigestsIsIgnored(t *testing.T) {
 // TestMissingTrustFileReadsAsNoDevices covers the first run, where nothing has
 // been written yet.
 func TestMissingTrustFileReadsAsNoDevices(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "nope", "device-trust.json")
+	path := filepath.Join(testenv.TempDir(t), "nope", "device-trust.json")
 	reg := newDeviceRegistryAt(time.Now)
 	reg.Restore(loadDeviceTrust(path))
 	if got := reg.Devices(); len(got) != 0 {
@@ -96,7 +98,7 @@ func TestMissingTrustFileReadsAsNoDevices(t *testing.T) {
 // going away keeps the phones this machine adopted, while the user closing the
 // share withdraws them.
 func TestShutdownKeepsTheDevicesCloseForgets(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "device-trust.json")
+	path := filepath.Join(testenv.TempDir(t), "device-trust.json")
 	share := NewDeviceShare(nil)
 	share.remember = func() bool { return true }
 	share.registry.persist = func(devices []persistedDevice) { _ = saveDeviceTrust(path, devices) }
@@ -130,7 +132,7 @@ func TestShutdownKeepsTheDevicesCloseForgets(t *testing.T) {
 // again stops the old listener but leaves the phones paired, so nobody scans a
 // second time.
 func TestReopeningAShareKeepsThePairedDevices(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "device-trust.json")
+	path := filepath.Join(testenv.TempDir(t), "device-trust.json")
 	share := NewDeviceShare(nil)
 	share.remember = func() bool { return true }
 	share.registry.persist = func(devices []persistedDevice) { _ = saveDeviceTrust(path, devices) }
@@ -158,7 +160,7 @@ func TestReopeningAShareKeepsThePairedDevices(t *testing.T) {
 // does not remember paired phones keeps the behaviour it always had, so a process
 // going away unpairs the phones it was holding.
 func TestWithoutTheSwitchShutdownStillForgets(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "device-trust.json")
+	path := filepath.Join(testenv.TempDir(t), "device-trust.json")
 	share := NewDeviceShare(nil)
 	share.registry.persist = func(devices []persistedDevice) { _ = saveDeviceTrust(path, devices) }
 

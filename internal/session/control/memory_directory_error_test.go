@@ -7,11 +7,12 @@ import (
 	"strings"
 	"testing"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/state/memory"
 )
 
 func TestMemoryCommandsReportDirectoryReadFailure(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "memory")
+	path := filepath.Join(testenv.TempDir(t), "memory")
 	if err := os.WriteFile(path, []byte("not a directory"), 0o600); err != nil {
 		t.Fatal(err)
 	}

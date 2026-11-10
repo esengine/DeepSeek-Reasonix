@@ -6,10 +6,12 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"reasonix/internal/base/testenv"
 )
 
 func TestListFatalLogsNewestFirstAndSkipsWhatIsNotACrashFile(t *testing.T) {
-	dir := t.TempDir()
+	dir := testenv.TempDir(t)
 	write := func(name, body string, age time.Duration) {
 		path := filepath.Join(dir, name)
 		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
@@ -32,7 +34,7 @@ func TestListFatalLogsNewestFirstAndSkipsWhatIsNotACrashFile(t *testing.T) {
 }
 
 func TestListFatalLogsIsBounded(t *testing.T) {
-	dir := t.TempDir()
+	dir := testenv.TempDir(t)
 	for i := range MaxListedFatalLogs + 7 {
 		name := filepath.Join(dir, fmt.Sprintf("host-%03d", i)+fatalSuffix)
 		if err := os.WriteFile(name, []byte("x"), 0o600); err != nil {

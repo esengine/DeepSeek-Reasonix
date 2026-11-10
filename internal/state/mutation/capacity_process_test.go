@@ -7,6 +7,8 @@ import (
 	"os/exec"
 	"testing"
 	"time"
+
+	"reasonix/internal/base/testenv"
 )
 
 func TestCapacityProcessDeathHelper(t *testing.T) {
@@ -22,7 +24,7 @@ func TestCapacityProcessDeathHelper(t *testing.T) {
 }
 
 func TestCapacityReclaimedAfterRealProcessExit(t *testing.T) {
-	root, state := t.TempDir(), t.TempDir()
+	root, state := testenv.TempDir(t), testenv.TempDir(t)
 	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestCapacityProcessDeathHelper$")

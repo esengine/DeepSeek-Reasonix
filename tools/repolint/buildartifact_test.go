@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"reasonix/internal/base/testenv"
 )
 
 func writeCommand(t *testing.T, root, dir string) {
@@ -18,7 +20,7 @@ func writeCommand(t *testing.T, root, dir string) {
 
 func fixtureRoot(t *testing.T, gitignore string) string {
 	t.Helper()
-	root := t.TempDir()
+	root := testenv.TempDir(t)
 	if err := os.WriteFile(filepath.Join(root, ".gitignore"), []byte(gitignore), 0o644); err != nil {
 		t.Fatal(err)
 	}

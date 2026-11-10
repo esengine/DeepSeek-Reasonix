@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"reasonix/internal/base/testenv"
 )
 
 func writeStyles(t *testing.T, root, name, body string) {
@@ -27,7 +29,7 @@ func TestCountImportantIgnoresComments(t *testing.T) {
 
 // The ratchet's point: a baseline recorded at N fails at N+1 and is quiet at N or below.
 func TestCSSRatchetFailsWhenImportantRises(t *testing.T) {
-	root := t.TempDir()
+	root := testenv.TempDir(t)
 	writeStyles(t, root, "studio.css", "a{b:c !important}\nd{e:f !important}\n")
 	baseline := baselineFrom(checkCSS(root))
 
@@ -46,7 +48,7 @@ func TestCSSRatchetFailsWhenImportantRises(t *testing.T) {
 }
 
 func TestCSSRatchetFailsWhenABudgetedSheetGrows(t *testing.T) {
-	root := t.TempDir()
+	root := testenv.TempDir(t)
 	writeStyles(t, root, "app.css", strings.Repeat("a{b:c}\n", 10))
 	baseline := baselineFrom(checkCSS(root))
 	writeStyles(t, root, "app.css", strings.Repeat("a{b:c}\n", 11))
@@ -57,7 +59,7 @@ func TestCSSRatchetFailsWhenABudgetedSheetGrows(t *testing.T) {
 }
 
 func TestCSSSizeBudgetCoversOnlyTheLayeredSheets(t *testing.T) {
-	root := t.TempDir()
+	root := testenv.TempDir(t)
 	writeStyles(t, root, "chart.css", strings.Repeat("a{b:c}\n", 3000))
 	if got := checkCSS(root); len(got) != 0 {
 		t.Fatalf("an unbudgeted sheet must not be weighed by length: %v", got)
@@ -65,7 +67,7 @@ func TestCSSSizeBudgetCoversOnlyTheLayeredSheets(t *testing.T) {
 }
 
 func TestStrayFilesAreFlagged(t *testing.T) {
-	root := t.TempDir()
+	root := testenv.TempDir(t)
 	for _, name := range []string{"Settings.tsx-e", "x.go.orig", "ok.tsx", "name-eel.ts"} {
 		if err := os.WriteFile(filepath.Join(root, name), nil, 0o644); err != nil {
 			t.Fatal(err)

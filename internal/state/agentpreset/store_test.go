@@ -6,11 +6,12 @@ import (
 	"path/filepath"
 	"testing"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/contract/agentcomposition"
 )
 
 func TestStoreScopesCASAndRetainedVersions(t *testing.T) {
-	s := New(t.TempDir(), t.TempDir())
+	s := New(testenv.TempDir(t), testenv.TempDir(t))
 	d := agentcomposition.Builtins()[0]
 	d.ID, d.Name = "user:review", "My review"
 	one, err := s.Save(d, "")
@@ -36,14 +37,14 @@ func TestStoreScopesCASAndRetainedVersions(t *testing.T) {
 	if _, err = s.Save(d, ""); err != nil {
 		t.Fatal(err)
 	}
-	other := New(s.Home, t.TempDir())
+	other := New(s.Home, testenv.TempDir(t))
 	if _, err = other.Get(d.ID); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("project leaked: %v", err)
 	}
 }
 
 func TestProjectCannotSelectDefaultAndBuiltinCannotBeWritten(t *testing.T) {
-	s := New(t.TempDir(), t.TempDir())
+	s := New(testenv.TempDir(t), testenv.TempDir(t))
 	d := agentcomposition.Builtins()[0]
 	if _, err := s.Save(d, ""); !errors.Is(err, ErrReadOnly) {
 		t.Fatalf("builtin write: %v", err)

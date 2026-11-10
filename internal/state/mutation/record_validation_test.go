@@ -8,13 +8,14 @@ import (
 	"testing"
 
 	"reasonix/internal/base/filelock"
+	"reasonix/internal/base/testenv"
 )
 
 func TestUnsupportedRecordCannotBeGrantedOrScavenged(t *testing.T) {
 	for _, live := range []bool{false, true} {
 		for _, shape := range []string{"future_effect", "read_only_paths", "external_paths", "extension", "capacity_extension"} {
 			t.Run(shape+map[bool]string{false: "/dead", true: "/live"}[live], func(t *testing.T) {
-				root, state := t.TempDir(), t.TempDir()
+				root, state := testenv.TempDir(t), testenv.TempDir(t)
 				c := testCoordinator(t, root, state)
 				r := record{Version: 1, ID: "unsupported", Order: 1, Active: true,
 					Paths: []string{filepath.Join(c.root, "reserved")}, Effect: NamedPaths}
@@ -93,7 +94,7 @@ func TestKnownRecordShapesRemainReadableAndReclaimable(t *testing.T) {
 				continue
 			}
 			t.Run(string(effect)+string(rune('0'+version)), func(t *testing.T) {
-				c := testCoordinator(t, t.TempDir(), t.TempDir())
+				c := testCoordinator(t, testenv.TempDir(t), testenv.TempDir(t))
 				r := record{Version: version, ID: "known", Order: 1, Paths: []string{c.root}, Effect: effect}
 				if version == 2 {
 					r.Workspace = c.root

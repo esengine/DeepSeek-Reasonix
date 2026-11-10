@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"runtime"
 	"testing"
+
+	"reasonix/internal/base/testenv"
 )
 
 // The system follows a link before it applies a `..`; the path checked has to
@@ -13,7 +15,7 @@ func TestRealPathFollowsALinkBeforeDotDot(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("windows resolves .. before it opens")
 	}
-	base, err := filepath.EvalSymlinks(t.TempDir())
+	base, err := filepath.EvalSymlinks(testenv.TempDir(t))
 	if err != nil {
 		t.Fatal(err)
 	}

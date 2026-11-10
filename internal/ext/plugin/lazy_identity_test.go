@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/contract/tool"
 )
 
@@ -59,7 +60,7 @@ func TestLazyCachedRawIdentityAcrossHTTPDiscovery(t *testing.T) {
 			defer server.Close()
 			ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 			defer cancel()
-			spec := Spec{Name: "srv", Type: "http", URL: server.URL, StripRawPrefix: tc.strip, StateDir: filepath.Join(t.TempDir(), "srv")}
+			spec := Spec{Name: "srv", Type: "http", URL: server.URL, StripRawPrefix: tc.strip, StateDir: filepath.Join(testenv.TempDir(t), "srv")}
 			first := NewHost()
 			defer first.Close()
 			live, err := first.Add(ctx, spec)

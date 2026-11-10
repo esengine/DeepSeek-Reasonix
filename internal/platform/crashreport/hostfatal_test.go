@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"reasonix/internal/base/testenv"
 )
 
 const (
@@ -46,7 +48,7 @@ func fatalLogs(t *testing.T, dir string) []string {
 }
 
 func TestFatalLogKeepsWhatTheRuntimePrintsUnderAStableName(t *testing.T) {
-	dir := filepath.Join(t.TempDir(), "crash")
+	dir := filepath.Join(testenv.TempDir(t), "crash")
 	runCrashChild(t, dir, false)
 
 	logs := fatalLogs(t, dir)
@@ -64,7 +66,7 @@ func TestFatalLogKeepsWhatTheRuntimePrintsUnderAStableName(t *testing.T) {
 }
 
 func TestFatalLogLeavesNothingAfterACleanExit(t *testing.T) {
-	dir := filepath.Join(t.TempDir(), "crash")
+	dir := filepath.Join(testenv.TempDir(t), "crash")
 	runCrashChild(t, dir, true)
 	if logs := fatalLogs(t, dir); len(logs) != 0 {
 		t.Fatalf("a clean exit left %v", logs)
@@ -72,7 +74,7 @@ func TestFatalLogLeavesNothingAfterACleanExit(t *testing.T) {
 }
 
 func TestFatalLogBoundsWhatEarlierCrashesLeft(t *testing.T) {
-	dir := t.TempDir()
+	dir := testenv.TempDir(t)
 	base := time.Now().Add(-time.Hour)
 	for i := range keepFatalLogs + 3 {
 		path := filepath.Join(dir, "host-old-"+string(rune('a'+i))+fatalSuffix)
@@ -113,7 +115,7 @@ func TestFatalLogBoundsWhatEarlierCrashesLeft(t *testing.T) {
 // named a crash file that held no reason or did not exist. exited puts the code
 // and the reason in it and keeps it.
 func TestExitedKeepsTheFileWithTheCodeAndTheReason(t *testing.T) {
-	dir := filepath.Join(t.TempDir(), "crash")
+	dir := filepath.Join(testenv.TempDir(t), "crash")
 	_, exited := InstallFatalLog(dir, "2.41.0")
 	exited(1, "reasonix-studio-host: listener closed")
 	names := fatalLogs(t, dir)

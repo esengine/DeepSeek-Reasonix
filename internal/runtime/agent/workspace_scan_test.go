@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"reasonix/internal/base/fileutil"
+	"reasonix/internal/base/testenv"
 )
 
 // walkReference is the sequential walk the parallel one stands in for, kept
@@ -52,8 +53,8 @@ func walkReference(ctx context.Context, root string, limit int) workspaceScan {
 }
 
 func TestParallelScanAnswersAsTheSequentialWalk(t *testing.T) {
-	root := t.TempDir()
-	outside := t.TempDir()
+	root := testenv.TempDir(t)
+	outside := testenv.TempDir(t)
 	write := func(rel string) {
 		p := filepath.Join(root, filepath.FromSlash(rel))
 		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {

@@ -12,6 +12,8 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"reasonix/internal/base/testenv"
 )
 
 type entry struct {
@@ -173,7 +175,7 @@ func TestExtractBinaryStillFindsTheRootBinaryBesideAPage(t *testing.T) {
 // upgrade has no business touching.
 func pagedInstall(t *testing.T) (dir, exe string) {
 	t.Helper()
-	dir = t.TempDir()
+	dir = testenv.TempDir(t)
 	exe = filepath.Join(dir, "reasonix")
 	must := func(path, body string) {
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -246,7 +248,7 @@ func TestUpgradeReplacesTheBinaryAndTheWholePageAndNothingElse(t *testing.T) {
 }
 
 func TestUpgradeDoesNotAddAPageToAnInstallThatHasNone(t *testing.T) {
-	dir := t.TempDir()
+	dir := testenv.TempDir(t)
 	exe := filepath.Join(dir, "reasonix")
 	if err := os.WriteFile(exe, []byte("old-binary"), 0o755); err != nil {
 		t.Fatal(err)
@@ -359,7 +361,7 @@ func TestUpgradedPageKeepsTheModesOfTheOldOne(t *testing.T) {
 func TestUpgradeLeavesALinkedPageAlone(t *testing.T) {
 	for _, which := range []string{"dist", "frontend-next"} {
 		t.Run(which, func(t *testing.T) {
-			root := t.TempDir()
+			root := testenv.TempDir(t)
 			install := filepath.Join(root, "install")
 			mine := filepath.Join(root, "my-build")
 			if err := os.MkdirAll(filepath.Join(mine, "dist"), 0o755); err != nil {

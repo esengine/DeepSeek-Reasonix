@@ -112,7 +112,7 @@ func (r recordingRunner) Run(_ context.Context, input string) error {
 // hub, its config path and its capabilities are the ones the host builds.
 func testHub(t *testing.T, cfg config.ServeConfig) (*serve.Hub, chan string) {
 	t.Helper()
-	root := t.TempDir()
+	root := testenv.TempDir(t)
 	got := make(chan string, 1)
 	bc := serve.NewBroadcaster()
 	ctrl := control.New(control.Options{
@@ -382,7 +382,7 @@ func TestOnlyAPipeIsAParentLease(t *testing.T) {
 		t.Error("the null device was read as a parent holding this host open")
 	}
 
-	path := filepath.Join(t.TempDir(), "not-a-pipe")
+	path := filepath.Join(testenv.TempDir(t), "not-a-pipe")
 	if err := os.WriteFile(path, []byte("x"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -399,7 +399,7 @@ func TestOnlyAPipeIsAParentLease(t *testing.T) {
 // The whole run, driven the way Electron drives it: a pipe for the lease, one
 // line of handshake, traffic, then the parent letting go.
 func TestRunServesUntilTheParentLetsGo(t *testing.T) {
-	page := t.TempDir()
+	page := testenv.TempDir(t)
 	if err := os.WriteFile(filepath.Join(page, "index.html"), []byte("<title>studio</title>"), 0o600); err != nil {
 		t.Fatal(err)
 	}

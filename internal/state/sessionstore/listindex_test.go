@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reasonix/internal/base/testenv"
 	"reflect"
 	"strings"
 	"sync"
@@ -56,7 +57,7 @@ func list(t *testing.T, dir string) []SessionOrderInfo {
 }
 
 func TestAnUnchangedFolderIsListedWithoutOpeningASession(t *testing.T) {
-	dir := t.TempDir()
+	dir := testenv.TempDir(t)
 	writeSessions(t, dir, 300)
 	reads := countSidecarReads(t)
 
@@ -74,7 +75,7 @@ func TestAnUnchangedFolderIsListedWithoutOpeningASession(t *testing.T) {
 }
 
 func TestARestartedProcessAnswersFromTheIndexOnDisk(t *testing.T) {
-	dir := t.TempDir()
+	dir := testenv.TempDir(t)
 	writeSessions(t, dir, 150)
 	want := list(t, dir)
 	reads := countSidecarReads(t)
@@ -88,7 +89,7 @@ func TestARestartedProcessAnswersFromTheIndexOnDisk(t *testing.T) {
 }
 
 func TestOnlyWhatChangedIsReadAgain(t *testing.T) {
-	dir := t.TempDir()
+	dir := testenv.TempDir(t)
 	writeSessions(t, dir, 200)
 	list(t, dir)
 	reads := countSidecarReads(t)
@@ -119,7 +120,7 @@ func TestOnlyWhatChangedIsReadAgain(t *testing.T) {
 }
 
 func TestANewAndARemovedSessionAreSeenAtOnce(t *testing.T) {
-	dir := t.TempDir()
+	dir := testenv.TempDir(t)
 	writeSessions(t, dir, 120)
 	list(t, dir)
 	reads := countSidecarReads(t)
@@ -144,7 +145,7 @@ func TestANewAndARemovedSessionAreSeenAtOnce(t *testing.T) {
 }
 
 func TestAPendingRemovalHidesASessionWithoutReadingIt(t *testing.T) {
-	dir := t.TempDir()
+	dir := testenv.TempDir(t)
 	writeSessions(t, dir, 120)
 	list(t, dir)
 	reads := countSidecarReads(t)
@@ -163,7 +164,7 @@ func TestAPendingRemovalHidesASessionWithoutReadingIt(t *testing.T) {
 }
 
 func TestAnUnusableIndexIsRebuiltNotTrusted(t *testing.T) {
-	dir := t.TempDir()
+	dir := testenv.TempDir(t)
 	writeSessions(t, dir, 120)
 	want := list(t, dir)
 	for _, bad := range []string{"not json", `{"format":999,"entries":{}}`, ""} {
@@ -179,13 +180,13 @@ func TestAnUnusableIndexIsRebuiltNotTrusted(t *testing.T) {
 }
 
 func TestTheIndexIsNotASessionAndASmallFolderKeepsNone(t *testing.T) {
-	small := t.TempDir()
+	small := testenv.TempDir(t)
 	writeSessions(t, small, 10)
 	list(t, small)
 	if _, err := os.Stat(filepath.Join(small, listIndexName)); err == nil {
 		t.Fatal("a folder of ten sessions kept an index")
 	}
-	big := t.TempDir()
+	big := testenv.TempDir(t)
 	writeSessions(t, big, 110)
 	if got := list(t, big); len(got) != 110 {
 		t.Fatalf("rows = %d", len(got))
@@ -196,7 +197,7 @@ func TestTheIndexIsNotASessionAndASmallFolderKeepsNone(t *testing.T) {
 }
 
 func TestListingsRunningTogetherAgree(t *testing.T) {
-	dir := t.TempDir()
+	dir := testenv.TempDir(t)
 	writeSessions(t, dir, 150)
 	var wg sync.WaitGroup
 	for range 8 {
@@ -225,7 +226,7 @@ func TestListIndexFormatTracksTheRowShape(t *testing.T) {
 
 // The picker's listing is built on the same order, so it gets the same saving.
 func TestTheSessionListingItselfOpensNoSidecarsOnAnUnchangedFolder(t *testing.T) {
-	dir := t.TempDir()
+	dir := testenv.TempDir(t)
 	writeSessions(t, dir, 130)
 	first, err := ListSessions(dir)
 	if err != nil {

@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/contract/event"
 	"reasonix/internal/contract/provider"
 	"reasonix/internal/runtime/agent/testutil"
@@ -37,7 +38,7 @@ func slowShellBuild(t *testing.T, kind string, tune func(*sandbox.ShellDiscovery
 
 func fakeBashOnPath(t *testing.T) string {
 	t.Helper()
-	bin := t.TempDir()
+	bin := testenv.TempDir(t)
 	name := "bash"
 	if runtime.GOOS == "windows" {
 		name = "bash.exe"

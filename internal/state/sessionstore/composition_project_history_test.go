@@ -3,6 +3,7 @@ package sessionstore
 import (
 	"errors"
 	"path/filepath"
+	"reasonix/internal/base/testenv"
 	"testing"
 
 	"reasonix/internal/contract/agentcomposition"
@@ -18,7 +19,7 @@ func TestLegacyProjectLaunchOverrideRemainsReadableAsHistory(t *testing.T) {
 	session := NewSession("retained prompt")
 	session.BindComposition(binding)
 	session.Add(provider.Message{Role: provider.RoleUser, Content: "history remains visible"})
-	path := filepath.Join(t.TempDir(), "legacy-project.jsonl")
+	path := filepath.Join(testenv.TempDir(t), "legacy-project.jsonl")
 	if err := session.SaveSnapshot(path); err != nil {
 		t.Fatal(err)
 	}

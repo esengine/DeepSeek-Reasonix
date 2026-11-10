@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"reasonix/internal/base/testenv"
 )
 
 // A migration rewrites a legacy fact as V2 before it publishes the index. If the
@@ -12,7 +14,7 @@ import (
 // fact as migrated and skips it — so the index must not be left stale by a run
 // that reported failure.
 func TestMigrateV2RetryAfterIndexFailureRepairsTheIndex(t *testing.T) {
-	dir := t.TempDir()
+	dir := testenv.TempDir(t)
 	legacy := "---\nname: alpha\ndescription: legacy\n---\n\nbody\n"
 	if err := os.WriteFile(filepath.Join(dir, "alpha.md"), []byte(legacy), 0o644); err != nil {
 		t.Fatal(err)

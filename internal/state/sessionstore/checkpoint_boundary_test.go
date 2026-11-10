@@ -3,11 +3,12 @@ package sessionstore
 import (
 	"os"
 	"path/filepath"
+	"reasonix/internal/base/testenv"
 	"testing"
 )
 
 func TestCheckpointReadersConfineSymlinksToSessionDirectory(t *testing.T) {
-	parent := t.TempDir()
+	parent := testenv.TempDir(t)
 	dir := filepath.Join(parent, "sessions")
 	if err := os.Mkdir(dir, 0o700); err != nil {
 		t.Fatal(err)

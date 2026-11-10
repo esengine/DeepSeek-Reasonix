@@ -8,11 +8,13 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"reasonix/internal/base/testenv"
 )
 
 func TestNativeImportRejectsUnknownWorkspaceBeforeFilesystemLookup(t *testing.T) {
 	h, _, _, _ := twoProjects(t)
-	unknown := filepath.Join(t.TempDir(), "missing-workspace")
+	unknown := filepath.Join(testenv.TempDir(t), "missing-workspace")
 	r := httptest.NewRequest(http.MethodPost, "/tree/sessions/import-native?workspace="+url.QueryEscape(unknown), strings.NewReader("{}"))
 	w := httptest.NewRecorder()
 	h.importNativeSession(w, r)

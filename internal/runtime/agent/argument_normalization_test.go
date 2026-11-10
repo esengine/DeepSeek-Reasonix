@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/contract/event"
 	"reasonix/internal/contract/provider"
 	"reasonix/internal/contract/tool"
@@ -120,7 +121,7 @@ func testArgumentNormalizationHistoryRoundTrip(t *testing.T, proxy bool) {
 	if !found {
 		t.Fatal("provider did not receive original call")
 	}
-	path := filepath.Join(t.TempDir(), "session.jsonl")
+	path := filepath.Join(testenv.TempDir(t), "session.jsonl")
 	if err := session.Save(path); err != nil {
 		t.Fatal(err)
 	}

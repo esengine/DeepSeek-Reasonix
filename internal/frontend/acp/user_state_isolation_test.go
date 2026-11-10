@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/session/control"
 )
 
@@ -26,7 +27,7 @@ func TestACPInventoryIgnoresCallerSkills(t *testing.T) {
 		}
 		return
 	}
-	home := t.TempDir()
+	home := testenv.TempDir(t)
 	dir := filepath.Join(home, ".reasonix", "skills", "caller-only-skill")
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		t.Fatal(err)

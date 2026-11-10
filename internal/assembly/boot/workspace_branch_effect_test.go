@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/contract/event"
 )
 
@@ -18,7 +19,7 @@ func TestWorkspaceBranchSummaryReadsOverlapThroughBuild(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("git wrapper uses POSIX shell")
 	}
-	dir := t.TempDir()
+	dir := testenv.TempDir(t)
 	realGit, err := exec.LookPath("git")
 	if err != nil {
 		t.Skip("git unavailable")
@@ -33,7 +34,7 @@ func TestWorkspaceBranchSummaryReadsOverlapThroughBuild(t *testing.T) {
 			t.Fatalf("git %v: %v %s", args, err, out)
 		}
 	}
-	home := t.TempDir()
+	home := testenv.TempDir(t)
 	t.Setenv("REASONIX_HOME", home)
 	t.Setenv("REASONIX_STATE_HOME", home)
 	ctrl, err := Build(t.Context(), Options{Home: home, WorkspaceRoot: dir, Sink: event.Discard, Stderr: io.Discard})
@@ -41,7 +42,7 @@ func TestWorkspaceBranchSummaryReadsOverlapThroughBuild(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer ctrl.Close()
-	bin, signals := t.TempDir(), t.TempDir()
+	bin, signals := testenv.TempDir(t), testenv.TempDir(t)
 	wrapper := `#!/bin/sh
 probe=
 for arg in "$@"; do

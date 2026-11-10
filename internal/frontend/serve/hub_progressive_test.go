@@ -9,12 +9,13 @@ import (
 	"testing"
 	"time"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/state/sessionv4/v4fixture"
 )
 
 func TestProgressiveTreePublishesLegacyRowsAndFinalCounts(t *testing.T) {
-	t.Setenv("REASONIX_HOME", t.TempDir())
-	root := t.TempDir()
+	t.Setenv("REASONIX_HOME", testenv.TempDir(t))
+	root := testenv.TempDir(t)
 	rememberWorkspace(root)
 	f := v4fixture.New(t)
 	f.Root = filepath.Join(filepath.Dir(SessionDirFor(root)), "sessions-v4")
@@ -77,8 +78,8 @@ func TestProgressiveTreePublishesLegacyRowsAndFinalCounts(t *testing.T) {
 func BenchmarkProgressiveTree(b *testing.B) {
 	for _, n := range []int{60, 2000} {
 		b.Run(fmt.Sprint(n), func(b *testing.B) {
-			b.Setenv("REASONIX_HOME", b.TempDir())
-			root := b.TempDir()
+			b.Setenv("REASONIX_HOME", testenv.TempDir(b))
+			root := testenv.TempDir(b)
 			rememberWorkspace(root)
 			f := v4fixture.New(b)
 			f.Root = filepath.Join(filepath.Dir(SessionDirFor(root)), "sessions-v4")

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/contract/agentcomposition"
 	"reasonix/internal/contract/config"
 )
@@ -39,7 +40,7 @@ func TestMCPRetainsParametersButOnlyReferencesCredentialValues(t *testing.T) {
 }
 
 func TestRetainedResourceTamperingAndUntrustedBindingAreRefused(t *testing.T) {
-	s := New(t.TempDir(), t.TempDir())
+	s := New(testenv.TempDir(t), testenv.TempDir(t))
 	asset := DirectorySnapshot{Files: []AssetFile{{Path: "script", Data: []byte("original"), Mode: 0o700}}}
 	root, err := s.Materialize(asset)
 	if err != nil {

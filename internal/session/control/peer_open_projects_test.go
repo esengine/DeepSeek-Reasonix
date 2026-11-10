@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/contract/tool"
 )
 
@@ -33,7 +34,7 @@ func TestOpeningProjectsWaitsForAPersonEvenInYoloAndActsOnExactlyTheCardsList(t 
 		return []tool.OpenedProject{{Path: paths[0], Added: true}}, nil
 	})
 	c.SetAutoApproveTools(true)
-	a1, a2 := filepath.Join(t.TempDir(), "a"), filepath.Join(t.TempDir(), "b")
+	a1, a2 := filepath.Join(testenv.TempDir(t), "a"), filepath.Join(testenv.TempDir(t), "b")
 	done := openProjectsAsync(c, a1+string(filepath.Separator), a2, a1)
 	a := nextApproval(t, requests)
 	if a.Tool != OpenProjectsApprovalTool || !a.Fresh || a.AllowsSession || a.AllowsPersist {
@@ -62,7 +63,7 @@ func TestADeclinedOpenProjectsCardAddsNothing(t *testing.T) {
 		called = true
 		return nil, nil
 	})
-	done := openProjectsAsync(c, filepath.Join(t.TempDir(), "a"))
+	done := openProjectsAsync(c, filepath.Join(testenv.TempDir(t), "a"))
 	a := nextApproval(t, requests)
 	c.Approve(a.ID, false, false, false)
 	got := <-done
@@ -77,7 +78,7 @@ func TestOpenProjectsRefusesBeforeAnyCardWhatCannotBeAsked(t *testing.T) {
 	c.SetProjectOpener(func(context.Context, *Controller, []string) ([]tool.OpenedProject, error) { return nil, nil })
 	var many []string
 	for i := range openProjectsMax + 1 {
-		many = append(many, filepath.Join(t.TempDir(), string(rune('a'+i))))
+		many = append(many, filepath.Join(testenv.TempDir(t), string(rune('a'+i))))
 	}
 	for name, tc := range map[string]struct {
 		paths []string
@@ -102,12 +103,12 @@ func TestOpenProjectsRefusesBeforeAnyCardWhatCannotBeAsked(t *testing.T) {
 func TestOpenProjectsNeedsTheDispatchSwitchAndAHost(t *testing.T) {
 	c, _, _ := settingController(t)
 	setDispatchSwitch(t, true, false)
-	if _, err := c.OpenProjects(context.Background(), []string{filepath.Join(t.TempDir(), "a")}); !errors.Is(err, ErrDispatchDisabled) {
+	if _, err := c.OpenProjects(context.Background(), []string{filepath.Join(testenv.TempDir(t), "a")}); !errors.Is(err, ErrDispatchDisabled) {
 		t.Fatalf("switch off = %v", err)
 	}
 	setDispatchSwitch(t, true, true)
 	c2 := c
-	if _, err := c2.OpenProjects(context.Background(), []string{filepath.Join(t.TempDir(), "a")}); !errors.Is(err, ErrDispatchUnavailable) {
+	if _, err := c2.OpenProjects(context.Background(), []string{filepath.Join(testenv.TempDir(t), "a")}); !errors.Is(err, ErrDispatchUnavailable) {
 		t.Fatalf("no host = %v", err)
 	}
 	if got := peerErrorCode(ErrOpenProjectsDeclined); got != "open_projects.declined" {

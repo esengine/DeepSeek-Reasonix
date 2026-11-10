@@ -101,7 +101,7 @@ func TestANetworkedClientCannotTurnMessagesOn(t *testing.T) {
 
 func TestANetworkedClientCannotAllowAProjectThrough(t *testing.T) {
 	srv := standbyServer(t, false)
-	body := map[string]any{"release_projects": []string{t.TempDir()}}
+	body := map[string]any{"release_projects": []string{testenv.TempDir(t)}}
 	if status, raw := postSide(t, srv.URL+"/peers/settings", body); status != http.StatusForbidden {
 		t.Fatalf("allowing a project without the grant = %d %s", status, raw)
 	}

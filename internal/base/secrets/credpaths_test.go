@@ -5,11 +5,13 @@ import (
 	"path/filepath"
 	"slices"
 	"testing"
+
+	"reasonix/internal/base/testenv"
 )
 
 func credHome(t *testing.T, files ...string) string {
 	t.Helper()
-	home := t.TempDir()
+	home := testenv.TempDir(t)
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
 	for _, rel := range files {

@@ -7,15 +7,17 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"reasonix/internal/base/testenv"
 )
 
 func TestWindowsLiveSkillJunctions(t *testing.T) {
 	for _, outside := range []bool{false, true} {
 		t.Run(map[bool]string{false: "contained", true: "escaped"}[outside], func(t *testing.T) {
-			root := t.TempDir()
+			root := testenv.TempDir(t)
 			target := filepath.Join(root, "data")
 			if outside {
-				target = filepath.Join(t.TempDir(), "data")
+				target = filepath.Join(testenv.TempDir(t), "data")
 			}
 			if err := os.Mkdir(target, 0o700); err != nil {
 				t.Fatal(err)
@@ -27,7 +29,7 @@ func TestWindowsLiveSkillJunctions(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			linkedRoot := filepath.Join(t.TempDir(), "skill")
+			linkedRoot := filepath.Join(testenv.TempDir(t), "skill")
 			for link, source := range map[string]string{
 				filepath.Join(root, "references"): target,
 				linkedRoot:                        root,

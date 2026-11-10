@@ -7,6 +7,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"reasonix/internal/base/testenv"
 )
 
 func installedFixture(t *testing.T) (string, string) {
@@ -24,7 +26,7 @@ func installedFixture(t *testing.T) (string, string) {
 	}
 	t.Setenv("REASONIX_CUA_INSTALLED_APP", exe)
 	t.Setenv("REASONIX_CUA_INSTALLED_ID", identity)
-	log := filepath.Join(t.TempDir(), "requests.jsonl")
+	log := filepath.Join(testenv.TempDir(t), "requests.jsonl")
 	t.Setenv("REASONIX_CUA_REQUEST_LOG", log)
 	return identity, log
 }

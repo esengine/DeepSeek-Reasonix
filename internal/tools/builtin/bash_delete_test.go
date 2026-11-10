@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/contract/tool"
 	"reasonix/internal/safety/sandbox"
 )
@@ -23,8 +24,8 @@ func (r *deleteGateTerminal) RunCommand(context.Context, string, string, time.Du
 
 func TestBashDestructiveTargetGate(t *testing.T) {
 	t.Setenv("REASONIX_FILTER_SUBPROCESS_ENV", "")
-	root := t.TempDir()
-	outside := t.TempDir()
+	root := testenv.TempDir(t)
+	outside := testenv.TempDir(t)
 	cases := []struct {
 		command string
 		ps      bool
@@ -67,7 +68,7 @@ func TestBashDestructiveTargetGate(t *testing.T) {
 }
 
 func TestBashDeleteGateAllowsBoundedCleanup(t *testing.T) {
-	root := t.TempDir()
+	root := testenv.TempDir(t)
 	for _, ps := range []bool{false, true} {
 		sh := sandbox.Shell{Kind: sandbox.ShellBash, Path: "bash"}
 		command := `rm -rf child`
@@ -86,7 +87,7 @@ func TestBashDeleteGateAllowsBoundedCleanup(t *testing.T) {
 }
 
 func TestBashDeleteGateRejectsAlternateScopes(t *testing.T) {
-	root := t.TempDir()
+	root := testenv.TempDir(t)
 	for _, command := range []string{`command rm -rf "$target"`, `env rm -rf "$target"`, `Remove-Item -Recurse /outside`, `Remove-Item -Recurse \outside`} {
 		if command == `Remove-Item -Recurse \outside` && runtime.GOOS != "windows" {
 			continue
@@ -121,7 +122,7 @@ func TestPowerShellDeleteAnalysisPreservesUnicode(t *testing.T) {
 
 func TestBashDeleteGateRejectsNestedDirectoryChange(t *testing.T) {
 	terminal := &deleteGateTerminal{}
-	root := t.TempDir()
+	root := testenv.TempDir(t)
 	b := bash{shell: sandbox.Shell{Kind: sandbox.ShellBash, Path: "bash"}, workDir: root, sb: sandbox.Spec{WriteRoots: []string{root}}, terminal: terminal}
 	args, _ := json.Marshal(map[string]string{"command": `echo "$(cd ..; rm -rf child)"`})
 	_, err := b.ExecuteDetailed(t.Context(), args)
@@ -132,7 +133,7 @@ func TestBashDeleteGateRejectsNestedDirectoryChange(t *testing.T) {
 }
 
 func TestBashDeleteGateExpansionShapes(t *testing.T) {
-	root := t.TempDir()
+	root := testenv.TempDir(t)
 	cases := map[string]string{
 		`rm -rf {~,x}`: CodeDeleteNonliteral, `rm -rf "{~,x}"`: CodeDeleteNonliteral, `rm -rf {x,..}`: CodeDeleteNonliteral,
 		`rm -rf a=~`: CodeDeleteNonliteral, `rm -rf a=x:~`: CodeDeleteNonliteral, `rm -rf x/~`: CodeDeleteNonliteral,

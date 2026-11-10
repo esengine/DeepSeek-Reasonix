@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reasonix/internal/base/testenv"
 	"testing"
 
 	"reasonix/internal/contract/agentcomposition"
@@ -13,7 +14,7 @@ import (
 func TestMoveCannotDiscardACompositionBinding(t *testing.T) {
 	for _, started := range []bool{false, true} {
 		t.Run(map[bool]string{false: "blank", true: "started"}[started], func(t *testing.T) {
-			from, to := t.TempDir(), t.TempDir()
+			from, to := testenv.TempDir(t), testenv.TempDir(t)
 			src := filepath.Join(from, "20261018-000000-bound.jsonl")
 			d := agentcomposition.Builtins()[1]
 			binding := &agentcomposition.Binding{Version: agentcomposition.Version{Definition: d, Revision: agentcomposition.Revision(d)}, Resolved: d, Workspace: from}

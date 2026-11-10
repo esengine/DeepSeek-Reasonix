@@ -2,12 +2,13 @@ package pluginspec
 
 import (
 	"path/filepath"
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/contract/config"
 	"testing"
 )
 
 func TestCompositionPackagePathsRebaseWithoutMutatingSiblingSpecs(t *testing.T) {
-	root, private := t.TempDir(), t.TempDir()
+	root, private := testenv.TempDir(t), testenv.TempDir(t)
 	spec := FromEntry(config.PluginEntry{Name: "docs", Command: filepath.Join(root, "server"), Args: []string{"--config=" + filepath.Join(root, "config.json")}, Env: map[string]string{"ASSET": filepath.Join(root, "asset")}}, root, Options{})
 	before := spec
 	ApplySessionPackageRoot(&spec, map[string]SessionPackageRoot{"docs": {Retained: root, Private: private}})
@@ -20,8 +21,8 @@ func TestCompositionPackagePathsRebaseWithoutMutatingSiblingSpecs(t *testing.T) 
 }
 
 func TestCompositionSeparatesProcessStateAndSharesCredentialReference(t *testing.T) {
-	home := t.TempDir()
-	root := t.TempDir()
+	home := testenv.TempDir(t)
+	root := testenv.TempDir(t)
 	entry := config.PluginEntry{Name: "docs", Command: "docs-server"}
 	a := FromEntry(entry, root, Options{StateHome: home, ProcessScope: "session-a"})
 	b := FromEntry(entry, root, Options{StateHome: home, ProcessScope: "session-b"})

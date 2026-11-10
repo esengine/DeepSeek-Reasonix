@@ -9,6 +9,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"reasonix/internal/base/testenv"
 )
 
 const installMine = `{"items":[{"receipt":"FB-AAAA-0001","category":"bug","titleSnippet":"from here","status":"received","createdAt":"2026-10-01T08:00:00Z","updatedAt":"2026-10-01T08:00:00Z","replies":[]}]}`
@@ -56,7 +58,7 @@ func unionService(t *testing.T, linked bool, assertion string) (*Service, *union
 	k := &unionKernel{account: accountFixture}
 	srv := httptest.NewServer(k)
 	t.Cleanup(srv.Close)
-	cfg := Config{Home: t.TempDir(), Base: srv.URL, Backoff: []time.Duration{}}
+	cfg := Config{Home: testenv.TempDir(t), Base: srv.URL, Backoff: []time.Duration{}}
 	if assertion != "" {
 		cfg.Assert = func(context.Context) (string, error) { return assertion, nil }
 	}

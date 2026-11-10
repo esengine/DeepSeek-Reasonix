@@ -8,12 +8,14 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"reasonix/internal/base/testenv"
 )
 
 func TestAttachmentStreamCleansIncompleteFiles(t *testing.T) {
 	for _, kind := range []string{"empty", "read failure", "cancel"} {
 		t.Run(kind, func(t *testing.T) {
-			root := t.TempDir()
+			root := testenv.TempDir(t)
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 			var src io.Reader = strings.NewReader("")
@@ -37,7 +39,7 @@ type failedAttachmentReader struct {
 }
 
 func TestAttachmentStreamReadsLargeFilesInBoundedChunks(t *testing.T) {
-	root := t.TempDir()
+	root := testenv.TempDir(t)
 	const size = 32 << 20
 	reader := &boundedAttachmentReader{left: size}
 	ref, err := SaveAttachmentStreamInRoot(t.Context(), root, "large.apk", reader)

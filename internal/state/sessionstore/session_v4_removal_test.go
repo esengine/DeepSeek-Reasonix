@@ -3,6 +3,7 @@ package sessionstore
 import (
 	"os"
 	"path/filepath"
+	"reasonix/internal/base/testenv"
 	"testing"
 )
 
@@ -83,7 +84,7 @@ func TestV4RemovalDoesNotFollowMarkersOutsideSessionDirectory(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			_, _, dir := v4Project(t)
 			path := v4ImportPath(dir, v4TestID)
-			outside := filepath.Join(t.TempDir(), "outside.json")
+			outside := filepath.Join(testenv.TempDir(t), "outside.json")
 			if err := os.WriteFile(outside, []byte(`{"operation":"remove","createdAt":1}`), 0600); err != nil {
 				t.Fatal(err)
 			}

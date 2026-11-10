@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"reasonix/internal/base/testenv"
 )
 
 // A submission is judged by what admission did with it, never by whether a
@@ -61,7 +63,7 @@ func TestSubmitHTTPAdmissionRefusesWhatWillNeverRun(t *testing.T) {
 	t.Run("a dropped file path is refused like text", func(t *testing.T) {
 		c := New(Options{Runner: formatRecordingRunner{observed: make(chan observedTurnFormat, 1)}})
 		c.Close()
-		path := filepath.Join(t.TempDir(), "note.txt")
+		path := filepath.Join(testenv.TempDir(t), "note.txt")
 		if err := os.WriteFile(path, []byte("x"), 0o600); err != nil {
 			t.Fatal(err)
 		}

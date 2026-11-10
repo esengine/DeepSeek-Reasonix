@@ -58,7 +58,7 @@ func fixture(t *testing.T) (string, gitcmd.Repo) {
 }
 
 func TestStagedRefusesWithoutRepoOrChanges(t *testing.T) {
-	if _, err := Staged(context.Background(), gitcmd.Repo{Dir: t.TempDir()}); !errors.Is(err, ErrNoRepository) {
+	if _, err := Staged(context.Background(), gitcmd.Repo{Dir: testenv.TempDir(t)}); !errors.Is(err, ErrNoRepository) {
 		t.Fatalf("no repo: %v", err)
 	}
 	_, repo := fixture(t)

@@ -1,9 +1,13 @@
 package sessionstore
 
-import "testing"
+import (
+	"testing"
+
+	"reasonix/internal/base/testenv"
+)
 
 func TestManualRankIsKeptWithTheSessionAndListed(t *testing.T) {
-	dir := t.TempDir()
+	dir := testenv.TempDir(t)
 	a := writeIdleSession(t, dir, "a")
 	b := writeIdleSession(t, dir, "b")
 	if _, err := ListSessionOrder(dir); err != nil {

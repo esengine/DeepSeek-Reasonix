@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"runtime"
 	"testing"
+
+	"reasonix/internal/base/testenv"
 )
 
 func executableCatalogue(file string) nativeApplication {
@@ -18,7 +20,7 @@ func executableCatalogue(file string) nativeApplication {
 }
 
 func TestCUALaunchRejectsScriptsAndMissingExecutableBeforeDispatch(t *testing.T) {
-	file := filepath.Join(t.TempDir(), "installed.exe")
+	file := filepath.Join(testenv.TempDir(t), "installed.exe")
 	if err := os.WriteFile(file, []byte("#!/bin/sh\necho unsafe\n"), 0700); err != nil {
 		t.Fatal(err)
 	}
@@ -34,7 +36,7 @@ func TestCUALaunchRejectsScriptsAndMissingExecutableBeforeDispatch(t *testing.T)
 }
 
 func TestCUALaunchResolvesLinksBeforeCheckingForbiddenExecutable(t *testing.T) {
-	alias := filepath.Join(t.TempDir(), "approved.exe")
+	alias := filepath.Join(testenv.TempDir(t), "approved.exe")
 	target := "/bin/sh"
 	if runtime.GOOS == "windows" {
 		target = filepath.Join(os.Getenv("SystemRoot"), "System32", "cmd.exe")

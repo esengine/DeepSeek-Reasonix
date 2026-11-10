@@ -5,21 +5,22 @@ import (
 	"path/filepath"
 	"testing"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/ext/pluginpkg"
 )
 
 func TestCompositionExtensionRuntimeCopiesDoNotShareMutableFiles(t *testing.T) {
-	source := t.TempDir()
+	source := testenv.TempDir(t)
 	if err := os.WriteFile(filepath.Join(source, "entry"), []byte("original"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	p := pluginpkg.InstalledPackage{}
 	p.Package.Root = source
-	first, err := privateCompositionPackages(t.TempDir(), []pluginpkg.InstalledPackage{p})
+	first, err := privateCompositionPackages(testenv.TempDir(t), []pluginpkg.InstalledPackage{p})
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := privateCompositionPackages(t.TempDir(), []pluginpkg.InstalledPackage{p})
+	second, err := privateCompositionPackages(testenv.TempDir(t), []pluginpkg.InstalledPackage{p})
 	if err != nil {
 		t.Fatal(err)
 	}

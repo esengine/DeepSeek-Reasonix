@@ -5,6 +5,8 @@ import (
 	"errors"
 	"path/filepath"
 	"testing"
+
+	"reasonix/internal/base/testenv"
 )
 
 func fakeProbe(version string) func(context.Context, string, []string) (string, error) {
@@ -24,8 +26,8 @@ func TestStudioRunsItsOwnBinaryAsNodeAndChecksTheVersion(t *testing.T) {
 }
 
 func TestNodeOnPathIsUsedOnlyWhenAbsoluteOutsideTheProjectAndNewEnough(t *testing.T) {
-	root := t.TempDir()
-	good := filepath.Join(t.TempDir(), "node")
+	root := testenv.TempDir(t)
+	good := filepath.Join(testenv.TempDir(t), "node")
 	inside := filepath.Join(root, "bin", "node")
 	for name, tc := range map[string]struct {
 		path    string
@@ -59,12 +61,12 @@ func TestNodeOnPathIsUsedOnlyWhenAbsoluteOutsideTheProjectAndNewEnough(t *testin
 }
 
 func TestAProjectSymlinkToNodeDoesNotHideIt(t *testing.T) {
-	root := t.TempDir()
+	root := testenv.TempDir(t)
 	real := filepath.Join(root, "node")
 	if err := writeExecutable(real); err != nil {
 		t.Fatal(err)
 	}
-	link := filepath.Join(t.TempDir(), "node")
+	link := filepath.Join(testenv.TempDir(t), "node")
 	if err := symlink(real, link); err != nil {
 		t.Skip("no symlinks here:", err)
 	}

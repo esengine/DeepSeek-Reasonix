@@ -10,6 +10,7 @@ import (
 
 	"github.com/BurntSushi/toml"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/contract/config"
 )
 
@@ -71,7 +72,7 @@ func TestSceneImportBoundsNonFiniteLayerNumbers(t *testing.T) {
 	if _, err := toml.Decode(rendered, &decoded); err != nil {
 		t.Fatalf("rendered config does not parse: %v\n%s", err, rendered)
 	}
-	path := filepath.Join(t.TempDir(), "config.toml")
+	path := filepath.Join(testenv.TempDir(t), "config.toml")
 	if err := os.WriteFile(path, []byte(rendered), 0o600); err != nil {
 		t.Fatal(err)
 	}

@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/contract/event"
 	"reasonix/internal/state/checkpoint"
 	"reasonix/internal/state/sessionstore"
@@ -46,7 +47,7 @@ func TestContendedNoticeDoesNotWriteIntoTheCallersPaths(t *testing.T) {
 }
 
 func TestRepeatedResumeDoesNotInterruptAFreshObservation(t *testing.T) {
-	root, locks := t.TempDir(), t.TempDir()
+	root, locks := testenv.TempDir(t), testenv.TempDir(t)
 	owner, err := workspacelease.New(root, locks, nil)
 	if err != nil {
 		t.Fatal(err)

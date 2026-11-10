@@ -120,7 +120,7 @@ func TestScheduleRefusalsCarryTheirOwnCodes(t *testing.T) {
 			t.Errorf("%s = %d %s, want %s", name, status, raw, c.code)
 		}
 	}
-	gone := filepath.Join(t.TempDir(), "gone")
+	gone := filepath.Join(testenv.TempDir(t), "gone")
 	if err := os.MkdirAll(gone, 0o755); err != nil {
 		t.Fatal(err)
 	}

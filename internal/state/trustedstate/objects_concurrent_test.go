@@ -8,12 +8,14 @@ import (
 	"path/filepath"
 	"sync"
 	"testing"
+
+	"reasonix/internal/base/testenv"
 )
 
 func TestObjectConcurrentStoreHandles(t *testing.T) {
 	for _, durable := range []bool{false, true} {
 		t.Run(fmt.Sprintf("durable=%v", durable), func(t *testing.T) {
-			root := t.TempDir()
+			root := testenv.TempDir(t)
 			data := bytes.Repeat([]byte("shared object"), 1<<16)
 			start := make(chan struct{})
 			var wg sync.WaitGroup
@@ -48,7 +50,7 @@ func TestObjectConcurrentStoreHandles(t *testing.T) {
 }
 
 func TestObjectStoreHandlesRefuseTamperedWinner(t *testing.T) {
-	root := t.TempDir()
+	root := testenv.TempDir(t)
 	data := []byte("shared object")
 	path, _ := Open(root, nil).objectPath(DigestOf(data))
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {

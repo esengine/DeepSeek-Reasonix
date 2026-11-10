@@ -10,6 +10,8 @@ import (
 	"runtime"
 	"testing"
 	"time"
+
+	"reasonix/internal/base/testenv"
 )
 
 func TestCreateCancellationStopsCheckoutDescendantsAndAllowsRollback(t *testing.T) {
@@ -27,7 +29,7 @@ func TestCreateCancellationStopsCheckoutDescendantsAndAllowsRollback(t *testing.
 			t.Fatalf("git: %v %s", err, out)
 		}
 	}
-	fixture := t.TempDir()
+	fixture := testenv.TempDir(t)
 	started, survived := filepath.Join(fixture, "started"), filepath.Join(fixture, "survived")
 	script := filepath.Join(fixture, "smudge.sh")
 	if err := os.WriteFile(script, []byte("printf ready > \"$1\"\nsleep 3\nprintf survived > \"$2\"\ncat\n"), 0o600); err != nil {
@@ -47,7 +49,7 @@ func TestCreateCancellationStopsCheckoutDescendantsAndAllowsRollback(t *testing.
 		err    error
 	}
 	done := make(chan outcome, 1)
-	managedRoot := t.TempDir()
+	managedRoot := testenv.TempDir(t)
 	go func() {
 		result, err := CreateFromProgress(ctx, repo, managedRoot, "HEAD", nil)
 		done <- outcome{result, err}

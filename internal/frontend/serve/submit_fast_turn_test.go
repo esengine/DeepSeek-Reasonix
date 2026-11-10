@@ -44,7 +44,7 @@ func (s settlesWithinSubmit) SubmitHTTPFormat(input, format string) control.Admi
 func TestSubmitOfATurnThatEndsAtOnceIsAccepted(t *testing.T) {
 	got := make(chan string, 1)
 	bc := NewBroadcaster()
-	ctrl := control.New(control.Options{Runner: fakeRunner{got: got}, Sink: bc, WorkspaceRoot: t.TempDir()})
+	ctrl := control.New(control.Options{Runner: fakeRunner{got: got}, Sink: bc, WorkspaceRoot: testenv.TempDir(t)})
 	t.Cleanup(ctrl.Close)
 	srv := httptest.NewServer(operatorHandler(New(settlesWithinSubmit{SessionAPI: ctrl, t: t, got: got}, bc, config.ServeConfig{})))
 	defer srv.Close()
@@ -65,7 +65,7 @@ func TestSubmitOfATurnThatEndsAtOnceIsAccepted(t *testing.T) {
 // going on around it.
 func TestSubmitToAClosedControllerIsRefused(t *testing.T) {
 	bc := NewBroadcaster()
-	ctrl := control.New(control.Options{Runner: fakeRunner{got: make(chan string, 1)}, Sink: bc, WorkspaceRoot: t.TempDir()})
+	ctrl := control.New(control.Options{Runner: fakeRunner{got: make(chan string, 1)}, Sink: bc, WorkspaceRoot: testenv.TempDir(t)})
 	srv := httptest.NewServer(operatorHandler(New(ctrl, bc, config.ServeConfig{})))
 	defer srv.Close()
 	ctrl.Close()

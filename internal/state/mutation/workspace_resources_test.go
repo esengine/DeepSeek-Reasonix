@@ -6,10 +6,12 @@ import (
 	"path/filepath"
 	"sync/atomic"
 	"testing"
+
+	"reasonix/internal/base/testenv"
 )
 
 func TestOpaqueWorktreeWriteCoordinatesSharedMetadataOnlyDuringMutation(t *testing.T) {
-	root, linked, state := t.TempDir(), t.TempDir(), t.TempDir()
+	root, linked, state := testenv.TempDir(t), testenv.TempDir(t), testenv.TempDir(t)
 	common := filepath.Join(root, ".git")
 	owner := testCoordinator(t, root, state)
 	held, err := owner.Acquire(t.Context(), Intent{Effect: GitMetadata, Paths: []string{common}})
@@ -53,7 +55,7 @@ func TestOpaqueWorktreeWriteCoordinatesSharedMetadataOnlyDuringMutation(t *testi
 
 func TestContinuationRepeatsOpaqueResourceAdmission(t *testing.T) {
 	var changed atomic.Bool
-	c, err := New(t.TempDir(), t.TempDir(), nil, Options{AdmissionCheck: func(_ context.Context, i Intent) error {
+	c, err := New(testenv.TempDir(t), testenv.TempDir(t), nil, Options{AdmissionCheck: func(_ context.Context, i Intent) error {
 		if i.Effect == Workspace && changed.Load() {
 			return ErrInvalidIntent
 		}
@@ -82,7 +84,7 @@ func TestContinuationRepeatsOpaqueResourceAdmission(t *testing.T) {
 
 func TestContextAdmissionCancellationReleasesAllResources(t *testing.T) {
 	entered := make(chan struct{})
-	root, state := t.TempDir(), t.TempDir()
+	root, state := testenv.TempDir(t), testenv.TempDir(t)
 	c, err := New(root, state, nil, Options{AdmissionCheck: func(ctx context.Context, _ Intent) error {
 		close(entered)
 		<-ctx.Done()

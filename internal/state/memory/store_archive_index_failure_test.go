@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"reasonix/internal/base/testenv"
 )
 
 // failIndexPublishIn makes publishing MEMORY.md in dir fail, after the fact moved
@@ -48,7 +50,7 @@ func assertIndexesDescribeTheirFiles(t *testing.T, dir string) {
 }
 
 func TestArchiveReportsFailureWhenTheIndexCannotBePublished(t *testing.T) {
-	dir := t.TempDir()
+	dir := testenv.TempDir(t)
 	s := Store{Dir: dir}
 	if _, err := s.Save(Memory{Name: "alpha", Description: "goes away", Type: TypeProject, Body: "body"}); err != nil {
 		t.Fatal(err)
@@ -70,7 +72,7 @@ func TestArchiveReportsFailureWhenTheIndexCannotBePublished(t *testing.T) {
 // named it. Retrying by the stable id the tools are told to use must reconcile
 // that store instead of reporting success and repairing nothing.
 func TestArchiveByIDRepairsAnIndexLineLeftStale(t *testing.T) {
-	dir := t.TempDir()
+	dir := testenv.TempDir(t)
 	s := Store{Dir: dir}
 	if _, err := s.Save(Memory{Name: "alpha", Description: "goes away", Type: TypeProject, Body: "body"}); err != nil {
 		t.Fatal(err)
@@ -100,7 +102,7 @@ func TestArchiveByIDRepairsAnIndexLineLeftStale(t *testing.T) {
 // simply absent: reporting a path for it makes forget claim a deletion it did
 // not perform.
 func TestArchiveOfAHistoricNameWithoutAStaleLineReportsNothingArchived(t *testing.T) {
-	dir := t.TempDir()
+	dir := testenv.TempDir(t)
 	s := Store{Dir: dir}
 	if _, err := s.Save(Memory{Name: "alpha", Description: "old", Type: TypeProject, Body: "body"}); err != nil {
 		t.Fatal(err)
@@ -122,7 +124,7 @@ func TestArchiveOfAHistoricNameWithoutAStaleLineReportsNothingArchived(t *testin
 // archive and the index disagreeing; the operation must instead end either fully
 // archived or untouched.
 func TestArchiveLeavesNoHalfCommitWhenAnIndexReadFails(t *testing.T) {
-	dir := t.TempDir()
+	dir := testenv.TempDir(t)
 	s := Store{Dir: dir}
 	if _, err := s.Save(Memory{Name: "alpha", Description: "goes away", Type: TypeProject, Body: "body"}); err != nil {
 		t.Fatal(err)
@@ -161,7 +163,7 @@ func TestArchiveLeavesNoHalfCommitWhenAnIndexReadFails(t *testing.T) {
 // A repair that cannot write the index must surface that failure rather than
 // reporting that nothing needed repairing.
 func TestRepairArchivedRefSurfacesAFlushFailure(t *testing.T) {
-	dir := t.TempDir()
+	dir := testenv.TempDir(t)
 	s := Store{Dir: dir}
 	if _, err := s.Save(Memory{Name: "alpha", Description: "gone", Type: TypeProject, Body: "body"}); err != nil {
 		t.Fatal(err)
@@ -188,7 +190,7 @@ func TestRepairArchivedRefSurfacesAFlushFailure(t *testing.T) {
 // must not be reported as a repaired archive: several historical archives can
 // share a name, and only a stable id identifies the one that half-committed.
 func TestArchiveByLegacyNameDoesNotClaimAHistoricalArchive(t *testing.T) {
-	dir := t.TempDir()
+	dir := testenv.TempDir(t)
 	s := Store{Dir: dir}
 	if _, err := s.Save(Memory{Name: "alpha", Description: "gone", Type: TypeProject, Body: "body"}); err != nil {
 		t.Fatal(err)

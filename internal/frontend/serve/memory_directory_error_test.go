@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/session/control"
 	"reasonix/internal/state/memory"
 )
@@ -20,7 +21,7 @@ func TestMemoryEndpointsReportDirectoryReadFailure(t *testing.T) {
 			name = "history"
 		}
 		t.Run(name, func(t *testing.T) {
-			store := memory.Store{Dir: t.TempDir()}
+			store := memory.Store{Dir: testenv.TempDir(t)}
 			first, err := store.SaveWithOptions(memory.Memory{Name: "fact", Body: "v1"}, memory.SaveOptions{})
 			if err != nil {
 				t.Fatal(err)

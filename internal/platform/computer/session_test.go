@@ -18,6 +18,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"reasonix/internal/base/testenv"
 )
 
 var nativeDriver *Driver
@@ -208,7 +210,7 @@ func snapshotRef(t *testing.T, s *Session) string {
 }
 
 func TestARefusedApplicationIsRefusedBeforeTheHelperIsAsked(t *testing.T) {
-	s := NewSession(NewDriver(filepath.Join(t.TempDir(), "missing"), nil))
+	s := NewSession(NewDriver(filepath.Join(testenv.TempDir(t), "missing"), nil))
 	for _, app := range []string{"com.apple.Terminal", "io.reasonix.studio", " PWSH.exe ", "SystemSettings.exe"} {
 		if _, err := s.Act(t.Context(), app, []Step{{Action: "key", Key: "Enter"}}); CodeOf(err) != CodeAppRefused {
 			t.Fatalf("%s: %v", app, err)
@@ -254,7 +256,7 @@ func TestCUAExplicitWindowDoesNotSelectAnotherWindow(t *testing.T) {
 }
 
 func TestCUAClickUsesFittedCapturePixelsOnce(t *testing.T) {
-	log := filepath.Join(t.TempDir(), "requests.jsonl")
+	log := filepath.Join(testenv.TempDir(t), "requests.jsonl")
 	t.Setenv("REASONIX_CUA_REQUEST_LOG", log)
 	s := fakeSession(t)
 	_, _, err := s.Screenshot(t.Context(), "com.example.Notes")
@@ -414,7 +416,7 @@ func TestCUARefusesMissingOrDifferentDriver(t *testing.T) {
 		}
 	})
 	t.Run("missing binary", func(t *testing.T) {
-		h := NewDriver(filepath.Join(t.TempDir(), "missing"), nil)
+		h := NewDriver(filepath.Join(testenv.TempDir(t), "missing"), nil)
 		var r DriverResult
 		if err := h.Call(t.Context(), "list_apps", map[string]any{}, &r); CodeOf(err) != CodeUnavailable {
 			t.Fatal(err)
@@ -549,7 +551,7 @@ func TestCUARefusesCoordinatesOutsideFittedImage(t *testing.T) {
 }
 
 func TestCUAForegroundClickRetainsItsSeparateDeliveryMode(t *testing.T) {
-	log := filepath.Join(t.TempDir(), "requests.jsonl")
+	log := filepath.Join(testenv.TempDir(t), "requests.jsonl")
 	t.Setenv("REASONIX_CUA_REQUEST_LOG", log)
 	s := fakeSession(t)
 	_, _, err := s.Screenshot(t.Context(), "com.example.Notes")
@@ -602,7 +604,7 @@ func TestCUAForegroundGrantPredicateCoversMixedBatches(t *testing.T) {
 func TestCUAFailedInterruptionDisablesReconnect(t *testing.T) {
 	t.Setenv("REASONIX_CUA_SILENT", "type_text")
 	s := fakeSession(t)
-	s.driver.abortSocket = filepath.Join(t.TempDir(), "missing.sock")
+	s.driver.abortSocket = filepath.Join(testenv.TempDir(t), "missing.sock")
 	if _, err := s.Apps(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -649,7 +651,7 @@ func TestCUANativeDeliveryContractDoesNotEscalate(t *testing.T) {
 	} {
 		t.Run(tc.name+tc.mode, func(t *testing.T) {
 			t.Setenv("REASONIX_CUA_NO_DELIVERY_MODE", tc.name)
-			log := filepath.Join(t.TempDir(), "requests")
+			log := filepath.Join(testenv.TempDir(t), "requests")
 			t.Setenv("REASONIX_CUA_REQUEST_LOG", log)
 			session := fakeSession(t)
 			var result DriverResult

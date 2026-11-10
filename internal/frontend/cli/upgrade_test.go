@@ -626,7 +626,7 @@ func TestFetchBytesSizedRequiresExactReleaseAssetLength(t *testing.T) {
 
 func npmLayout(t *testing.T, pkgName string) string {
 	t.Helper()
-	pkg := filepath.Join(t.TempDir(), "node_modules", "@reasonix", "cli-win32-x64")
+	pkg := filepath.Join(testenv.TempDir(t), "node_modules", "@reasonix", "cli-win32-x64")
 	if err := os.MkdirAll(filepath.Join(pkg, "bin"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -643,7 +643,7 @@ func npmLayout(t *testing.T, pkgName string) string {
 
 func brewLayout(t *testing.T) (exe, link string) {
 	t.Helper()
-	root := t.TempDir()
+	root := testenv.TempDir(t)
 	dir := filepath.Join(root, "Caskroom", "reasonix", "2.31.0")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
@@ -710,13 +710,13 @@ func TestApplyCLIReleaseRefusesManagedInstallsWithoutTouchingThem(t *testing.T) 
 }
 
 func TestUpgradeStillReplacesUnmanagedBinaries(t *testing.T) {
-	plain := filepath.Join(t.TempDir(), "reasonix")
+	plain := filepath.Join(testenv.TempDir(t), "reasonix")
 	if err := os.WriteFile(plain, []byte("old"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	wrapper := npmLayout(t, "reasonix")
 	foreign := npmLayout(t, "some-other-package")
-	otherCask := filepath.Join(t.TempDir(), "Caskroom", "other", "1.0", "reasonix")
+	otherCask := filepath.Join(testenv.TempDir(t), "Caskroom", "other", "1.0", "reasonix")
 	for _, exe := range []string{plain, wrapper, foreign, otherCask} {
 		useExecutable(t, exe)
 		if err := checkSelfReplaceable(); err != nil {

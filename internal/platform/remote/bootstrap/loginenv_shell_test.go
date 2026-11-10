@@ -10,6 +10,7 @@ import (
 	"runtime"
 	"testing"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/platform/remote"
 	"reasonix/internal/platform/remote/sftpfs"
 )
@@ -52,7 +53,7 @@ false
 			continue
 		}
 		t.Run(sh.bin+sh.rc, func(t *testing.T) {
-			home := t.TempDir()
+			home := testenv.TempDir(t)
 			if err := os.WriteFile(filepath.Join(home, sh.rc), []byte(rc), 0o644); err != nil {
 				t.Fatal(err)
 			}

@@ -6,6 +6,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"reasonix/internal/base/testenv"
 )
 
 type fakeClock struct {
@@ -29,7 +31,7 @@ var epoch = time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
 
 func newTestStore(t *testing.T) (*Store, *fakeClock, string) {
 	t.Helper()
-	dir := filepath.Join(t.TempDir(), "schedules")
+	dir := filepath.Join(testenv.TempDir(t), "schedules")
 	clk := &fakeClock{t: epoch}
 	st, err := open(dir, clk.Now)
 	if err != nil {

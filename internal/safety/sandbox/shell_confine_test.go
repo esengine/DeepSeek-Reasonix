@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"reasonix/internal/base/testenv"
 )
 
 func confineHost(t *testing.T, confine func(string) bool, bashPath string) shellHost {
@@ -66,14 +68,14 @@ func TestAPinnedBashTheSandboxRefusesFallsBackToo(t *testing.T) {
 
 func TestBashConfineIsAbsentUnlessTheModeEnforces(t *testing.T) {
 	for _, mode := range []string{"", "off", "warn"} {
-		if BashConfine(mode, t.TempDir()) != nil {
+		if BashConfine(mode, testenv.TempDir(t)) != nil {
 			t.Errorf("mode %q asked the shell to start confined", mode)
 		}
 	}
 }
 
 func TestResolveAsksConfineOfEveryBashItProves(t *testing.T) {
-	bash := filepath.Join(t.TempDir(), "bash")
+	bash := filepath.Join(testenv.TempDir(t), "bash")
 	if err := os.WriteFile(bash, []byte("#!/bin/sh\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}

@@ -8,6 +8,8 @@ import (
 	"runtime"
 	"testing"
 	"time"
+
+	"reasonix/internal/base/testenv"
 )
 
 // The git locator is resolved before the launch is approved, and its
@@ -21,7 +23,7 @@ func TestGitLocatorRejectsNonURLRemotes(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not installed")
 	}
-	dir := t.TempDir()
+	dir := testenv.TempDir(t)
 	marker := filepath.Join(dir, "executed")
 	payload := filepath.Join(dir, "p.sh")
 	if err := os.WriteFile(payload, []byte("#!/bin/sh\necho ran >> '"+marker+"'\nexit 1\n"), 0o755); err != nil {

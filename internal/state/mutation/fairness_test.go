@@ -5,10 +5,12 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"reasonix/internal/base/testenv"
 )
 
 func TestOverlappingQueueIsFIFOAndDisjointWorkProceeds(t *testing.T) {
-	root, state := t.TempDir(), t.TempDir()
+	root, state := testenv.TempDir(t), testenv.TempDir(t)
 	coordinator := testCoordinator(t, root, state)
 	a, b, c := filepath.Join(root, "a"), filepath.Join(root, "b"), filepath.Join(root, "c")
 	held, err := coordinator.Acquire(t.Context(), intent(a))

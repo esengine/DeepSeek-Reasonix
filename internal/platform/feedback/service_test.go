@@ -27,6 +27,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"reasonix/internal/base/testenv"
 )
 
 type stub struct {
@@ -169,7 +171,7 @@ func setup(t *testing.T, st *stub) (*Service, *httptest.Server) {
 	t.Helper()
 	srv := httptest.NewServer(st.handler())
 	t.Cleanup(srv.Close)
-	svc, err := New(Config{Home: t.TempDir(), Base: srv.URL, HTTP: srv.Client(), Backoff: []time.Duration{}})
+	svc, err := New(Config{Home: testenv.TempDir(t), Base: srv.URL, HTTP: srv.Client(), Backoff: []time.Duration{}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -278,7 +280,7 @@ func TestRetryAfterAnUnansweredRequestReusesTheKey(t *testing.T) {
 	}}
 	srv := httptest.NewServer(st.handler())
 	defer srv.Close()
-	svc, _ := New(Config{Home: t.TempDir(), Base: srv.URL, HTTP: srv.Client(), Backoff: []time.Duration{time.Millisecond}})
+	svc, _ := New(Config{Home: testenv.TempDir(t), Base: srv.URL, HTTP: srv.Client(), Backoff: []time.Duration{time.Millisecond}})
 	if _, err := svc.Submit(context.Background(), draft()); err != nil {
 		t.Fatal(err)
 	}
@@ -367,7 +369,7 @@ func TestUnreachableServiceIsOfflineAndKeepsNothing(t *testing.T) {
 	srv := httptest.NewServer(http.NotFoundHandler())
 	base := srv.URL
 	srv.Close()
-	svc, _ := New(Config{Home: t.TempDir(), Base: base, Backoff: []time.Duration{}})
+	svc, _ := New(Config{Home: testenv.TempDir(t), Base: base, Backoff: []time.Duration{}})
 	_, err := svc.Submit(context.Background(), draft())
 	if !errors.Is(err, ErrOffline) {
 		t.Fatalf("err = %v", err)
@@ -652,7 +654,7 @@ func TestEnvCarriesNoSecretsAndNamesTheSurface(t *testing.T) {
 
 func TestBaseComesFromEnvironmentWhenUnset(t *testing.T) {
 	t.Setenv(baseEnv, "http://127.0.0.1:9/")
-	svc, err := New(Config{Home: t.TempDir(), HTTP: http.DefaultClient})
+	svc, err := New(Config{Home: testenv.TempDir(t), HTTP: http.DefaultClient})
 	if err != nil || svc.base != "http://127.0.0.1:9" {
 		t.Fatalf("base = %q %v", svc.base, err)
 	}
@@ -871,7 +873,7 @@ func TestTransientSubmitResponseRetryIsBounded(t *testing.T) {
 	} {
 		st := &stub{postFn: fn}
 		srv := httptest.NewServer(st.handler())
-		svc, _ := New(Config{Home: t.TempDir(), Base: srv.URL, HTTP: srv.Client(), Backoff: []time.Duration{time.Millisecond, time.Millisecond}})
+		svc, _ := New(Config{Home: testenv.TempDir(t), Base: srv.URL, HTTP: srv.Client(), Backoff: []time.Duration{time.Millisecond, time.Millisecond}})
 		_, _ = svc.Submit(context.Background(), draft())
 		srv.Close()
 		want := 1
@@ -912,17 +914,17 @@ func TestTheMetadataGateStopsWhatItCannotProveClean(t *testing.T) {
 
 func TestBaseURLPolicy(t *testing.T) {
 	for _, bad := range []string{"http://example.com", "ftp://x", "https://u:p@example.com", "example.com", "ftp://127.0.0.1:9"} {
-		if _, err := New(Config{Home: t.TempDir(), Base: bad, HTTP: http.DefaultClient}); err == nil {
+		if _, err := New(Config{Home: testenv.TempDir(t), Base: bad, HTTP: http.DefaultClient}); err == nil {
 			t.Errorf("base %q accepted", bad)
 		}
 	}
 	for _, ok := range []string{"https://example.com", "http://127.0.0.1:9", "http://localhost:9", "http://[::1]:9"} {
-		if _, err := New(Config{Home: t.TempDir(), Base: ok, HTTP: http.DefaultClient}); err != nil {
+		if _, err := New(Config{Home: testenv.TempDir(t), Base: ok, HTTP: http.DefaultClient}); err != nil {
 			t.Errorf("base %q refused: %v", ok, err)
 		}
 	}
 	t.Setenv(baseEnv, "http://evil.example.com")
-	svc, err := New(Config{Home: t.TempDir(), HTTP: http.DefaultClient})
+	svc, err := New(Config{Home: testenv.TempDir(t), HTTP: http.DefaultClient})
 	if err != nil || svc.base != defaultBase {
 		t.Fatalf("an insecure environment override was honoured: %q %v", svc.base, err)
 	}
@@ -936,7 +938,7 @@ func TestRedirectsAreNotFollowed(t *testing.T) {
 		http.Redirect(w, r, elsewhere.URL+"/v1/feedback", http.StatusTemporaryRedirect)
 	}))
 	defer moved.Close()
-	svc, err := New(Config{Home: t.TempDir(), Base: moved.URL, Backoff: []time.Duration{}})
+	svc, err := New(Config{Home: testenv.TempDir(t), Base: moved.URL, Backoff: []time.Duration{}})
 	if err != nil {
 		t.Fatal(err)
 	}

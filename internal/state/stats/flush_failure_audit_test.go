@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"reasonix/internal/base/testenv"
 )
 
 // TestAuditFlushReportsWriteFailure pins the contract Flush advertises: a caller
@@ -14,7 +16,7 @@ import (
 // stats directory path exists as a regular file, so every Append fails and
 // recordDispatcher.run discards the error that should reach Flush.
 func TestAuditFlushReportsWriteFailure(t *testing.T) {
-	parent := t.TempDir()
+	parent := testenv.TempDir(t)
 	notADir := filepath.Join(parent, "stats-is-a-file")
 	if err := os.WriteFile(notADir, []byte("occupied"), 0o600); err != nil {
 		t.Fatalf("setup: %v", err)

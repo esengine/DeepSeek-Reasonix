@@ -32,7 +32,7 @@ func (r *heldRunner) Run(_ context.Context, input string) error {
 
 func heldController(t *testing.T) (*Controller, *heldRunner) {
 	t.Helper()
-	t.Setenv("REASONIX_HOME", t.TempDir())
+	t.Setenv("REASONIX_HOME", testenv.TempDir(t))
 	dir := testenv.TempDir(t)
 	r := &heldRunner{started: make(chan string, 8), release: make(chan struct{}, 8)}
 	c := New(Options{Runner: r, Sink: event.Discard, SessionDir: dir, SessionPath: filepath.Join(dir, "session.jsonl")})
@@ -127,7 +127,7 @@ func TestAnExtensionPromptOverTheByteCeilingIsRefusedAndSpendsNoCount(t *testing
 }
 
 func TestAnExtensionReadsTheLastMessagesRedactedAndBounded(t *testing.T) {
-	t.Setenv("REASONIX_HOME", t.TempDir())
+	t.Setenv("REASONIX_HOME", testenv.TempDir(t))
 	dir := testenv.TempDir(t)
 	sess := sessionstore.NewSession("sys")
 	for i := range 30 {

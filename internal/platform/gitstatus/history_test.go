@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"reasonix/internal/base/testenv"
 )
 
 // A repository with a side branch that merges back: the shape a graph exists to
@@ -86,10 +88,10 @@ func TestHistoryIsBoundedAndSaysSo(t *testing.T) {
 }
 
 func TestHistoryOfAnEmptyOrUnversionedWorkspaceIsNotAnError(t *testing.T) {
-	if _, ok, err := History(context.Background(), opened(t, t.TempDir()), 10); ok || err != nil {
+	if _, ok, err := History(context.Background(), opened(t, testenv.TempDir(t)), 10); ok || err != nil {
 		t.Fatalf("not a repository: ok=%v err=%v, want a quiet false", ok, err)
 	}
-	empty := t.TempDir()
+	empty := testenv.TempDir(t)
 	git(t, empty, "init", "-q")
 	page, ok, err := History(context.Background(), opened(t, empty), 10)
 	if err != nil || !ok || len(page.Commits) != 0 {

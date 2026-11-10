@@ -308,7 +308,7 @@ func TestCompleteReportsTheQueryItFilteredOn(t *testing.T) {
 // project carries, and the reason this is read from the file rather than from a
 // list of names somebody guessed.
 func TestRefDirItemsSkipsIgnoredEntries(t *testing.T) {
-	root := t.TempDir()
+	root := testenv.TempDir(t)
 	mustMkdir(t, filepath.Join(root, ".git"))
 	mustWrite(t, filepath.Join(root, ".gitignore"), "node_modules/\ndist/\n")
 	for _, d := range []string{"node_modules", "dist", "internal"} {
@@ -335,7 +335,7 @@ func TestRefDirItemsSkipsIgnoredEntries(t *testing.T) {
 // Filtering the listing must not lock the directory away: a user who types the
 // path has said what they mean, the way grep searches a path named explicitly.
 func TestRefDirItemsStillDescendsIntoAnIgnoredDirectory(t *testing.T) {
-	root := t.TempDir()
+	root := testenv.TempDir(t)
 	mustMkdir(t, filepath.Join(root, ".git"))
 	mustWrite(t, filepath.Join(root, ".gitignore"), "node_modules/\n")
 	mustMkdir(t, filepath.Join(root, "node_modules", "left-pad"))

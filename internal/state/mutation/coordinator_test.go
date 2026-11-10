@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"reasonix/internal/base/testenv"
 )
 
 func testCoordinator(t *testing.T, root, state string) *Coordinator {
@@ -23,7 +25,7 @@ func intent(paths ...string) Intent {
 }
 
 func TestTransactionReleasesBeforeSessionEnds(t *testing.T) {
-	root, state := t.TempDir(), t.TempDir()
+	root, state := testenv.TempDir(t), testenv.TempDir(t)
 	a, b := testCoordinator(t, root, state), testCoordinator(t, root, state)
 	first, err := a.Acquire(t.Context(), intent(filepath.Join(root, "a")))
 	if err != nil {
@@ -54,17 +56,17 @@ func TestTransactionReleasesBeforeSessionEnds(t *testing.T) {
 }
 
 func TestDifferentWorkspacesCoordinateExtraPathAndHardlinks(t *testing.T) {
-	state, extra := t.TempDir(), filepath.Join(t.TempDir(), "shared")
+	state, extra := testenv.TempDir(t), filepath.Join(testenv.TempDir(t), "shared")
 	if err := os.WriteFile(extra, []byte("base"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	a, b := testCoordinator(t, t.TempDir(), state), testCoordinator(t, t.TempDir(), state)
+	a, b := testCoordinator(t, testenv.TempDir(t), state), testCoordinator(t, testenv.TempDir(t), state)
 	lease, err := a.Acquire(t.Context(), intent(extra))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer lease.End(NotExecuted)
-	alias := filepath.Join(t.TempDir(), "alias")
+	alias := filepath.Join(testenv.TempDir(t), "alias")
 	if err := os.Link(extra, alias); err != nil {
 		t.Skipf("hardlinks unavailable: %v", err)
 	}
@@ -79,7 +81,7 @@ func TestDifferentWorkspacesCoordinateExtraPathAndHardlinks(t *testing.T) {
 }
 
 func TestQueuedSetDoesNotHoldPartialResources(t *testing.T) {
-	root, state := t.TempDir(), t.TempDir()
+	root, state := testenv.TempDir(t), testenv.TempDir(t)
 	c := testCoordinator(t, root, state)
 	a, b := filepath.Join(root, "a"), filepath.Join(root, "b")
 	first, err := c.Acquire(t.Context(), intent(a))
@@ -118,7 +120,7 @@ func TestQueuedSetDoesNotHoldPartialResources(t *testing.T) {
 }
 
 func TestExplicitEffectsAndContentPreconditions(t *testing.T) {
-	root, state := t.TempDir(), t.TempDir()
+	root, state := testenv.TempDir(t), testenv.TempDir(t)
 	c := testCoordinator(t, root, state)
 	if _, err := c.Acquire(t.Context(), intent()); !errors.Is(err, ErrInvalidIntent) {
 		t.Fatalf("empty named set: %v", err)
@@ -147,7 +149,7 @@ func TestExplicitEffectsAndContentPreconditions(t *testing.T) {
 }
 
 func TestNestedTransactionCannotWidenOrReleaseParent(t *testing.T) {
-	root, state := t.TempDir(), t.TempDir()
+	root, state := testenv.TempDir(t), testenv.TempDir(t)
 	c := testCoordinator(t, root, state)
 	path := filepath.Join(root, "a")
 	parent, err := c.Acquire(t.Context(), intent(path))

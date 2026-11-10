@@ -5,12 +5,13 @@ import (
 	"path/filepath"
 	"testing"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/state/store"
 )
 
 func sessionPath(t *testing.T) string {
 	t.Helper()
-	return filepath.Join(t.TempDir(), "session.jsonl")
+	return filepath.Join(testenv.TempDir(t), "session.jsonl")
 }
 
 // TestOpeningSurvivesWithoutTheTurn is the whole point of the file: a turn is

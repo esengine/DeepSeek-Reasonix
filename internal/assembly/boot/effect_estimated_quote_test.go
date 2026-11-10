@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/contract/event"
 	"reasonix/internal/contract/pricing"
 	"reasonix/internal/session/control"
@@ -17,7 +18,7 @@ import (
 func TestEffectEstimatedUsageQuoteAfterStreamRecovery(t *testing.T) {
 	for _, interrupted := range []bool{false, true} {
 		t.Run(map[bool]string{false: "reported_control", true: "interrupted"}[interrupted], func(t *testing.T) {
-			home, root := statedBootHome(t), t.TempDir()
+			home, root := statedBootHome(t), testenv.TempDir(t)
 			writeFile(t, root, "fixture.txt", "fixture content")
 			var calls atomic.Int32
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

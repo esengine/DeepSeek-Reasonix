@@ -5,11 +5,12 @@ import (
 	"path/filepath"
 	"testing"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/contract/agentcomposition"
 )
 
 func TestProjectLaunchOverridesCannotReuseAnOldTrustedBinding(t *testing.T) {
-	store := New(t.TempDir(), t.TempDir())
+	store := New(testenv.TempDir(t), testenv.TempDir(t))
 	d := agentcomposition.Builtins()[0]
 	d.ID = "project:legacy-launch"
 	d.MCP = agentcomposition.Selection{Mode: agentcomposition.Select, Members: []agentcomposition.Module{{ID: "authorized", Parameters: []byte(`{"args":["other-package"]}`)}}}

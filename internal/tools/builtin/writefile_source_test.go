@@ -6,10 +6,12 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"reasonix/internal/base/testenv"
 )
 
 func TestTargetAccessLeavesAWriteBelowAFileToTheTool(t *testing.T) {
-	dir := t.TempDir()
+	dir := testenv.TempDir(t)
 	if err := os.WriteFile(filepath.Join(dir, "Program.cs"), []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}

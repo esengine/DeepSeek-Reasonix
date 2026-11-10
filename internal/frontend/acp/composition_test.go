@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/contract/agentcomposition"
 	"reasonix/internal/contract/event"
 	"reasonix/internal/contract/provider"
@@ -44,7 +45,7 @@ func (f *compositionFactory) NewSession(_ context.Context, p SessionParams) (*co
 }
 
 func TestCompositionACPNewIsUnboundAndLocksOnlyItsIndependentSelector(t *testing.T) {
-	home, root := t.TempDir(), t.TempDir()
+	home, root := testenv.TempDir(t), testenv.TempDir(t)
 	t.Setenv("REASONIX_HOME", home)
 	f := &compositionFactory{home: home}
 	svc := &service{factory: f, sessions: map[string]*acpSession{}}
@@ -78,7 +79,7 @@ func TestCompositionACPNewIsUnboundAndLocksOnlyItsIndependentSelector(t *testing
 }
 
 func TestCompositionACPRestorePinsBindingAndKeepsUnavailableHistoryReadable(t *testing.T) {
-	home, root, dir := t.TempDir(), t.TempDir(), t.TempDir()
+	home, root, dir := testenv.TempDir(t), testenv.TempDir(t), testenv.TempDir(t)
 	t.Setenv("REASONIX_HOME", home)
 	f := &compositionFactory{home: home, dir: dir}
 	svc := &service{factory: f, sessions: map[string]*acpSession{}}

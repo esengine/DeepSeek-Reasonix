@@ -9,6 +9,8 @@ import (
 	"testing"
 	"testing/synctest"
 	"time"
+
+	"reasonix/internal/base/testenv"
 )
 
 func assertRootWaitClosed(t *testing.T, done <-chan struct{}) {
@@ -177,7 +179,7 @@ func TestRootWaitDoesNotRegisterBeforeStartOrForUntrackedCommands(t *testing.T) 
 				cancel()
 			}
 			if scenario == "missing_executable" {
-				cmd.Path = t.TempDir() + string(os.PathSeparator) + "missing"
+				cmd.Path = testenv.TempDir(t) + string(os.PathSeparator) + "missing"
 			}
 			tracked, err := RunCommand(ctx, cmd, RunOptions{Track: scenario != "untracked"})
 			if scenario != "untracked" && err == nil {

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reasonix/internal/base/testenv"
 	"strings"
 	"testing"
 
@@ -40,7 +41,7 @@ func movableSession(t *testing.T, dir string) string {
 }
 
 func TestMoveSessionCarriesTheConversationAndNoAuthorization(t *testing.T) {
-	from, to := t.TempDir(), t.TempDir()
+	from, to := testenv.TempDir(t), testenv.TempDir(t)
 	src := movableSession(t, from)
 
 	dst, err := MoveSession(src, to, "/new/project")
@@ -73,7 +74,7 @@ func TestMoveSessionCarriesTheConversationAndNoAuthorization(t *testing.T) {
 }
 
 func TestMoveSessionLeavesNothingBehindAtTheSource(t *testing.T) {
-	from, to := t.TempDir(), t.TempDir()
+	from, to := testenv.TempDir(t), testenv.TempDir(t)
 	src := movableSession(t, from)
 	if _, err := MoveSession(src, to, "/new/project"); err != nil {
 		t.Fatal(err)
@@ -87,7 +88,7 @@ func TestMoveSessionLeavesNothingBehindAtTheSource(t *testing.T) {
 }
 
 func TestMoveSessionRemovesCheckpointsJobsAndInboxAndMovesNone(t *testing.T) {
-	from, to := t.TempDir(), t.TempDir()
+	from, to := testenv.TempDir(t), testenv.TempDir(t)
 	src := movableSession(t, from)
 	dirs := []string{store.SessionCheckpointDir(src), store.SessionJobsDir(src), store.SessionInboxDir(src)}
 	dst, err := MoveSession(src, to, "/new/project")
@@ -107,7 +108,7 @@ func TestMoveSessionRemovesCheckpointsJobsAndInboxAndMovesNone(t *testing.T) {
 }
 
 func TestMoveSessionRefusesASessionSomeoneHolds(t *testing.T) {
-	from, to := t.TempDir(), t.TempDir()
+	from, to := testenv.TempDir(t), testenv.TempDir(t)
 	src := movableSession(t, from)
 	lease, err := TryAcquireSessionLease(src)
 	if err != nil {
@@ -129,12 +130,12 @@ func TestMoveSessionRefusesASessionSomeoneHolds(t *testing.T) {
 }
 
 func TestMoveSessionRefusesTheSameFolderAndAMissingSource(t *testing.T) {
-	dir := t.TempDir()
+	dir := testenv.TempDir(t)
 	src := movableSession(t, dir)
 	if _, err := MoveSession(src, dir, "/old/project"); !errors.Is(err, ErrSameFolder) {
 		t.Fatalf("moving into its own folder is %v, want ErrSameFolder", err)
 	}
-	if _, err := MoveSession(filepath.Join(dir, "nope.jsonl"), t.TempDir(), "/x"); err == nil {
+	if _, err := MoveSession(filepath.Join(dir, "nope.jsonl"), testenv.TempDir(t), "/x"); err == nil {
 		t.Fatal("a missing source cannot be moved")
 	}
 }

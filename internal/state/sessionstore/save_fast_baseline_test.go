@@ -3,6 +3,7 @@ package sessionstore
 import (
 	"fmt"
 	"path/filepath"
+	"reasonix/internal/base/testenv"
 	"runtime"
 	"strings"
 	"testing"
@@ -39,7 +40,7 @@ func TestSavingOneMoreMessageDoesNotReplayTheLog(t *testing.T) {
 	if raceDetector {
 		t.Skip("allocation counts are not comparable under the race detector")
 	}
-	path := filepath.Join(t.TempDir(), "s.jsonl")
+	path := filepath.Join(testenv.TempDir(t), "s.jsonl")
 	s := seededSession(t, path, 2000)
 	if err := s.Save(path); err != nil {
 		t.Fatal(err)
@@ -60,7 +61,7 @@ func TestSavingOneMoreMessageDoesNotReplayTheLog(t *testing.T) {
 }
 
 func TestSavingAfterAnotherRuntimeWroteStillSeesIt(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "s.jsonl")
+	path := filepath.Join(testenv.TempDir(t), "s.jsonl")
 	a := seededSession(t, path, 40)
 	b, err := LoadSession(path)
 	if err != nil {
@@ -91,7 +92,7 @@ func TestSavingAfterAnotherRuntimeWroteStillSeesIt(t *testing.T) {
 // Switching away from a session that was opened and never touched saves it
 // once more; that snapshot has nothing to write and must not read the log back.
 func TestSnapshotOfAnUntouchedLoadedSessionReadsNothing(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "s.jsonl")
+	path := filepath.Join(testenv.TempDir(t), "s.jsonl")
 	seededSession(t, path, 2000)
 	loaded, err := LoadSession(path)
 	if err != nil {
@@ -114,7 +115,7 @@ func TestSnapshotOfAnUntouchedLoadedSessionReadsNothing(t *testing.T) {
 // A ledger that does not describe the transcript on disk is what an interrupted
 // save leaves behind; the first save after a load is what heals it.
 func TestSnapshotAfterLoadStillHealsALedgerThatDisagreesWithTheTranscript(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "s.jsonl")
+	path := filepath.Join(testenv.TempDir(t), "s.jsonl")
 	seededSession(t, path, 40)
 	if err := UpdateBranchMeta(path, false, func(m *BranchMeta) error {
 		m.ContentDigest = "stale"

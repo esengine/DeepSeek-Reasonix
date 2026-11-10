@@ -13,6 +13,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"reasonix/internal/base/testenv"
 )
 
 const listBody = `{"packages":[{"slug":"a/kit","status":"active","name":"kit"}],"limit":24,"offset":0}`
@@ -71,7 +73,7 @@ func freezeClock(t *testing.T) *time.Time {
 
 func TestFirstReadWithNoCacheAndNoRegistryIsUnreachable(t *testing.T) {
 	stub := newStub(t, okList)
-	c := stub.client(t.TempDir())
+	c := stub.client(testenv.TempDir(t))
 	stub.srv.Close()
 	page, err := c.List(context.Background(), Query{})
 	if !errors.Is(err, ErrUnreachable) || page.Cache != nil {
@@ -82,7 +84,7 @@ func TestFirstReadWithNoCacheAndNoRegistryIsUnreachable(t *testing.T) {
 func TestListFallsBackToTheLastGoodCopyAndSaysSo(t *testing.T) {
 	now := freezeClock(t)
 	stub := newStub(t, okList)
-	c := stub.client(t.TempDir())
+	c := stub.client(testenv.TempDir(t))
 	first, err := c.List(context.Background(), Query{})
 	if err != nil || first.Cache != nil {
 		t.Fatalf("first = %+v err = %v", first, err)
@@ -115,7 +117,7 @@ func TestServerErrorsAndUnreadableAnswersFallBackToo(t *testing.T) {
 				}
 				okList(w, r)
 			})
-			c := stub.client(t.TempDir())
+			c := stub.client(testenv.TempDir(t))
 			if _, err := c.List(context.Background(), Query{}); err != nil {
 				t.Fatal(err)
 			}
@@ -137,7 +139,7 @@ func TestClientErrorsAreNotMaskedByTheCache(t *testing.T) {
 		}
 		okList(w, r)
 	})
-	c := stub.client(t.TempDir())
+	c := stub.client(testenv.TempDir(t))
 	if _, err := c.List(context.Background(), Query{}); err != nil {
 		t.Fatal(err)
 	}
@@ -158,7 +160,7 @@ func TestNotModifiedServesTheStoredBodyWithoutANote(t *testing.T) {
 		w.Header().Set("Last-Modified", "Mon, 05 Oct 2026 00:00:00 GMT")
 		okList(w, r)
 	})
-	dir := t.TempDir()
+	dir := testenv.TempDir(t)
 	c := stub.client(dir)
 	if _, err := c.List(context.Background(), Query{}); err != nil {
 		t.Fatal(err)
@@ -190,7 +192,7 @@ func listQuery(q Query) url.Values {
 func TestACopyOlderThanTheLimitIsNotServed(t *testing.T) {
 	now := freezeClock(t)
 	stub := newStub(t, okList)
-	c := stub.client(t.TempDir())
+	c := stub.client(testenv.TempDir(t))
 	if _, err := c.List(context.Background(), Query{}); err != nil {
 		t.Fatal(err)
 	}
@@ -204,7 +206,7 @@ func TestACopyOlderThanTheLimitIsNotServed(t *testing.T) {
 func TestCorruptFilesAreIgnored(t *testing.T) {
 	freezeClock(t)
 	stub := newStub(t, okList)
-	dir := t.TempDir()
+	dir := testenv.TempDir(t)
 	c := stub.client(dir)
 	if _, err := c.List(context.Background(), Query{}); err != nil {
 		t.Fatal(err)
@@ -234,7 +236,7 @@ func TestQueriesDoNotShareACopy(t *testing.T) {
 	stub := newStub(t, func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(`{"packages":[{"slug":"a/` + r.URL.Query().Get("q") + `","status":"active"}],"limit":24}`))
 	})
-	c := stub.client(t.TempDir())
+	c := stub.client(testenv.TempDir(t))
 	for _, q := range []string{"alpha", "beta"} {
 		if _, err := c.List(context.Background(), Query{Q: q}); err != nil {
 			t.Fatal(err)
@@ -265,7 +267,7 @@ func TestDetailIsCachedPerPackage(t *testing.T) {
 		name := strings.TrimPrefix(r.URL.Path, "/v1/packages/a/")
 		_, _ = w.Write([]byte(`{"package":{"slug":"a/` + name + `","status":"active","latestVersion":"1"},"versions":[{"version":"1","source":"s","content_hash":"sha256:ab"}]}`))
 	})
-	c := stub.client(t.TempDir())
+	c := stub.client(testenv.TempDir(t))
 	if _, err := c.Detail(context.Background(), "a/one"); err != nil {
 		t.Fatal(err)
 	}
@@ -288,7 +290,7 @@ func TestAGoneEntryDropsItsCopy(t *testing.T) {
 		}
 		okList(w, r)
 	})
-	dir := t.TempDir()
+	dir := testenv.TempDir(t)
 	c := stub.client(dir)
 	_, _ = c.List(context.Background(), Query{})
 	gone.Store(true)
@@ -302,7 +304,7 @@ func TestAGoneEntryDropsItsCopy(t *testing.T) {
 
 func TestACancelledRequestIsNotAnsweredFromTheCache(t *testing.T) {
 	stub := newStub(t, okList)
-	c := stub.client(t.TempDir())
+	c := stub.client(testenv.TempDir(t))
 	_, _ = c.List(context.Background(), Query{})
 	stub.srv.Close()
 	ctx, cancel := context.WithCancel(context.Background())
@@ -314,7 +316,7 @@ func TestACancelledRequestIsNotAnsweredFromTheCache(t *testing.T) {
 
 func TestACopySurvivesARestart(t *testing.T) {
 	stub := newStub(t, okList)
-	dir := t.TempDir()
+	dir := testenv.TempDir(t)
 	if _, err := stub.client(dir).List(context.Background(), Query{}); err != nil {
 		t.Fatal(err)
 	}
@@ -329,7 +331,7 @@ func TestOwnAndTokenRequestsNeverTouchTheCache(t *testing.T) {
 	stub := newStub(t, func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(`{"package":{"slug":"a/kit","status":"pending"},"versions":[]}`))
 	})
-	dir := t.TempDir()
+	dir := testenv.TempDir(t)
 	c := stub.client(dir)
 	if _, err := c.Owned(context.Background(), "secret-token", "a/kit"); err != nil {
 		t.Fatal(err)
@@ -353,7 +355,7 @@ func TestOwnAndTokenRequestsNeverTouchTheCache(t *testing.T) {
 
 func TestConcurrentReadersAndWritersAgree(t *testing.T) {
 	stub := newStub(t, okList)
-	c := stub.client(t.TempDir())
+	c := stub.client(testenv.TempDir(t))
 	var wg sync.WaitGroup
 	for i := range 16 {
 		wg.Go(func() {
@@ -371,7 +373,7 @@ func TestConcurrentReadersAndWritersAgree(t *testing.T) {
 func TestTheCacheStaysWithinItsLimits(t *testing.T) {
 	now := freezeClock(t)
 	stub := newStub(t, okList)
-	dir := t.TempDir()
+	dir := testenv.TempDir(t)
 	c := stub.client(dir)
 	c.cache.maxEntries = 3
 	for i, q := range []string{"a", "b", "c", "d", "e"} {
@@ -412,7 +414,7 @@ func TestTheCacheStaysWithinItsLimits(t *testing.T) {
 func TestExpiredFilesArePrunedAndForeignFilesLeftAlone(t *testing.T) {
 	freezeClock(t)
 	stub := newStub(t, okList)
-	dir := t.TempDir()
+	dir := testenv.TempDir(t)
 	c := stub.client(dir)
 	if _, err := c.List(context.Background(), Query{Q: "a"}); err != nil {
 		t.Fatal(err)
@@ -436,7 +438,7 @@ func TestExpiredFilesArePrunedAndForeignFilesLeftAlone(t *testing.T) {
 
 func TestFileNamesAreSafeOnEveryPlatform(t *testing.T) {
 	stub := newStub(t, okList)
-	dir := t.TempDir()
+	dir := testenv.TempDir(t)
 	c := stub.client(dir)
 	for _, q := range []string{`../../x`, `a:b*c?"<>|`, "日本語 検索", strings.Repeat("长", 300)} {
 		if _, err := c.List(context.Background(), Query{Q: q}); err != nil {
@@ -455,7 +457,7 @@ func TestFileNamesAreSafeOnEveryPlatform(t *testing.T) {
 
 func TestAnUnwritableCacheNeverBreaksARead(t *testing.T) {
 	stub := newStub(t, okList)
-	root := filepath.Join(t.TempDir(), "file")
+	root := filepath.Join(testenv.TempDir(t), "file")
 	if err := os.WriteFile(root, []byte("x"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -478,7 +480,7 @@ func TestNoRootMeansNoCache(t *testing.T) {
 }
 
 func TestTheKeyIgnoresParameterOrderAndSeparatesHosts(t *testing.T) {
-	d := newDiskCache(t.TempDir())
+	d := newDiskCache(testenv.TempDir(t))
 	a := url.Values{"limit": {"24"}, "q": {"x"}}
 	b := url.Values{}
 	b.Set("q", "x")
@@ -491,7 +493,7 @@ func TestTheKeyIgnoresParameterOrderAndSeparatesHosts(t *testing.T) {
 func TestAFreshCopyIsServedWithoutTheNetworkAndWithoutALabel(t *testing.T) {
 	now := freezeClock(t)
 	stub := newStub(t, okList)
-	c := stub.freshClient(t.TempDir())
+	c := stub.freshClient(testenv.TempDir(t))
 	if _, err := c.List(context.Background(), Query{}); err != nil {
 		t.Fatal(err)
 	}
@@ -513,7 +515,7 @@ func TestPastTheFreshWindowTheRegistryIsAskedWithValidators(t *testing.T) {
 		w.Header().Set("ETag", `W/"a"`)
 		okList(w, r)
 	})
-	c := stub.freshClient(t.TempDir())
+	c := stub.freshClient(testenv.TempDir(t))
 	_, _ = c.List(context.Background(), Query{})
 	*now = now.Add(cacheFreshFor + time.Second)
 	page, err := c.List(context.Background(), Query{})
@@ -532,7 +534,7 @@ func TestARepeatedReadSkipsTheFreshWindow(t *testing.T) {
 		}
 		okList(w, r)
 	})
-	c := stub.freshClient(t.TempDir())
+	c := stub.freshClient(testenv.TempDir(t))
 	_, _ = c.List(context.Background(), Query{})
 	down.Store(true)
 	page, err := c.List(WithRefresh(context.Background()), Query{})
@@ -549,7 +551,7 @@ func TestAnswersMarkedPrivateOrNoStoreAreNotKept(t *testing.T) {
 			w.Header().Set("Cache-Control", mark.Load().(string))
 			okList(w, r)
 		})
-		dir := t.TempDir()
+		dir := testenv.TempDir(t)
 		c := stub.client(dir)
 		if _, err := c.List(context.Background(), Query{}); err != nil || len(cacheFiles(t, dir)) != 1 {
 			t.Fatalf("a public answer must be kept: %v", err)

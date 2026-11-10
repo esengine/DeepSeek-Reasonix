@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"reasonix/internal/base/testenv"
 )
 
 func withFakeIO(t *testing.T, w func(string, []byte, os.FileMode) error, r func(string) ([]byte, error)) {
@@ -38,7 +40,7 @@ func TestRestoreSourceFailsWhenTheBytesDoNotComeBack(t *testing.T) {
 
 // The real filesystem is the other witness: writing over a directory fails.
 func TestRestoreSourceFailsOnARealWriteError(t *testing.T) {
-	if err := restoreSource(t.TempDir(), []byte("original")); err == nil {
+	if err := restoreSource(testenv.TempDir(t), []byte("original")); err == nil {
 		t.Fatal("restoring onto a directory reported success")
 	}
 }
@@ -47,7 +49,7 @@ func TestTreeMatchesSeesADirtyTree(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git unavailable")
 	}
-	repo := t.TempDir()
+	repo := testenv.TempDir(t)
 	git := func(args ...string) {
 		t.Helper()
 		cmd := exec.Command("git", args...)
@@ -88,7 +90,7 @@ func TestRunMutationFailsWhenTheRestoreFails(t *testing.T) {
 	if _, err := exec.LookPath("go"); err != nil {
 		t.Skip("go unavailable")
 	}
-	repo := t.TempDir()
+	repo := testenv.TempDir(t)
 	git := func(args ...string) string {
 		t.Helper()
 		cmd := exec.Command("git", args...)
@@ -150,7 +152,7 @@ func TestDifferentialPerTestFailsWhenRestoreFails(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git unavailable")
 	}
-	repo := t.TempDir()
+	repo := testenv.TempDir(t)
 	git := func(args ...string) string {
 		t.Helper()
 		cmd := exec.Command("git", args...)
@@ -197,7 +199,7 @@ func TestDifferentialPerTestFailsWhenRestoreFails(t *testing.T) {
 // tree must not be left on base just because the failure happened early. The
 // defer that restores is registered before the check for exactly this path.
 func TestDifferentialPerTestRestoresWhenTheBaseCheckFails(t *testing.T) {
-	repo := t.TempDir()
+	repo := testenv.TempDir(t)
 	run := func(args ...string) {
 		t.Helper()
 		cmd := exec.Command("git", append([]string{"-C", repo}, args...)...)

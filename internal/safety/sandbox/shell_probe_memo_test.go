@@ -6,10 +6,12 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"reasonix/internal/base/testenv"
 )
 
 func TestProbeBashMemoLaunchesAProvenExecutableOnce(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "bash.exe")
+	path := filepath.Join(testenv.TempDir(t), "bash.exe")
 	if err := os.WriteFile(path, []byte("one"), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -26,7 +28,7 @@ func TestProbeBashMemoLaunchesAProvenExecutableOnce(t *testing.T) {
 }
 
 func TestProbeBashMemoReprobesAChangedExecutable(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "bash.exe")
+	path := filepath.Join(testenv.TempDir(t), "bash.exe")
 	if err := os.WriteFile(path, []byte("one"), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -51,7 +53,7 @@ func TestProbeBashMemoReprobesAChangedExecutable(t *testing.T) {
 }
 
 func TestProbeBashMemoNeverKeepsAFailure(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "bash.exe")
+	path := filepath.Join(testenv.TempDir(t), "bash.exe")
 	if err := os.WriteFile(path, []byte("stub"), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -73,7 +75,7 @@ func TestProbeBashMemoNeverKeepsAFailure(t *testing.T) {
 func TestProbeBashMemoUnreadablePathIsProbedEveryTime(t *testing.T) {
 	launches := 0
 	run := func(string) bool { launches++; return false }
-	missing := filepath.Join(t.TempDir(), "absent")
+	missing := filepath.Join(testenv.TempDir(t), "absent")
 	probeBashMemo(missing, run)
 	probeBashMemo(missing, run)
 	if launches != 2 {
@@ -82,7 +84,7 @@ func TestProbeBashMemoUnreadablePathIsProbedEveryTime(t *testing.T) {
 }
 
 func TestProbeBashMemoConcurrentCalls(t *testing.T) {
-	dir := t.TempDir()
+	dir := testenv.TempDir(t)
 	good, bad := filepath.Join(dir, "good.exe"), filepath.Join(dir, "bad.exe")
 	for _, p := range []string{good, bad} {
 		if err := os.WriteFile(p, []byte("x"), 0o700); err != nil {

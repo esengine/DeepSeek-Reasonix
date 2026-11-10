@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"reasonix/internal/base/testenv"
 )
 
 // failIndexPublishOnce makes the next MEMORY.md publication in dir fail, then
@@ -33,7 +35,7 @@ func activeFactsNamed(t *testing.T, store Store, name string) []Memory {
 // A failed save must not advance what the store reports, so retrying the same
 // intent lands where it would have landed had the index been writable.
 func TestStoreV2CreateRetryAfterIndexFailureLandsOnce(t *testing.T) {
-	dir := t.TempDir()
+	dir := testenv.TempDir(t)
 	store := Store{Dir: dir}
 	failIndexPublishOnce(t, dir)
 
@@ -69,7 +71,7 @@ func TestStoreV2CreateRetryAfterIndexFailureLandsOnce(t *testing.T) {
 // so a retry that carries the caller's expected revision must still be able to
 // land rather than report a conflict the caller cannot resolve.
 func TestStoreV2GuardedUpdateRetryAfterIndexFailureConverges(t *testing.T) {
-	dir := t.TempDir()
+	dir := testenv.TempDir(t)
 	store := Store{Dir: dir}
 	first, err := store.SaveWithOptions(Memory{Name: "alpha", Description: "d", Body: "v1"}, SaveOptions{})
 	if err != nil {
@@ -105,7 +107,7 @@ func TestStoreV2GuardedUpdateRetryAfterIndexFailureConverges(t *testing.T) {
 // comments and its own formatting, and a rollback that re-renders the parsed
 // Memory silently drops all of it.
 func TestStoreV2FailedUpdateRestoresTheFileByteForByte(t *testing.T) {
-	dir := t.TempDir()
+	dir := testenv.TempDir(t)
 	store := Store{Dir: dir}
 	first, err := store.SaveWithOptions(Memory{Name: "alpha", Description: "d", Body: "v1"}, SaveOptions{})
 	if err != nil {

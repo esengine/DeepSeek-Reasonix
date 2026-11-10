@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/contract/config"
 	"reasonix/internal/ext/plugin"
 )
@@ -158,7 +159,7 @@ func TestPluginSpecsForRootDoesNotPinHTTPCodeGraph(t *testing.T) {
 
 func TestPluginSpecsForRootExpandWorkspaceRoot(t *testing.T) {
 	t.Setenv("CLAUDE_PROJECT_DIR", "/inherited/from/a/parent/hook")
-	root := t.TempDir()
+	root := testenv.TempDir(t)
 	specs := ForRoot([]config.PluginEntry{{
 		Name: "idea", Type: "http", URL: "http://127.0.0.1:64342/stream",
 		Headers: map[string]string{"X-Project": "${REASONIX_WORKSPACE_ROOT}", "X-Claude": "${CLAUDE_PROJECT_DIR}"},

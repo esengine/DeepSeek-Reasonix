@@ -8,6 +8,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"testing"
+
+	"reasonix/internal/base/testenv"
 )
 
 // preOptionGit puts first on PATH a git older than 2.31: rev-parse does not
@@ -28,7 +30,7 @@ done
 [ -n "$echoed" ] && echo "$echoed"
 exec "` + real + `" "$@"
 `
-	bin := t.TempDir()
+	bin := testenv.TempDir(t)
 	if err := os.WriteFile(filepath.Join(bin, "git"), []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -45,10 +47,10 @@ func TestOpenOnGitWithoutPathFormat(t *testing.T) {
 			f := newRepoFixture(t, "", map[string]string{"f.txt": "one\n"})
 			dir := f.dir
 			if linked {
-				dir = filepath.Join(t.TempDir(), "linked")
+				dir = filepath.Join(testenv.TempDir(t), "linked")
 				f.plain("worktree", "add", "--quiet", dir)
 			}
-			alias := filepath.Join(t.TempDir(), "alias")
+			alias := filepath.Join(testenv.TempDir(t), "alias")
 			if err := os.Symlink(dir, alias); err != nil {
 				t.Fatal(err)
 			}

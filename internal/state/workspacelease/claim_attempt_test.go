@@ -4,10 +4,12 @@ import (
 	"errors"
 	"path/filepath"
 	"testing"
+
+	"reasonix/internal/base/testenv"
 )
 
 func TestClaimAttemptAndProbeDoNotRetainPartialClaims(t *testing.T) {
-	root, locks := t.TempDir(), t.TempDir()
+	root, locks := testenv.TempDir(t), testenv.TempDir(t)
 	paths := []string{filepath.Join(root, "a")}
 	if _, err := ProbeClaimPaths(root, locks, paths); err != nil {
 		t.Fatal(err)
@@ -44,7 +46,7 @@ func TestClaimAttemptAndProbeDoNotRetainPartialClaims(t *testing.T) {
 }
 
 func TestClaimAttemptHonorsLegacyWholeWorkspaceLock(t *testing.T) {
-	root, locks := t.TempDir(), t.TempDir()
+	root, locks := testenv.TempDir(t), testenv.TempDir(t)
 	o, err := New(root, locks, nil)
 	if err != nil {
 		t.Fatal(err)

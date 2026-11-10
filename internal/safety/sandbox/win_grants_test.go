@@ -7,6 +7,8 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	"reasonix/internal/base/testenv"
 )
 
 type fakeACL struct {
@@ -50,7 +52,7 @@ func (f *fakeACL) Granted(root, sid string) (bool, error) {
 
 func openBook(t *testing.T, ops grantOps) (*GrantBook, string) {
 	t.Helper()
-	dir := t.TempDir()
+	dir := testenv.TempDir(t)
 	b, err := OpenGrantBook(dir, ops)
 	if err != nil {
 		t.Fatal(err)
@@ -61,7 +63,7 @@ func openBook(t *testing.T, ops grantOps) (*GrantBook, string) {
 func TestEnsureGrantsOncePerRootAndTheRecordSurvivesAReopen(t *testing.T) {
 	acl := newFakeACL()
 	b, dir := openBook(t, acl)
-	root := t.TempDir()
+	root := testenv.TempDir(t)
 	for range 3 {
 		if err := b.Ensure(root); err != nil {
 			t.Fatal(err)
@@ -87,7 +89,7 @@ func TestEnsureGrantsOncePerRootAndTheRecordSurvivesAReopen(t *testing.T) {
 func TestACrashBetweenIntentAndResultIsFinishedByRepair(t *testing.T) {
 	acl := newFakeACL()
 	b, dir := openBook(t, acl)
-	root := t.TempDir()
+	root := testenv.TempDir(t)
 	acl.failNext = "grant"
 	if err := b.Ensure(root); err == nil {
 		t.Fatal("a failed grant reported success")
@@ -108,7 +110,7 @@ func TestACrashBetweenIntentAndResultIsFinishedByRepair(t *testing.T) {
 func TestRepairGrantsAgainWhereTheSIDWasLostAndDropsWhatNoLongerExists(t *testing.T) {
 	acl := newFakeACL()
 	b, _ := openBook(t, acl)
-	keep, gone := t.TempDir(), filepath.Join(t.TempDir(), "gone")
+	keep, gone := testenv.TempDir(t), filepath.Join(testenv.TempDir(t), "gone")
 	if err := os.Mkdir(gone, 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -130,7 +132,7 @@ func TestRepairGrantsAgainWhereTheSIDWasLostAndDropsWhatNoLongerExists(t *testin
 func TestRevokeRemovesTheEntryAndAnInterruptedRevokeIsFinished(t *testing.T) {
 	acl := newFakeACL()
 	b, dir := openBook(t, acl)
-	root := t.TempDir()
+	root := testenv.TempDir(t)
 	if err := b.Ensure(root); err != nil {
 		t.Fatal(err)
 	}
@@ -157,7 +159,7 @@ func TestRevokeRemovesTheEntryAndAnInterruptedRevokeIsFinished(t *testing.T) {
 // A record that exists and cannot be read is never the same as no record: the
 // sandbox must not start over with a new SID and call that safe.
 func TestAnUnreadableRecordIsAnErrorNotAFreshBook(t *testing.T) {
-	dir := t.TempDir()
+	dir := testenv.TempDir(t)
 	if err := os.WriteFile(filepath.Join(dir, "windows-grants.json"), []byte("{not json"), 0o600); err != nil {
 		t.Fatal(err)
 	}

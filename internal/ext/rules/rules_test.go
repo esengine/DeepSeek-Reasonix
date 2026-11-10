@@ -7,6 +7,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"reasonix/internal/base/testenv"
 )
 
 func write(t *testing.T, path, body string) {
@@ -28,7 +30,7 @@ func rels(rs []Rule) []string {
 }
 
 func TestLoadSplitsUnconditionalFromPathScopedAndOrdersBroadToSpecific(t *testing.T) {
-	root, user := t.TempDir(), t.TempDir()
+	root, user := testenv.TempDir(t), testenv.TempDir(t)
 	write(t, filepath.Join(user, "rules", "style.md"), "User style.\n")
 	write(t, filepath.Join(root, ".claude", "rules", "claude.md"), "Claude-dir rule.\n")
 	write(t, filepath.Join(root, ".reasonix", "rules", "b.md"), "B rule.\n")
@@ -50,7 +52,7 @@ func TestLoadSplitsUnconditionalFromPathScopedAndOrdersBroadToSpecific(t *testin
 }
 
 func TestAGatedRuleWithNoUsableGlobStaysGatedAndIsReported(t *testing.T) {
-	root := t.TempDir()
+	root := testenv.TempDir(t)
 	write(t, filepath.Join(root, ".reasonix", "rules", "typo.md"), "---\npaths: \"!src/**\"\n---\nNever applies.\n")
 	got := Load(Options{WorkspaceRoot: root})
 	if len(got.Always) != 0 || len(got.Scoped) != 1 || len(got.Scoped[0].Globs) != 0 {
@@ -62,7 +64,7 @@ func TestAGatedRuleWithNoUsableGlobStaysGatedAndIsReported(t *testing.T) {
 }
 
 func TestEmptyBodiesAndLargeFilesAreSkippedAndSaid(t *testing.T) {
-	root := t.TempDir()
+	root := testenv.TempDir(t)
 	write(t, filepath.Join(root, ".reasonix", "rules", "empty.md"), "---\npaths: x\n---\n\n")
 	write(t, filepath.Join(root, ".reasonix", "rules", "big.md"), strings.Repeat("x", MaxFileBytes+1))
 	write(t, filepath.Join(root, ".reasonix", "rules", "ok.md"), "fine\n")
@@ -80,7 +82,7 @@ func TestEmptyBodiesAndLargeFilesAreSkippedAndSaid(t *testing.T) {
 }
 
 func TestEachLayerStopsAtItsByteCapAndNamesWhatItDropped(t *testing.T) {
-	root := t.TempDir()
+	root := testenv.TempDir(t)
 	chunk := strings.Repeat("y", MaxFileBytes-10)
 	for _, name := range []string{"a.md", "b.md", "c.md"} {
 		write(t, filepath.Join(root, ".reasonix", "rules", name), chunk)
@@ -104,7 +106,7 @@ func TestASymlinkedRuleIsNotFollowed(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("symlink creation needs privileges on Windows")
 	}
-	root, outside := t.TempDir(), t.TempDir()
+	root, outside := testenv.TempDir(t), testenv.TempDir(t)
 	write(t, filepath.Join(outside, "secret.md"), "outside the project\n")
 	if err := os.MkdirAll(filepath.Join(root, ".reasonix", "rules"), 0o755); err != nil {
 		t.Fatal(err)
@@ -122,7 +124,7 @@ func TestBlockRendersEachRuleUnderItsOwnHeadingAndNothingForNone(t *testing.T) {
 	if Block(nil) != "" {
 		t.Fatal("no rules rendered a block")
 	}
-	root := t.TempDir()
+	root := testenv.TempDir(t)
 	write(t, filepath.Join(root, ".reasonix", "rules", "a.md"), "Use tabs.\n")
 	write(t, filepath.Join(root, ".reasonix", "rules", "ts.md"), "---\npaths: src/**/*.ts\n---\nUse strict mode.\n")
 	got := Load(Options{WorkspaceRoot: root})

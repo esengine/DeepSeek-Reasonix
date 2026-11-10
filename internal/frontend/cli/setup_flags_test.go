@@ -4,6 +4,8 @@ import (
 	"os"
 	"strings"
 	"testing"
+
+	"reasonix/internal/base/testenv"
 )
 
 // 1.x prints setup usage for -h/--help (exit 0) and refuses any other dashed
@@ -21,7 +23,7 @@ func TestSetupHelpAndUnknownFlagsMatch1x(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.arg, func(t *testing.T) {
-			dir := t.TempDir()
+			dir := testenv.TempDir(t)
 			t.Chdir(dir)
 			var code int
 			stdout, stderr := captureCLIOutput(t, func() {

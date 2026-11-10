@@ -12,6 +12,7 @@ import (
 	"github.com/BurntSushi/toml"
 
 	fileencoding "reasonix/internal/base/fileutil/encoding"
+	"reasonix/internal/base/testenv"
 )
 
 // benchmarksRoot holds every committed task corpus. Validation discovers the
@@ -363,7 +364,7 @@ func fullDecisions() map[authoringRule]ruleDecision {
 func TestCorpusPolicyValidationCatchesGaps(t *testing.T) {
 	universe := func(t *testing.T, corpora ...string) (string, []corpusPolicy) {
 		t.Helper()
-		root := t.TempDir()
+		root := testenv.TempDir(t)
 		var policies []corpusPolicy
 		for _, name := range corpora {
 			dir := tempCorpus(t, root, name, "t-"+name, "")
@@ -437,7 +438,7 @@ func TestCorpusPolicyValidationCatchesGaps(t *testing.T) {
 			name: "a registry entry that shadows the root's corpus by name",
 			universe: func(t *testing.T) (string, []corpusPolicy) {
 				root, policies := universe(t, "registered")
-				elsewhere := tempCorpus(t, t.TempDir(), "registered", "t-impostor", "")
+				elsewhere := tempCorpus(t, testenv.TempDir(t), "registered", "t-impostor", "")
 				policies[0].Dir = elsewhere
 				return root, policies
 			},
@@ -505,7 +506,7 @@ func TestStopPolicyAppliesToEveryRegisteredCorpus(t *testing.T) {
 		}
 	}
 
-	root := t.TempDir()
+	root := testenv.TempDir(t)
 	for _, c := range []struct {
 		name   string
 		corpus string

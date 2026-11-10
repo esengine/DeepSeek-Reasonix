@@ -6,6 +6,7 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/contract/event"
 	"reasonix/internal/contract/provider"
 	"reasonix/internal/session/control"
@@ -33,7 +34,7 @@ func TestEffectBackgroundJobNoLaunchFinalizesResources(t *testing.T) {
 				mode = "capability"
 			}
 			t.Run(name+"/"+mode, func(t *testing.T) {
-				home, root := statedBootHome(t), t.TempDir()
+				home, root := statedBootHome(t), testenv.TempDir(t)
 				child := &noLaunchProvider{}
 				var ctrl *control.Controller
 				parent := &browserScriptProvider{rounds: []func(string) *provider.ToolCall{

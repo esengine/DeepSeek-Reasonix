@@ -198,7 +198,7 @@ func TestUnevaluableHookDoesNotChangeOtherHooks(t *testing.T) {
 }
 
 func TestSaveRejectsAnInvalidMatcher(t *testing.T) {
-	t.Setenv("REASONIX_HOME", t.TempDir())
+	t.Setenv("REASONIX_HOME", testenv.TempDir(t))
 	err := Save(ScopeGlobal, "", Settings{Hooks: map[Event][]HookConfig{PreToolUse: {{Match: "[", Command: "x"}}}})
 	if !errors.Is(err, ErrInvalidMatcher) {
 		t.Fatalf("Save error = %v, want ErrInvalidMatcher", err)
@@ -283,7 +283,7 @@ func TestObservingHookIsOnlyRefusedWhenItsApprovedScriptChanges(t *testing.T) {
 }
 
 func TestSaveNamesTheHookWithTheInvalidMatcher(t *testing.T) {
-	t.Setenv("REASONIX_HOME", t.TempDir())
+	t.Setenv("REASONIX_HOME", testenv.TempDir(t))
 	err := Save(ScopeGlobal, "", Settings{Hooks: map[Event][]HookConfig{PreToolUse: {{Command: "ok"}, {Match: "a(", Command: "x"}}}})
 	if err == nil {
 		t.Fatal("want an error")

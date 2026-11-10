@@ -6,10 +6,12 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"reasonix/internal/base/testenv"
 )
 
 func TestPreviewReadsBytesAndRefusesEscape(t *testing.T) {
-	root := t.TempDir()
+	root := testenv.TempDir(t)
 	data := []byte("%PDF-1.7\n\x00binary")
 	if err := os.WriteFile(filepath.Join(root, "报告.pdf"), data, 0o600); err != nil {
 		t.Fatal(err)
@@ -23,12 +25,12 @@ func TestPreviewReadsBytesAndRefusesEscape(t *testing.T) {
 	if err != nil || string(got) != string(data) {
 		t.Fatalf("read = %q, %v", got, err)
 	}
-	for _, ref := range []Ref{{Path: "../secret"}, {Root: t.TempDir(), Path: "x"}} {
+	for _, ref := range []Ref{{Path: "../secret"}, {Root: testenv.TempDir(t), Path: "x"}} {
 		if _, err := s.Info(context.Background(), ref); !errors.Is(err, ErrDenied) {
 			t.Fatalf("escape = %v", err)
 		}
 	}
-	outside := t.TempDir()
+	outside := testenv.TempDir(t)
 	if err := os.WriteFile(filepath.Join(outside, "secret.txt"), []byte("secret"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -40,7 +42,7 @@ func TestPreviewReadsBytesAndRefusesEscape(t *testing.T) {
 }
 
 func TestPreviewLimitsAndUnknownBinary(t *testing.T) {
-	root := t.TempDir()
+	root := testenv.TempDir(t)
 	s := Service{Primary: root}
 	for _, tc := range []struct {
 		name string
@@ -64,11 +66,11 @@ func TestPreviewLimitsAndUnknownBinary(t *testing.T) {
 }
 
 func TestGrantedRootAndCancellation(t *testing.T) {
-	extra := t.TempDir()
+	extra := testenv.TempDir(t)
 	if err := os.WriteFile(filepath.Join(extra, "notes.md"), []byte("# Notes"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	s := Service{Primary: t.TempDir(), Extra: []string{extra}}
+	s := Service{Primary: testenv.TempDir(t), Extra: []string{extra}}
 	ref, err := s.Resolve(filepath.Join(extra, "notes.md"))
 	if err != nil || ref.Root != extra || ref.Path != "notes.md" {
 		t.Fatalf("resolve = %+v, %v", ref, err)
@@ -89,7 +91,7 @@ func TestGrantedRootAndCancellation(t *testing.T) {
 }
 
 func TestOfficeDocumentsPreviewAsBinaryWithinTheirLimit(t *testing.T) {
-	root := t.TempDir()
+	root := testenv.TempDir(t)
 	zip := []byte("PK\x03\x04\x00binary office package")
 	s := Service{Primary: root}
 	for _, name := range []string{"报告.docx", "budget.XLSX"} {

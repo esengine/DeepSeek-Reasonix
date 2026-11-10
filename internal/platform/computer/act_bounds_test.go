@@ -8,6 +8,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"reasonix/internal/base/testenv"
 )
 
 // failingWrite accepts a deadline and then refuses the write, the half of the
@@ -29,7 +31,7 @@ func TestCUAAbortExchangeReportsATransportThatFails(t *testing.T) {
 	if err := exchangeAbort(failingWrite{client}); err == nil {
 		t.Fatal("a refused write was taken for an abort")
 	}
-	if err := abortEmbedded(t.TempDir() + "/no-such.sock"); err == nil {
+	if err := abortEmbedded(testenv.TempDir(t) + "/no-such.sock"); err == nil {
 		t.Fatal("an absolute path with nothing listening was taken for an endpoint")
 	}
 }

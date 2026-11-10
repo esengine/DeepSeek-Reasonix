@@ -12,6 +12,7 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/contract/provider"
 	"reasonix/internal/model/providerbroker"
 )
@@ -29,7 +30,7 @@ func brokerFlagsFor(t *testing.T, args ...string) brokerFlags {
 
 func writeTokenFile(t *testing.T, token string) string {
 	t.Helper()
-	path := filepath.Join(t.TempDir(), "broker.token")
+	path := filepath.Join(testenv.TempDir(t), "broker.token")
 	if err := os.WriteFile(path, []byte(token+"\n"), 0o600); err != nil {
 		t.Fatalf("write token: %v", err)
 	}
@@ -151,7 +152,7 @@ func writePrivate(t *testing.T, path, line string) {
 // serve reads the one file per request, so the conversation already running
 // reaches the new broker instead of being restarted to find it.
 func TestBrokerFileFollowsARepublishedBroker(t *testing.T) {
-	file := filepath.Join(t.TempDir(), "broker.endpoint")
+	file := filepath.Join(testenv.TempDir(t), "broker.endpoint")
 	first, second := brokerAt(t, "first", "one"), brokerAt(t, "second", "two")
 	writePrivate(t, file, first+"\none")
 
@@ -189,7 +190,7 @@ func TestBrokerFileFollowsARepublishedBroker(t *testing.T) {
 }
 
 func TestBrokerNamedTwiceIsRefused(t *testing.T) {
-	dir := t.TempDir()
+	dir := testenv.TempDir(t)
 	file, tokenFile := filepath.Join(dir, "broker.endpoint"), writeTokenFile(t, "t")
 	writePrivate(t, file, "http://127.0.0.1:1\nt")
 	b := brokerFlagsFor(t, "--provider-broker", "http://127.0.0.1:1", "--provider-broker-file", file, "--provider-broker-token-file", tokenFile)
@@ -208,7 +209,7 @@ func TestBrokerDoesNotFollowARedirect(t *testing.T) {
 		http.Redirect(w, r, elsewhere.URL+r.URL.Path, http.StatusTemporaryRedirect)
 	}))
 	defer redirecting.Close()
-	file := filepath.Join(t.TempDir(), "broker.endpoint")
+	file := filepath.Join(testenv.TempDir(t), "broker.endpoint")
 	writePrivate(t, file, redirecting.URL+"\nt")
 
 	resolver, err := brokerFlagsFor(t, "--provider-broker-file", file).resolver()

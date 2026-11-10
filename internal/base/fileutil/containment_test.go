@@ -3,10 +3,12 @@ package fileutil
 import (
 	"path/filepath"
 	"testing"
+
+	"reasonix/internal/base/testenv"
 )
 
 func TestUnderExcludesTheRootItself(t *testing.T) {
-	root := t.TempDir()
+	root := testenv.TempDir(t)
 	if Under(root, root) {
 		t.Error("Under(root, root) = true; the root is not below itself")
 	}
@@ -16,7 +18,7 @@ func TestUnderExcludesTheRootItself(t *testing.T) {
 }
 
 func TestAtOrUnderIncludesTheRootItself(t *testing.T) {
-	root := t.TempDir()
+	root := testenv.TempDir(t)
 	for _, path := range []string{root, filepath.Join(root, "child"), filepath.Join(root, "a", "b")} {
 		if !AtOrUnder(path, root) {
 			t.Errorf("AtOrUnder(%q, root) = false", path)
@@ -25,7 +27,7 @@ func TestAtOrUnderIncludesTheRootItself(t *testing.T) {
 }
 
 func TestContainmentRejectsEscapes(t *testing.T) {
-	root := t.TempDir()
+	root := testenv.TempDir(t)
 	outside := filepath.Join(filepath.Dir(root), "sibling")
 	for _, path := range []string{outside, filepath.Join(root, "..", "sibling"), filepath.Dir(root)} {
 		if AtOrUnder(path, root) {
@@ -40,7 +42,7 @@ func TestContainmentRejectsEscapes(t *testing.T) {
 // An interior ".." must be resolved before the comparison, or a path spells
 // its way inside a root it never reaches.
 func TestContainmentResolvesInteriorDotDot(t *testing.T) {
-	root := t.TempDir()
+	root := testenv.TempDir(t)
 	if !AtOrUnder(filepath.Join(root, "a", "..", "b"), root) {
 		t.Error("a path that cleans to root/b is inside root")
 	}
@@ -50,7 +52,7 @@ func TestContainmentResolvesInteriorDotDot(t *testing.T) {
 }
 
 func TestContainmentRejectsEmptySides(t *testing.T) {
-	root := t.TempDir()
+	root := testenv.TempDir(t)
 	if AtOrUnder("", root) || AtOrUnder(root, "") || Under("", root) || Under(root, "") {
 		t.Error("an empty side answers no question and is not containment")
 	}

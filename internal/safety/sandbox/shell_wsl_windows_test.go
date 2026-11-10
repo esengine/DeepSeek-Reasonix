@@ -7,6 +7,8 @@ import (
 	"strings"
 	"syscall"
 	"testing"
+
+	"reasonix/internal/base/testenv"
 )
 
 // Every spelling below names the real System32 stub and the real Store alias;
@@ -54,7 +56,7 @@ func TestWSLLauncherPathSurvivesAlternateSpellings(t *testing.T) {
 
 func TestWSLLauncherPathFollowsJunction(t *testing.T) {
 	win, _ := wslFixture(t)
-	junction := filepath.Join(t.TempDir(), "j")
+	junction := filepath.Join(testenv.TempDir(t), "j")
 	if out, err := exec.Command("cmd", "/c", "mklink", "/J", junction, filepath.Join(win, "System32")).CombinedOutput(); err != nil {
 		t.Skip("cannot create a junction:", string(out))
 	}

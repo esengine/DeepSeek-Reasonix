@@ -11,6 +11,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"reasonix/internal/base/testenv"
 )
 
 func TestUnsupportedRecordSurvivesOwnerProcessDeath(t *testing.T) {
@@ -21,7 +23,7 @@ func TestUnsupportedRecordSurvivesOwnerProcessDeath(t *testing.T) {
 
 func unsupportedRecordOwnerDeath(t *testing.T, shape string) {
 	t.Helper()
-	root, state := t.TempDir(), t.TempDir()
+	root, state := testenv.TempDir(t), testenv.TempDir(t)
 	c := testCoordinator(t, root, state)
 	cmd := exec.CommandContext(t.Context(), os.Args[0], "-test.run=^TestMutationProcessHelper$")
 	cmd.Env = append(os.Environ(), "REASONIX_MUTATION_TEST_HELPER=1", "REASONIX_MUTATION_TEST_ROOT="+root,

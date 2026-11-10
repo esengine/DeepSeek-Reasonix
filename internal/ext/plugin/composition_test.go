@@ -7,11 +7,12 @@ import (
 	"testing"
 	"time"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/safety/sandbox"
 )
 
 func TestCompositionProcessStateIsPrivateAndConfinedToOwnedSubdirectory(t *testing.T) {
-	base := t.TempDir()
+	base := testenv.TempDir(t)
 	for _, name := range []string{"one", "two"} {
 		root := filepath.Join(base, "sessions", name)
 		_, env, err := prepareMCPPrivateStateForOS(Spec{StateDir: base, ProcessStateDir: root}, sandbox.Spec{}, nil, "linux")
@@ -42,7 +43,7 @@ func TestCompositionProcessStateIsPrivateAndConfinedToOwnedSubdirectory(t *testi
 }
 
 func TestCompositionProcessStateRejectsSymlinkOwner(t *testing.T) {
-	base, outside := t.TempDir(), t.TempDir()
+	base, outside := testenv.TempDir(t), testenv.TempDir(t)
 	if err := os.Symlink(outside, filepath.Join(base, "sessions")); err != nil {
 		t.Skipf("symlinks unavailable: %v", err)
 	}
@@ -57,7 +58,7 @@ func TestCompositionProcessStateRejectsSymlinkOwner(t *testing.T) {
 func TestCompositionMCPReconnectKeepsSessionOwnedPackageResources(t *testing.T) {
 	redirectCache(t)
 	spec := helperSpec()
-	spec.StateDir = t.TempDir()
+	spec.StateDir = testenv.TempDir(t)
 	spec.ProcessStateDir = filepath.Join(spec.StateDir, "sessions", "fixture")
 	spec.Package, spec.Authorized, spec.ProcessMode = "fixture", true, MCPProcessHost
 	entry := filepath.Join(spec.ProcessStateDir, "package", "entry")

@@ -11,6 +11,7 @@ import (
 
 	"github.com/charmbracelet/colorprofile"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/contract/event"
 )
 
@@ -194,7 +195,7 @@ func TestRenderDiffFenceStreamingRunsFormatterOnce(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("no portable shell")
 	}
-	countFile := filepath.Join(t.TempDir(), "runs")
+	countFile := filepath.Join(testenv.TempDir(t), "runs")
 	t.Setenv("COUNTFILE", countFile)
 	defer setDiffFormatter(nil)
 	setDiffFormatter([]string{"sh", "-c", `echo run >> "$COUNTFILE"; cat`})

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/contract/config"
 	"reasonix/internal/ext/extension"
 	"reasonix/internal/ext/extension/dispatch"
@@ -16,7 +17,7 @@ import (
 
 func contextRun(t *testing.T, blocks []map[string]string, iniBody string) string {
 	t.Helper()
-	t.Setenv("REASONIX_HOME", t.TempDir())
+	t.Setenv("REASONIX_HOME", testenv.TempDir(t))
 	if iniBody != "" {
 		path := config.UserConfigPath()
 		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {

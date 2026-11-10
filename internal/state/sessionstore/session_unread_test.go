@@ -3,6 +3,7 @@ package sessionstore
 import (
 	"os"
 	"path/filepath"
+	"reasonix/internal/base/testenv"
 	"slices"
 	"strings"
 	"sync"
@@ -40,7 +41,7 @@ func listedUnread(t *testing.T, dir, path string) bool {
 }
 
 func TestSessionUnreadFollowsFinishedAndViewed(t *testing.T) {
-	dir := t.TempDir()
+	dir := testenv.TempDir(t)
 	path := saveUnreadFixture(t, dir, "20260101-000001-m.jsonl")
 	if listedUnread(t, dir, path) {
 		t.Fatal("a session nobody finished a turn in is unread")
@@ -67,7 +68,7 @@ func TestSessionUnreadFollowsFinishedAndViewed(t *testing.T) {
 }
 
 func TestSessionUnreadAbsentFieldsMeanRead(t *testing.T) {
-	dir := t.TempDir()
+	dir := testenv.TempDir(t)
 	path := saveUnreadFixture(t, dir, "20260101-000001-m.jsonl")
 	if listedUnread(t, dir, path) {
 		t.Fatal("a session without the fields must read as seen")
@@ -89,7 +90,7 @@ func TestSessionUnreadAbsentFieldsMeanRead(t *testing.T) {
 }
 
 func TestSessionViewedWithoutUnreadWritesNothing(t *testing.T) {
-	dir := t.TempDir()
+	dir := testenv.TempDir(t)
 	path := saveUnreadFixture(t, dir, "20260101-000001-m.jsonl")
 	before, err := os.ReadFile(BranchMetaPath(path))
 	if err != nil {
@@ -112,7 +113,7 @@ func TestSessionViewedWithoutUnreadWritesNothing(t *testing.T) {
 }
 
 func TestSessionFinishedSkipsATranscriptThatWasNeverWritten(t *testing.T) {
-	dir := t.TempDir()
+	dir := testenv.TempDir(t)
 	path := filepath.Join(dir, "20260101-000009-m.jsonl")
 	if err := RecordSessionFinished(path, time.Now(), true); err != nil {
 		t.Fatal(err)
@@ -123,7 +124,7 @@ func TestSessionFinishedSkipsATranscriptThatWasNeverWritten(t *testing.T) {
 }
 
 func TestSessionFinishedByThePersonDoesNotLeaveItUnread(t *testing.T) {
-	dir := t.TempDir()
+	dir := testenv.TempDir(t)
 	path := saveUnreadFixture(t, dir, "20260101-000001-m.jsonl")
 	if err := RecordSessionFinished(path, time.Now(), false); err != nil {
 		t.Fatal(err)
@@ -138,7 +139,7 @@ func TestSessionFinishedByThePersonDoesNotLeaveItUnread(t *testing.T) {
 }
 
 func TestSessionUnreadSurvivesAClockThatRanBackwards(t *testing.T) {
-	dir := t.TempDir()
+	dir := testenv.TempDir(t)
 	path := saveUnreadFixture(t, dir, "20260101-000001-m.jsonl")
 	now := time.Now().UTC()
 	if err := RecordSessionFinished(path, now, true); err != nil {
@@ -159,7 +160,7 @@ func TestSessionUnreadSurvivesAClockThatRanBackwards(t *testing.T) {
 }
 
 func TestSessionUnreadDoesNotReorderTheList(t *testing.T) {
-	dir := t.TempDir()
+	dir := testenv.TempDir(t)
 	older := saveUnreadFixture(t, dir, "20260101-000001-m.jsonl")
 	newer := saveUnreadFixture(t, dir, "20260101-000002-m.jsonl")
 	before, err := ListSessions(dir)
@@ -185,7 +186,7 @@ func TestSessionUnreadDoesNotReorderTheList(t *testing.T) {
 }
 
 func TestSessionUnreadSurvivesArchiveRenameAndAutosave(t *testing.T) {
-	dir := t.TempDir()
+	dir := testenv.TempDir(t)
 	path := saveUnreadFixture(t, dir, "20260101-000001-m.jsonl")
 	if err := RecordSessionFinished(path, time.Now(), true); err != nil {
 		t.Fatal(err)
@@ -208,7 +209,7 @@ func TestSessionUnreadSurvivesArchiveRenameAndAutosave(t *testing.T) {
 }
 
 func TestSessionViewedAndFinishedRaceLeaveOneConsistentAnswer(t *testing.T) {
-	dir := t.TempDir()
+	dir := testenv.TempDir(t)
 	path := saveUnreadFixture(t, dir, "20260101-000001-m.jsonl")
 	if err := RecordSessionFinished(path, time.Now(), true); err != nil {
 		t.Fatal(err)
@@ -232,7 +233,7 @@ func TestSessionViewedAndFinishedRaceLeaveOneConsistentAnswer(t *testing.T) {
 }
 
 func TestSessionViewedWorksWhileAnotherWindowHoldsTheSession(t *testing.T) {
-	dir := t.TempDir()
+	dir := testenv.TempDir(t)
 	path := saveUnreadFixture(t, dir, "20260101-000001-m.jsonl")
 	lease, err := TryAcquireSessionLease(path)
 	if err != nil {
@@ -251,7 +252,7 @@ func TestSessionViewedWorksWhileAnotherWindowHoldsTheSession(t *testing.T) {
 }
 
 func TestSessionViewedToleratesASidecarCaughtMidReplace(t *testing.T) {
-	dir := t.TempDir()
+	dir := testenv.TempDir(t)
 	path := saveUnreadFixture(t, dir, "20260101-000001-m.jsonl")
 	if err := RecordSessionFinished(path, time.Now(), true); err != nil {
 		t.Fatal(err)

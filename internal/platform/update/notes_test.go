@@ -13,6 +13,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"reasonix/internal/base/testenv"
 )
 
 // mirror answers every request from handler, whatever address it was aimed at,
@@ -38,7 +40,7 @@ type roundTrip func(*http.Request) (*http.Response, error)
 func (f roundTrip) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
 
 func notesReq(t *testing.T, c *http.Client) notesRequest {
-	return notesRequest{dir: filepath.Join(t.TempDir(), "release-notes"), client: c, userAgent: "test"}
+	return notesRequest{dir: filepath.Join(testenv.TempDir(t), "release-notes"), client: c, userAgent: "test"}
 }
 
 func TestNotesURLIsBuiltFromAReleaseVersionOnly(t *testing.T) {

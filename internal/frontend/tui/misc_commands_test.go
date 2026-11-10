@@ -188,7 +188,7 @@ func TestLocalCommandsAreOfferedByCompletionAndHelp(t *testing.T) {
 func TestThemeAndVerboseNeverWriteIntoAProjectFile(t *testing.T) {
 	m, _, userPath := miscModel(t)
 	t.Cleanup(func() { termrender.SetThemeStyle("graphite") })
-	dir := t.TempDir()
+	dir := testenv.TempDir(t)
 	project := filepath.Join(dir, "reasonix.toml")
 	const body = "# shared\n[agent]\nmax_steps = 7\n"
 	if err := os.WriteFile(project, []byte(body), 0o600); err != nil {

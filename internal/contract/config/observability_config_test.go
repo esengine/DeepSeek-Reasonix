@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"slices"
 	"testing"
+
+	"reasonix/internal/base/testenv"
 )
 
 func TestOTLPExportIsOffUnlessTheUserFileSwitchesItOnAndNamesACollector(t *testing.T) {
@@ -43,7 +45,7 @@ func TestAProjectFileCannotTurnOnOrRedirectTraceExport(t *testing.T) {
 }
 
 func TestSavingTheUserFileKeepsTheTraceExportSettings(t *testing.T) {
-	t.Setenv("REASONIX_HOME", t.TempDir())
+	t.Setenv("REASONIX_HOME", testenv.TempDir(t))
 	path := UserConfigPath()
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		t.Fatal(err)

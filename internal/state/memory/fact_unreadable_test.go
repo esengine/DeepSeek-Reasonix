@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"reasonix/internal/base/testenv"
 )
 
 // denyFactFile makes exactly one fact file unreadable, the fault a permission
@@ -44,7 +46,7 @@ func requireFactReadError(t *testing.T, err error, path string) *FactReadError {
 // directory and returns the store plus both paths.
 func unreadableFixture(t *testing.T) (Store, string, string) {
 	t.Helper()
-	s := Store{Dir: t.TempDir()}
+	s := Store{Dir: testenv.TempDir(t)}
 	good, err := s.Save(Memory{Name: "good", Title: "Compiler flags", Description: "compiler flags are documented here", Body: "compiler flags: use -O2"})
 	if err != nil {
 		t.Fatal(err)
@@ -102,7 +104,7 @@ func TestAnUnreadableFactIsListedNotAbsent(t *testing.T) {
 // stop before it rewrites a file it could not read, because the new id and
 // revision 1 would erase the old identity and its history.
 func TestSaveByNameRefusesAnUnreadableFact(t *testing.T) {
-	s := Store{Dir: t.TempDir()}
+	s := Store{Dir: testenv.TempDir(t)}
 	first, err := s.SaveWithOptions(Memory{Name: "fact", Body: "v1"}, SaveOptions{})
 	if err != nil {
 		t.Fatal(err)
@@ -142,7 +144,7 @@ func TestSaveByNameRefusesAnUnreadableFact(t *testing.T) {
 // TestMissingFactStillReadsAsAbsent is the control beside the fix: a file that
 // is genuinely gone stays absent, with no error and no unreadable entry.
 func TestMissingFactStillReadsAsAbsent(t *testing.T) {
-	s := Store{Dir: t.TempDir()}
+	s := Store{Dir: testenv.TempDir(t)}
 	if _, err := s.Save(Memory{Name: "present", Body: "present body"}); err != nil {
 		t.Fatal(err)
 	}
@@ -178,7 +180,7 @@ func TestAnUnrelatedUnreadableFactDoesNotBlockAName(t *testing.T) {
 // unreadable fact must not degrade the turn, and the audit must name it as
 // unreadable instead of leaving it looking absent.
 func TestRecallKeepsItsBlockAndNamesTheUnreadableFact(t *testing.T) {
-	opts := Options{CWD: t.TempDir(), UserDir: t.TempDir()}
+	opts := Options{CWD: testenv.TempDir(t), UserDir: testenv.TempDir(t)}
 	s := StoreFor(opts.UserDir, opts.CWD)
 	if _, err := s.Save(Memory{Name: "good", Title: "Compiler flags", Description: "compiler flags are documented here", Body: "compiler flags: use -O2"}); err != nil {
 		t.Fatal(err)
@@ -219,7 +221,7 @@ func TestRecallKeepsItsBlockAndNamesTheUnreadableFact(t *testing.T) {
 // the honest answer — "the store is empty" would be the absence this fix rules
 // out.
 func TestRecallWithOnlyUnreadableFactsSaysUnreadable(t *testing.T) {
-	s := Store{Dir: t.TempDir()}
+	s := Store{Dir: testenv.TempDir(t)}
 	locked, err := s.Save(Memory{Name: "only", Body: "the only fact"})
 	if err != nil {
 		t.Fatal(err)
@@ -239,7 +241,7 @@ func TestRecallWithOnlyUnreadableFactsSaysUnreadable(t *testing.T) {
 // directory that cannot be listed still degrades with its existing sentence,
 // and that condition is not reported as a per-fact unreadable file.
 func TestRecallDirectoryFailureKeepsItsSentence(t *testing.T) {
-	s := Store{Dir: t.TempDir()}
+	s := Store{Dir: testenv.TempDir(t)}
 	if _, err := s.Save(Memory{Name: "fact", Body: "compiler flags"}); err != nil {
 		t.Fatal(err)
 	}

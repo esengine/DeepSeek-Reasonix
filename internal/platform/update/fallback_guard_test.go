@@ -10,6 +10,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"reasonix/internal/base/testenv"
 )
 
 // signedAt is a manifest whose asset is served at primary with fallback as
@@ -40,7 +42,7 @@ func TestTamperedBytesFromThePrimaryDoNotFallThrough(t *testing.T) {
 			return okBody(string(body)), nil
 		},
 	})
-	u := New(Options{Current: "v1.0.0", HTTP: &http.Client{Transport: routeOr(c, rs.Client())}, CacheDir: t.TempDir()})
+	u := New(Options{Current: "v1.0.0", HTTP: &http.Client{Transport: routeOr(c, rs.Client())}, CacheDir: testenv.TempDir(t)})
 	m := signedAt(rs, body, "https://mirror.test/a", "https://github.test/a")
 	if _, err := u.DownloadManifest(context.Background(), m, Report{}); !errors.Is(err, ErrVerify) {
 		t.Fatalf("err = %v, want ErrVerify", err)
@@ -60,7 +62,7 @@ func TestTamperedBytesFromTheFallbackAreRefused(t *testing.T) {
 			return okBody(strings.Repeat("X", len(body))), nil
 		},
 	})
-	u := New(Options{Current: "v1.0.0", HTTP: &http.Client{Transport: routeOr(c, rs.Client())}, CacheDir: t.TempDir()})
+	u := New(Options{Current: "v1.0.0", HTTP: &http.Client{Transport: routeOr(c, rs.Client())}, CacheDir: testenv.TempDir(t)})
 	m := signedAt(rs, body, "https://mirror.test/a", "https://github.test/a")
 	if _, err := u.DownloadManifest(context.Background(), m, Report{}); !errors.Is(err, ErrVerify) {
 		t.Fatalf("err = %v, want ErrVerify", err)

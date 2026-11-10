@@ -3,6 +3,7 @@ package boot
 import (
 	"os"
 	"path/filepath"
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/contract/provider"
 	"reasonix/internal/platform/computer"
 	"strings"
@@ -16,7 +17,7 @@ func TestEffectComputerLaunchKeepsItsApprovalSeparateFromCanonicalRead(t *testin
 	}
 	t.Setenv(fakeComputerHelperEnv, "1")
 	t.Setenv("REASONIX_BOOT_CUA_INSTALLED_APP", exe)
-	log := filepath.Join(t.TempDir(), "requests.jsonl")
+	log := filepath.Join(testenv.TempDir(t), "requests.jsonl")
 	t.Setenv("REASONIX_BOOT_CUA_REQUEST_LOG", log)
 	driver := computer.NewDriver(exe, os.Environ())
 	t.Cleanup(driver.Close)

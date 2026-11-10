@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"reasonix/internal/base/testenv"
 )
 
 // A nested repository registered as a gitlink carries its own local filter;
@@ -28,7 +30,7 @@ func TestStageAllDoesNotEnterNestedRepositories(t *testing.T) {
 	f.write("y.txt", "new\n")
 
 	repo := f.open(f.dir)
-	index := filepath.Join(t.TempDir(), "index")
+	index := filepath.Join(testenv.TempDir(t), "index")
 	raw, err := os.ReadFile(filepath.Join(f.dir, ".git", "index"))
 	if err != nil {
 		t.Fatal(err)
@@ -78,7 +80,7 @@ func TestUserRecurseDoesNotCarryHostCheckoutIntoSubmodules(t *testing.T) {
 	f.plain("checkout", "--quiet", "main")
 	f.plain("submodule", "--quiet", "update")
 	f.appendConfig("modules/sm/config", "[filter \"pwn\"]\n\tsmudge = "+f.payload()+"\n\tclean = "+f.payload()+"\n")
-	global := filepath.Join(t.TempDir(), "gitconfig")
+	global := filepath.Join(testenv.TempDir(t), "gitconfig")
 	if err := os.WriteFile(global, []byte("[submodule]\n\trecurse = true\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}

@@ -2,6 +2,7 @@ package serve
 
 import (
 	"net/http/httptest"
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/contract/config"
 	"testing"
 )
@@ -16,7 +17,7 @@ func TestModelAliasesNeverOverlayRemoteCatalog(t *testing.T) {
 	}
 	h := NewHub(HubOptions{ProviderResolver: homeResolver()})
 	defer h.Shutdown()
-	rt, err := h.Open(t.Context(), OpenRequest{Root: t.TempDir()})
+	rt, err := h.Open(t.Context(), OpenRequest{Root: testenv.TempDir(t)})
 	if err != nil {
 		t.Fatal(err)
 	}

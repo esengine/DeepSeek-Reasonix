@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/ext/skilllock"
 )
 
@@ -16,8 +17,8 @@ func sourceSkill(t *testing.T, root, body string) string {
 }
 
 func TestACopyInstallRecordsItsSourceAndUninstallForgetsIt(t *testing.T) {
-	home, project := t.TempDir(), t.TempDir()
-	src := sourceSkill(t, t.TempDir(), "v1")
+	home, project := testenv.TempDir(t), testenv.TempDir(t)
+	src := sourceSkill(t, testenv.TempDir(t), "v1")
 	tool := NewTool(Options{ProjectRoot: project, HomeDir: home})
 	resp := execInstall(t, tool, map[string]any{"source": src, "kind": "skill", "mode": "copy", "scope": "global", "apply": true})
 	if !resp.OK {
@@ -49,8 +50,8 @@ func TestACopyInstallRecordsItsSourceAndUninstallForgetsIt(t *testing.T) {
 }
 
 func TestAProjectInstallIsNotRecorded(t *testing.T) {
-	home, project := t.TempDir(), t.TempDir()
-	src := sourceSkill(t, t.TempDir(), "v1")
+	home, project := testenv.TempDir(t), testenv.TempDir(t)
+	src := sourceSkill(t, testenv.TempDir(t), "v1")
 	tool := NewTool(Options{ProjectRoot: project, HomeDir: home})
 	if resp := execInstall(t, tool, map[string]any{"source": src, "kind": "skill", "mode": "copy", "scope": "project", "apply": true}); !resp.OK {
 		t.Fatalf("project install: %+v", resp)
@@ -63,8 +64,8 @@ func TestAProjectInstallIsNotRecorded(t *testing.T) {
 // A source that is a git checkout, or holds an in-folder link, installs as its
 // files only; the record must still read it as in step with the copy.
 func TestACopyOfAGitCheckoutWithALinkReadsAsInStep(t *testing.T) {
-	home, project := t.TempDir(), t.TempDir()
-	src := sourceSkill(t, t.TempDir(), "v1")
+	home, project := testenv.TempDir(t), testenv.TempDir(t)
+	src := sourceSkill(t, testenv.TempDir(t), "v1")
 	writeFile(t, filepath.Join(src, ".git", "HEAD"), "ref: refs/heads/main")
 	writeFile(t, filepath.Join(src, "notes.txt"), "n")
 	if os.Symlink("notes.txt", filepath.Join(src, "alias.txt")) != nil {

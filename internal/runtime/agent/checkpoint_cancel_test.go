@@ -9,6 +9,7 @@ import (
 	"testing/synctest"
 	"time"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/contract/event"
 	"reasonix/internal/contract/provider"
 	"reasonix/internal/contract/tool"
@@ -28,7 +29,7 @@ func TestCancelledCheckpointWaitNeverEntersToolOrHook(t *testing.T) {
 				name += "/capability"
 			}
 			t.Run(name, func(t *testing.T) {
-				root := t.TempDir()
+				root := testenv.TempDir(t)
 				path := filepath.Join(root, "note.txt")
 				if err := os.WriteFile(path, []byte("user bytes"), 0o600); err != nil {
 					t.Fatal(err)
@@ -99,7 +100,7 @@ func TestCancelledCheckpointWaitNeverEntersToolOrHook(t *testing.T) {
 }
 
 func TestCancelledCheckpointWaitReleasesProvisionalWorkspacePaths(t *testing.T) {
-	root, locks := t.TempDir(), t.TempDir()
+	root, locks := testenv.TempDir(t), testenv.TempDir(t)
 	owner, err := workspacelease.New(root, locks, nil)
 	if err != nil {
 		t.Fatal(err)

@@ -5,11 +5,12 @@ import (
 	"path/filepath"
 	"testing"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/ext/pluginpkg"
 )
 
 func TestRemovingAPluginReclaimsItsSupersededCopies(t *testing.T) {
-	home := t.TempDir()
+	home := testenv.TempDir(t)
 	dir := pluginpkg.PluginsDir(home)
 	mk := func(name string) string {
 		p := filepath.Join(dir, name)

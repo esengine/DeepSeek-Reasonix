@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/state/peermail"
 )
 
@@ -74,7 +75,7 @@ func TestEffectAReleasedPeerMessageStartsATurnOnAnIdleSession(t *testing.T) {
 // nothing into the prompt and does not hold the queue.
 func TestEffectPeerMessageTextIsNeverReadForFileReferences(t *testing.T) {
 	rec, peersDir, ctrl, held := buildPeerSession(t, true)
-	home := t.TempDir()
+	home := testenv.TempDir(t)
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
 	t.Setenv("REASONIX_HOME", filepath.Dir(peersDir))

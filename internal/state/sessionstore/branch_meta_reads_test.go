@@ -3,6 +3,7 @@ package sessionstore
 import (
 	"crypto/sha256"
 	"path/filepath"
+	"reasonix/internal/base/testenv"
 	"testing"
 )
 
@@ -16,7 +17,7 @@ func countMetaReads(t *testing.T) *int {
 // One locked read-modify-write reads the sidecar once: the update has already
 // seen what is on disk, so the write does not ask again.
 func TestOneMetaTransactionReadsTheSidecarOnce(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "s.jsonl")
+	path := filepath.Join(testenv.TempDir(t), "s.jsonl")
 	if err := UpdateSessionMeta(path, "m", "p", 1, true); err != nil {
 		t.Fatal(err)
 	}
@@ -37,7 +38,7 @@ func TestOneMetaTransactionReadsTheSidecarOnce(t *testing.T) {
 }
 
 func TestRecordingARevisionReadsTheSidecarOnceAndKeepsTheLedger(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "s.jsonl")
+	path := filepath.Join(testenv.TempDir(t), "s.jsonl")
 	if err := UpdateSessionMeta(path, "m", "p", 1, true); err != nil {
 		t.Fatal(err)
 	}
@@ -61,7 +62,7 @@ func TestRecordingARevisionReadsTheSidecarOnceAndKeepsTheLedger(t *testing.T) {
 
 // A revision another runtime already recorded must survive our write.
 func TestAWriterBehindTheLedgerDoesNotLowerIt(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "s.jsonl")
+	path := filepath.Join(testenv.TempDir(t), "s.jsonl")
 	if err := UpdateSessionMeta(path, "m", "p", 1, true); err != nil {
 		t.Fatal(err)
 	}

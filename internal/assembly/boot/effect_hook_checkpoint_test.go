@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/contract/event"
 	"reasonix/internal/contract/provider"
 	"reasonix/internal/ext/hook"
@@ -26,7 +27,7 @@ func TestEffectReadHooksLeaveCheckpointCoverage(t *testing.T) {
 			}
 			t.Run(name, func(t *testing.T) {
 				home := statedBootHome(t)
-				root := t.TempDir()
+				root := testenv.TempDir(t)
 				marker := filepath.Join(root, "hook.txt")
 				writeFile(t, root, "note.txt", "original")
 				kind := "hook-checkpoint-" + strings.ReplaceAll(t.Name(), "/", "-")

@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/contract/event"
 	"reasonix/internal/contract/provider"
 	"reasonix/internal/contract/tool"
@@ -49,7 +50,7 @@ func TestReadOnlyToolHooksHoldCheckpointWriteAdmission(t *testing.T) {
 				name = stage + "/capability"
 			}
 			t.Run(name, func(t *testing.T) {
-				root := t.TempDir()
+				root := testenv.TempDir(t)
 				path := filepath.Join(root, "hook.txt")
 				store := checkpoint.New("", root)
 				if err := store.Begin(0, "fixture", 0); err != nil {
@@ -121,7 +122,7 @@ func TestReadOnlyToolHooksHoldCheckpointWriteAdmission(t *testing.T) {
 }
 
 func TestReadHookStopsBeforeCallbackWhenCheckpointAdmissionFails(t *testing.T) {
-	root := t.TempDir()
+	root := testenv.TempDir(t)
 	store := checkpoint.New("", root)
 	if err := store.Begin(0, "fixture", 0); err != nil {
 		t.Fatal(err)
@@ -147,11 +148,11 @@ func TestReadOnlyWithoutToolMutationHooksDoesNotNeedCheckpointWriteAdmission(t *
 		hooks ToolHooks
 	}{
 		{name: "nil"},
-		{name: "empty", hooks: hook.NewRunner(nil, t.TempDir(), nil, nil)},
-		{name: "session-only", hooks: hook.NewRunner([]hook.ResolvedHook{{Event: hook.SessionStart}}, t.TempDir(), nil, nil)},
+		{name: "empty", hooks: hook.NewRunner(nil, testenv.TempDir(t), nil, nil)},
+		{name: "session-only", hooks: hook.NewRunner([]hook.ResolvedHook{{Event: hook.SessionStart}}, testenv.TempDir(t), nil, nil)},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			store := checkpoint.New("", t.TempDir())
+			store := checkpoint.New("", testenv.TempDir(t))
 			store.Barrier().Close()
 			reg := tool.NewRegistry()
 			reg.Add(fakeTool{name: "probe", readOnly: true})
@@ -167,7 +168,7 @@ func TestReadOnlyWithoutToolMutationHooksDoesNotNeedCheckpointWriteAdmission(t *
 
 func checkpointUndoForReadHook(t *testing.T) (*checkpoint.Store, string, string, string, checkpoint.RewindResult) {
 	t.Helper()
-	root, dir := t.TempDir(), t.TempDir()
+	root, dir := testenv.TempDir(t), testenv.TempDir(t)
 	path := filepath.Join(root, "note.txt")
 	if err := os.WriteFile(path, []byte("before"), 0o600); err != nil {
 		t.Fatal(err)

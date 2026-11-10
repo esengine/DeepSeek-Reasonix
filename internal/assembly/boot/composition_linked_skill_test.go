@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/contract/agentcomposition"
 	"reasonix/internal/contract/config"
 	"reasonix/internal/state/agentpreset"
@@ -15,7 +16,7 @@ func TestCompositionRetainsLinkedSkillAcrossRestart(t *testing.T) {
 	for _, layout := range []string{"directory", "file"} {
 		t.Run(layout, func(t *testing.T) {
 			home, root := compositionTestWorkspace(t, "openai")
-			source := t.TempDir()
+			source := testenv.TempDir(t)
 			writeFile(t, source, "SKILL.md", "---\nname: linked\ndescription: linked skill\n---\nORIGINAL SKILL")
 			writeFile(t, source, "references/guide.md", "ORIGINAL REFERENCE")
 			target, link := source, filepath.Join(home, "skills", "linked")
@@ -83,7 +84,7 @@ func TestCompositionRetainsLinkedSkillAcrossRestart(t *testing.T) {
 
 func TestCompositionLinkedSkillRejectsLinkedResources(t *testing.T) {
 	home, root := compositionTestWorkspace(t, "openai")
-	source, outside := t.TempDir(), t.TempDir()
+	source, outside := testenv.TempDir(t), testenv.TempDir(t)
 	writeFile(t, source, "SKILL.md", "---\nname: linked\ndescription: linked skill\n---\nSKILL")
 	writeFile(t, outside, "private.txt", "must not be retained")
 	if err := os.Symlink(filepath.Join(outside, "private.txt"), filepath.Join(source, "reference.md")); err != nil {

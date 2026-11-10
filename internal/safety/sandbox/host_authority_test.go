@@ -15,6 +15,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"reasonix/internal/base/testenv"
 )
 
 // authorityFixture is a stand-in host service plus an external listener. The
@@ -33,7 +35,7 @@ func newAuthorityFixture(t *testing.T) authorityFixture {
 	if _, err := exec.LookPath("python3"); err != nil {
 		t.Skip("python3 not installed")
 	}
-	// Not t.TempDir(): its name carries the test's, and a Unix socket path is
+	// Not testenv.TempDir(t): its name carries the test's, and a Unix socket path is
 	// capped near 104 bytes, so the listen would fail with "invalid argument".
 	bound, err := os.MkdirTemp("", "rxa")
 	if err != nil {
@@ -164,7 +166,7 @@ func TestAuthorityEndpointsFollowTheClientsResolution(t *testing.T) {
 			t.Error("a tcp:// daemon was treated as a socket to mask; it belongs to the network axis")
 		}
 	}
-	t.Setenv("SSH_AUTH_SOCK", filepath.Join(t.TempDir(), "missing.sock"))
+	t.Setenv("SSH_AUTH_SOCK", filepath.Join(testenv.TempDir(t), "missing.sock"))
 	if got := existingSockets(authorityEndpoints(SSHAgent, os.Getenv)); len(got) != 0 {
 		t.Errorf("a missing endpoint was kept (%v); masking it would fail the sandbox closed", got)
 	}
@@ -194,8 +196,8 @@ func TestAuthorityEndpointsCoverEveryGovernedClient(t *testing.T) {
 // confined command, so the client there reads the preset value and the preset
 // socket is the one the backend has to name.
 func TestAuthorityEndpointsFollowTheShellEnvOverride(t *testing.T) {
-	host := filepath.Join(t.TempDir(), "host-agent.sock")
-	preset := filepath.Join(t.TempDir(), "preset-agent.sock")
+	host := filepath.Join(testenv.TempDir(t), "host-agent.sock")
+	preset := filepath.Join(testenv.TempDir(t), "preset-agent.sock")
 	t.Setenv("SSH_AUTH_SOCK", host)
 
 	got := authorityEndpoints(SSHAgent, EffectiveGetenv(map[string]string{"SSH_AUTH_SOCK": preset}))

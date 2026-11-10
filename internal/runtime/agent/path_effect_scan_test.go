@@ -8,12 +8,13 @@ import (
 	"testing"
 	"time"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/safety/evidence"
 )
 
 func scanTree(t *testing.T, files int) string {
 	t.Helper()
-	root := t.TempDir()
+	root := testenv.TempDir(t)
 	for i := range files {
 		if err := os.WriteFile(filepath.Join(root, "f"+string(rune('a'+i%26))+string(rune('a'+i/26))), []byte("x"), 0o600); err != nil {
 			t.Fatal(err)

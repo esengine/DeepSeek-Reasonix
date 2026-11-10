@@ -12,6 +12,8 @@ import (
 	"testing"
 
 	"golang.org/x/sys/windows"
+
+	"reasonix/internal/base/testenv"
 )
 
 // The token the suite runs under decides what these measure: elevated means the
@@ -122,7 +124,7 @@ func TestProbeInheritedHandle(t *testing.T) {
 // Granting follows the tree of a root but not a link out of it, and a root that
 // is itself a link is refused.
 func TestGrantsDoNotFollowLinksOutOfARoot(t *testing.T) {
-	base := t.TempDir()
+	base := testenv.TempDir(t)
 	ws, out := filepath.Join(base, "ws"), filepath.Join(base, "out")
 	for _, d := range []string{ws, out} {
 		if err := os.MkdirAll(d, 0o755); err != nil {

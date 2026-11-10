@@ -3,10 +3,12 @@ package agentpreset
 import (
 	"errors"
 	"testing"
+
+	"reasonix/internal/base/testenv"
 )
 
 func TestRetiredBuiltinDefaultRequiresAnExplicitChoice(t *testing.T) {
-	s := New(t.TempDir(), t.TempDir())
+	s := New(testenv.TempDir(t), testenv.TempDir(t))
 	if err := writeJSON(s.UserDirectory()+"/settings.json", preferences{Default: "builtin:review"}); err != nil {
 		t.Fatal(err)
 	}

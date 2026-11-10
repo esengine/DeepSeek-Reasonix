@@ -13,6 +13,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"reasonix/internal/base/testenv"
 )
 
 func TestWebImageAcquisition(t *testing.T) {
@@ -34,7 +36,7 @@ func TestWebImageAcquisition(t *testing.T) {
 	if !strings.Contains(out, server.URL+"/photo.png") {
 		t.Errorf("web_fetch discarded image candidates: %s", out)
 	}
-	dir := t.TempDir()
+	dir := testenv.TempDir(t)
 	tools := (Workspace{Dir: dir}).Tools("import_web_image")
 	if len(tools) != 1 {
 		t.Fatal("image importer not registered")
@@ -84,7 +86,7 @@ func TestWebImageLive(t *testing.T) {
 	if page == "" {
 		t.Skip("set REASONIX_IMAGE_SMOKE_PAGE for an explicit network smoke test")
 	}
-	w := webImage{workDir: t.TempDir()}
+	w := webImage{workDir: testenv.TempDir(t)}
 	body, source, err := w.fetch(context.Background(), page, webFetchMaxRead)
 	if err != nil {
 		t.Fatal(err)
@@ -102,14 +104,14 @@ func TestWebImageLive(t *testing.T) {
 }
 
 func TestWebImageBoundaries(t *testing.T) {
-	dir := t.TempDir()
+	dir := testenv.TempDir(t)
 	w := webImage{workDir: dir, roots: realRoots([]string{filepath.Join(dir, "allowed")}), guard: NewSessionDataGuard(dir, nil)}
 	for _, path := range []string{"outside.png", "sessions/photo.png"} {
 		if _, err := w.Execute(context.Background(), argsJSON(t, map[string]any{"path": path, "alt": "Photo"})); err == nil {
 			t.Fatalf("accepted forbidden path %s", path)
 		}
 	}
-	outside := t.TempDir()
+	outside := testenv.TempDir(t)
 	if err := os.Symlink(outside, filepath.Join(dir, "escape")); err == nil {
 		w.roots = realRoots([]string{dir})
 		if _, err := w.Execute(context.Background(), argsJSON(t, map[string]any{"path": "escape/photo.png", "alt": "Photo"})); err == nil {

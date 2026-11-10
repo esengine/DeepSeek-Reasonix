@@ -93,7 +93,7 @@ func TestCreateCleansUpBranchWhenPopulateFails(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not installed")
 	}
-	repo := t.TempDir()
+	repo := testenv.TempDir(t)
 	git := func(args ...string) string {
 		t.Helper()
 		cmd := exec.Command("git", append([]string{"-C", repo}, args...)...)
@@ -115,13 +115,13 @@ func TestCreateCleansUpBranchWhenPopulateFails(t *testing.T) {
 	git("commit", "-q", "-m", "init")
 	// A user-scope required filter whose smudge fails: user scope stays live,
 	// so the checkout inside the new worktree fails.
-	global := filepath.Join(t.TempDir(), "gitconfig")
+	global := filepath.Join(testenv.TempDir(t), "gitconfig")
 	if err := os.WriteFile(global, []byte("[filter \"req\"]\n\tclean = cat\n\tsmudge = false\n\trequired = true\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("GIT_CONFIG_GLOBAL", global)
 
-	if _, err := Create(context.Background(), opened(t, repo), t.TempDir()); err == nil {
+	if _, err := Create(context.Background(), opened(t, repo), testenv.TempDir(t)); err == nil {
 		t.Fatal("Create succeeded with a failing required filter, want an error")
 	}
 	if refs := strings.TrimSpace(git("for-each-ref", "--format=%(refname)", "refs/heads/reasonix/")); refs != "" {

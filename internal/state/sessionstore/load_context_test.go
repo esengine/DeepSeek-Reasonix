@@ -4,12 +4,13 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"reasonix/internal/base/testenv"
 	"testing"
 	"time"
 )
 
 func TestLoadSessionContextCancelsWhileSaveOwnsPath(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "session.jsonl")
+	path := filepath.Join(testenv.TempDir(t), "session.jsonl")
 	if err := NewSession("system").Save(path); err != nil {
 		t.Fatal(err)
 	}
@@ -30,7 +31,7 @@ func TestLoadSessionContextCancelsWhileSaveOwnsPath(t *testing.T) {
 }
 
 func TestCanceledReplayDoesNotReturnDamagedPrefix(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "session.jsonl")
+	path := filepath.Join(testenv.TempDir(t), "session.jsonl")
 	if err := NewSession("system").Save(path); err != nil {
 		t.Fatal(err)
 	}

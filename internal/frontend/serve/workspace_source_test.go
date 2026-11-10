@@ -13,6 +13,7 @@ import (
 	"strings"
 	"testing"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/contract/config"
 	"reasonix/internal/contract/event"
 	"reasonix/internal/contract/provider"
@@ -26,8 +27,8 @@ import (
 
 func worktreeServer(t *testing.T) (*Server, string, string) {
 	t.Helper()
-	t.Setenv("REASONIX_HOME", t.TempDir())
-	dir := t.TempDir()
+	t.Setenv("REASONIX_HOME", testenv.TempDir(t))
+	dir := testenv.TempDir(t)
 	for _, args := range [][]string{{"init", "-q", "-b", "main"}, {"-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-qm", "base", "--allow-empty"}, {"branch", "studio"}} {
 		out, err := exec.Command("git", append([]string{"-C", dir}, args...)...).CombinedOutput()
 		if err != nil {

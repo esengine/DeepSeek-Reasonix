@@ -4,6 +4,8 @@ import (
 	"path/filepath"
 	"runtime"
 	"testing"
+
+	"reasonix/internal/base/testenv"
 )
 
 // A workspace opened at a drive root was listed as "\": filepath.Base answers
@@ -25,7 +27,7 @@ func TestRootNameOfAVolumeIsTheVolume(t *testing.T) {
 
 // An ordinary directory keeps the name it already had.
 func TestRootNameOfADirectoryIsItsBase(t *testing.T) {
-	dir := t.TempDir()
+	dir := testenv.TempDir(t)
 	if got, want := RootName(dir), filepath.Base(dir); got != want {
 		t.Fatalf("RootName(%q) = %q, want %q", dir, got, want)
 	}

@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/runtime/schedrun"
 	"reasonix/internal/state/schedule"
 )
@@ -60,7 +61,7 @@ type rig struct {
 
 func newRig(t *testing.T) *rig {
 	t.Helper()
-	dir := filepath.Join(t.TempDir(), "schedules")
+	dir := filepath.Join(testenv.TempDir(t), "schedules")
 	clk := &clock{t: epoch}
 	st, err := schedule.Open(dir)
 	if err != nil {

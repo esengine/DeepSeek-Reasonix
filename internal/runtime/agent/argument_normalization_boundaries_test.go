@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"reasonix/internal/base/diff"
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/contract/event"
 	"reasonix/internal/contract/provider"
 	"reasonix/internal/contract/tool"
@@ -144,7 +145,7 @@ func TestArgumentNormalizationPreservesSpilledOutputReads(t *testing.T) {
 	}})
 	var checked json.RawMessage
 	a := New(nil, reg, sessionstore.NewSession(""), Options{
-		ArchiveDir: t.TempDir(),
+		ArchiveDir: testenv.TempDir(t),
 		CheckTargetAccess: func(_ context.Context, _ tool.Tool, args json.RawMessage) error {
 			checked = append(json.RawMessage(nil), args...)
 			return nil
