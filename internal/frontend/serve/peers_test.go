@@ -17,6 +17,10 @@ import (
 
 func peerServer(t *testing.T, peersDir string, name string) *httptest.Server {
 	t.Helper()
+	t.Setenv("REASONIX_HOME", testenv.TempDir(t))
+	if err := os.WriteFile(config.UserConfigPath(), []byte("[peers]\nenabled = true\ndispatch = false\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	dir := testenv.TempDir(t)
 	path := filepath.Join(dir, "sessions", name+".jsonl")
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
