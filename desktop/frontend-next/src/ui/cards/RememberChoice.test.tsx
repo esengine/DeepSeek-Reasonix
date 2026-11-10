@@ -49,6 +49,14 @@ describe("RememberWhere for the questions that keep their answer somewhere other
     expect(note).toContain("随对话保存");
   });
 
+  it("write_scope names the project's extra folders, and does not claim a session answer survives a reopen", () => {
+    const note = where("write_scope");
+    expect(note).toContain("额外文件夹");
+    expect(note).not.toContain("权限规则");
+    expect(note).not.toContain("随对话保存");
+    expect(note).toContain("重新打开会话后会再问");
+  });
+
   it("keeps the permission-rule sentence for an ordinary tool", () => {
     expect(where("bash")).toContain("权限规则");
   });

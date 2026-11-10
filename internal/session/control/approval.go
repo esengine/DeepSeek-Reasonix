@@ -6,6 +6,8 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -37,6 +39,10 @@ type approvalManager struct {
 	approvals map[string]pendingApproval
 	asks      map[string]pendingAsk
 	granted   map[string]bool
+	// writeDirs are the folders the person allowed writes into for this session
+	// (resolved, so they compare with resolved targets). Kept apart from granted
+	// because a grant here covers a folder, not a tool.
+	writeDirs []string
 	ids       promptIDs
 	posture   approvalPosture
 	// approvalTimeout bounds how long requestApproval/Ask block on a user
@@ -156,6 +162,11 @@ func (a *approvalManager) preApprovedForDecision(tool, subject string, args json
 }
 
 func (a *approvalManager) preApprovedForDecisionOptions(tool, subject string, args json.RawMessage, fresh, requireHuman bool) bool {
+	if tool == WriteScopeApprovalTool {
+		// Answered by a folder the person allowed, never by a posture and never by
+		// a tool-wide session grant. The subject is the file being written.
+		return a.writeDirAllows(filepath.Dir(subject))
+	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if fresh {
@@ -243,13 +254,14 @@ func (a *approvalManager) grantSession(tool, subject string) {
 // rebuild must carry forward; see Controller.SessionAuthorizations /
 // RestoreSessionAuthorizations.
 type SessionAuthorizations struct {
-	Grants []string
+	Grants    []string
+	WriteDirs []string
 }
 
 func (a *approvalManager) snapshotSessionAuthorizations() SessionAuthorizations {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	auth := SessionAuthorizations{Grants: make([]string, 0, len(a.granted))}
+	auth := SessionAuthorizations{Grants: make([]string, 0, len(a.granted)), WriteDirs: slices.Clone(a.writeDirs)}
 	for rule := range a.granted {
 		auth.Grants = append(auth.Grants, rule)
 	}
@@ -261,6 +273,11 @@ func (a *approvalManager) restoreSessionAuthorizations(auth SessionAuthorization
 	defer a.mu.Unlock()
 	for _, rule := range auth.Grants {
 		a.granted[rule] = true
+	}
+	for _, dir := range auth.WriteDirs {
+		if !slices.Contains(a.writeDirs, dir) {
+			a.writeDirs = append(a.writeDirs, dir)
+		}
 	}
 }
 
@@ -652,7 +669,7 @@ func ParseToolApprovalMode(mode string) (string, bool) {
 // narrow operation in interactive or headless mode.
 func RequiresFreshHumanApprovalTool(tool string) bool {
 	switch tool {
-	case planApprovalTool, memoryRememberTool, memoryForgetTool, permission.ConfirmTool, permission.OriginConfirmTool, SandboxEscapeApprovalTool, ManagedConfigWriteApprovalTool, NetworkEgressApprovalTool, PaidSearchApprovalTool, MCPSignInApprovalTool, MCPScopeUpgradeApprovalTool, SettingApprovalTool, SettingElevatedApprovalTool:
+	case planApprovalTool, memoryRememberTool, memoryForgetTool, permission.ConfirmTool, permission.OriginConfirmTool, SandboxEscapeApprovalTool, ManagedConfigWriteApprovalTool, WriteScopeApprovalTool, DeleteScopeApprovalTool, NetworkEgressApprovalTool, PaidSearchApprovalTool, MCPSignInApprovalTool, MCPScopeUpgradeApprovalTool, SettingApprovalTool, SettingElevatedApprovalTool:
 		return true
 	default:
 		return false
@@ -669,6 +686,10 @@ func requiresFreshApprovalTool(tool string) bool {
 // drops promises what it cannot keep — the label said "do not ask again" while
 // the grant died with the session.
 func ApprovalGrants(tool string, fresh bool) (session, persist bool) {
+	if tool == WriteScopeApprovalTool {
+		// Both are narrowed per request to a folder that may be granted at all.
+		return true, true
+	}
 	if fresh || RequiresFreshHumanApprovalTool(tool) {
 		return allowsFreshSessionGrantTool(tool), false
 	}
@@ -738,8 +759,9 @@ func (a *approvalManager) revokeSessionGrant(rule string) int {
 	a.mu.Lock()
 	n := 0
 	if rule == "" {
-		n = len(a.granted)
+		n = len(a.granted) + len(a.writeDirs)
 		clear(a.granted)
+		a.writeDirs = nil
 	} else if a.granted[rule] {
 		delete(a.granted, rule)
 		n = 1

@@ -155,7 +155,7 @@ func (c *Controller) EnableInteractiveApproval() {
 		return
 	}
 	escapeApprover := sandboxEscapeApprover{c}
-	configApprover := managedConfigWriteApprover{c}
+	configApprover := fileWriteApprover{c}
 	paidApprover := paidSearchApprover{c}
 	if c.executor != nil {
 		c.executor.SetPaidSearchApprover(paidApprover)
@@ -436,6 +436,10 @@ func (c *Controller) ReplayPendingPromptsWith(sinkFactory func() event.Sink) {
 func (c *Controller) replayPendingPromptsTo(sink event.Sink) bool {
 	approvals, asks := c.approval.snapshotPrompts()
 	for i := range approvals {
+		if approvals[i].Tool == WriteScopeApprovalTool {
+			approvals[i].AllowsSession, approvals[i].AllowsPersist = c.approvalGrants(approvals[i].Tool, approvals[i].Subject, true, false)
+			continue
+		}
 		approvals[i].AllowsPersist = c.offersPersist(approvals[i].Tool, approvals[i].AllowsPersist)
 	}
 	c.emitPendingPrompts(sink, approvals, asks)
@@ -628,11 +632,11 @@ func (c *Controller) requestApprovalDecision(ctx context.Context, req approvalRe
 		id, reply = c.approval.registerWithInput(req.tool, req.subject, req.reason, req.args)
 	}
 
-	session, persist := approvalGrantsForRequest(req.tool, req.fresh, req.requireHuman)
+	session, persist := c.approvalGrants(req.tool, req.subject, req.fresh, req.requireHuman)
 	c.sink.Emit(c.approvalRequestEvent(event.Approval{
 		ID: id, Tool: req.tool, Subject: req.subject, Reason: req.reason, ReasonCode: ExplicitApprovalCode(req.tool, req.subject),
 		RawInput: append(json.RawMessage(nil), req.args...), Fresh: req.fresh,
-		AllowsSession: session, AllowsPersist: c.offersPersist(req.tool, persist), Kind: kind,
+		AllowsSession: session, AllowsPersist: persist, Kind: kind,
 	}))
 	c.approval.promptEmitMu.Unlock()
 	// The agent now needs the user's attention; a Notification hook can ping an
@@ -644,6 +648,11 @@ func (c *Controller) requestApprovalDecision(ctx context.Context, req approvalRe
 
 	select {
 	case r := <-reply:
+		if req.tool == WriteScopeApprovalTool {
+			// Recorded while the prompt lock is still held, so a question for the
+			// same folder queued behind this one sees the grant when it re-checks.
+			c.noteWriteScopeReply(req.subject, r)
+		}
 		return r, nil
 	case <-waitCtx.Done():
 		c.approval.cancel(id)

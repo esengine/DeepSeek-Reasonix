@@ -108,3 +108,61 @@ describe("an approval that opens folders as projects", () => {
     expect([...box.querySelectorAll("li code")].map((c) => c.textContent)).toEqual(["/only"]);
   });
 });
+
+describe("a write outside the folders the agent may change", () => {
+  const card = (over: Partial<Approval["a"]> = {}) =>
+    draw({ id: "w1", tool: "write_scope", subject: "/srv/app/wsl.conf", reason: "这个文件在 agent 可写的文件夹之外。「本会话允许」和「始终允许」只放开 /srv/app 及其下面的内容，不是整个磁盘。", fresh: true, allowsSession: true, allowsPersist: true, input: { path: "/srv/app/wsl.conf", dir: "/srv/app" }, ...over });
+
+  it("is titled for what it is, and names the file rather than the internal tool", () => {
+    const box = card();
+    expect(box.querySelector(".nm")?.textContent).toBe(t("chat.asking_to_write_outside_the_workspace"));
+    expect(box.querySelector(".tool")?.textContent).toBe(t("chat.a_file_outside_the_workspace"));
+    expect(box.querySelector(".tool")?.textContent).not.toContain("write_scope");
+    expect(box.querySelector(".sub")?.textContent).toBe("/srv/app/wsl.conf");
+  });
+
+  it("says which folder a wider answer covers", () => {
+    expect(card().querySelector(".apv")?.textContent).toContain("/srv/app 及其下面的内容");
+  });
+
+  it("offers this once, this folder for the session, and always, then refuse", () => {
+    const box = card();
+    expect(box.querySelector('[data-value="once"]')).not.toBeNull();
+    expect(box.querySelector('[data-value="session"]')).not.toBeNull();
+    expect(box.querySelector('[data-value="always"]')).not.toBeNull();
+    expect(box.querySelector('[data-value="deny"]')).not.toBeNull();
+  });
+
+  it("offers neither wider answer for a folder the kernel will not grant", () => {
+    const box = card({ allowsSession: false, allowsPersist: false });
+    expect(box.querySelector('[data-value="session"]')).toBeNull();
+    expect(box.querySelector('[data-value="always"]')).toBeNull();
+    expect(box.querySelector('[data-value="once"]')).not.toBeNull();
+  });
+
+  it("does not offer to switch to full access, which cannot answer it", () => {
+    expect(card().querySelector('[data-action="decision.full-access"]')).toBeNull();
+  });
+});
+
+describe("a recursive delete outside the workspace", () => {
+  const card = (over: Partial<Approval["a"]> = {}) =>
+    draw({ id: "d1", tool: "delete_scope", subject: "/tmp/nas, /tmp/askpass.sh", reason: "这条命令会递归删除工作区和你已授权的文件夹之外的路径：/tmp/nas, /tmp/askpass.sh。只有你允许才会执行，这次答复只对这一条命令有效。", fresh: true, allowsSession: false, allowsPersist: false, input: { paths: ["/tmp/nas", "/tmp/askpass.sh"] }, ...over });
+
+  it("is titled for what it is, and names the targets rather than the internal tool", () => {
+    const box = card();
+    expect(box.querySelector(".nm")?.textContent).toBe(t("chat.asking_to_delete_outside_the_workspace"));
+    expect(box.querySelector(".tool")?.textContent).toBe(t("chat.paths_outside_the_workspace"));
+    expect(box.querySelector(".tool")?.textContent).not.toContain("delete_scope");
+    expect(box.querySelector(".sub")?.textContent).toBe("/tmp/nas, /tmp/askpass.sh");
+  });
+
+  it("covers one command: once or refuse, never a remembered answer or full access", () => {
+    const box = card();
+    expect(box.querySelector('[data-value="once"]')).not.toBeNull();
+    expect(box.querySelector('[data-value="deny"]')).not.toBeNull();
+    expect(box.querySelector('[data-value="session"]')).toBeNull();
+    expect(box.querySelector('[data-value="always"]')).toBeNull();
+    expect(box.querySelector('[data-action="decision.full-access"]')).toBeNull();
+  });
+});

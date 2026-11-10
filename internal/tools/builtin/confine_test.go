@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -252,6 +253,128 @@ func TestManagedConfigWriteGatedOnApprover(t *testing.T) {
 		if _, err := os.Stat(target); !os.IsNotExist(err) {
 			t.Fatalf("file must not be created %s, stat err=%v", target, err)
 		}
+	}
+}
+
+// stubScopeApprover is a scripted approver for both questions the file tools can
+// put: a managed-config write and a write outside the scope.
+type stubScopeApprover struct {
+	stubConfigWriteApprover
+	allowScope  bool
+	scopeReason string
+	sessionDirs []string
+	scopeAsked  []tool.WriteScopeRequest
+}
+
+func (s *stubScopeApprover) ApproveWriteScope(_ context.Context, req tool.WriteScopeRequest) (bool, string, error) {
+	s.scopeAsked = append(s.scopeAsked, req)
+	return s.allowScope, s.scopeReason, nil
+}
+
+func (s *stubScopeApprover) WriteScopeSessionAllowed(_ context.Context, req tool.WriteScopeRequest) bool {
+	return slices.Contains(s.sessionDirs, req.Dir)
+}
+
+func outsideTarget(t *testing.T) (project, target string) {
+	t.Helper()
+	home := isolateBuiltinTestUserState(t)
+	project = filepath.Join(home, "project")
+	other := filepath.Join(home, "elsewhere")
+	for _, d := range []string{project, other} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return project, filepath.Join(other, "wsl.conf")
+}
+
+func writeArgs(target string) json.RawMessage {
+	args, _ := json.Marshal(map[string]string{"path": target, "content": "x\n"})
+	return args
+}
+
+func TestWriteOutsideScopeAsksAndWritesWhenAllowed(t *testing.T) {
+	project, target := outsideTarget(t)
+	w := writeFile{roots: realRoots(config.Default().WriteRootsForRoot(project))}
+	approver := &stubScopeApprover{allowScope: true}
+	ctx := tool.WithConfigWriteApprover(context.Background(), approver)
+	if _, err := w.Execute(ctx, writeArgs(target)); err != nil {
+		t.Fatalf("an allowed write outside the scope should land: %v", err)
+	}
+	if _, err := os.Stat(target); err != nil {
+		t.Fatalf("file not written: %v", err)
+	}
+	if len(approver.scopeAsked) != 1 {
+		t.Fatalf("asked %d times, want once", len(approver.scopeAsked))
+	}
+	got := approver.scopeAsked[0]
+	if got.Dir != filepath.Dir(got.Path) || !strings.HasSuffix(got.Path, "wsl.conf") {
+		t.Fatalf("request = %+v, want the target and its parent folder", got)
+	}
+}
+
+func TestWriteOutsideScopeStaysRefusedWhenDeclined(t *testing.T) {
+	project, target := outsideTarget(t)
+	w := writeFile{roots: realRoots(config.Default().WriteRootsForRoot(project))}
+	approver := &stubScopeApprover{scopeReason: "the user declined this write; do not retry it"}
+	ctx := tool.WithConfigWriteApprover(context.Background(), approver)
+	_, err := w.Execute(ctx, writeArgs(target))
+	if err == nil || !strings.Contains(err.Error(), "declined") {
+		t.Fatalf("a declined write should carry the reason, got %v", err)
+	}
+	var refusal tool.Refusal
+	if !errors.As(err, &refusal) || refusal.Code != CodeWriteOutsideScope {
+		t.Fatalf("a declined write keeps its identity %q, got %v", CodeWriteOutsideScope, err)
+	}
+	if _, statErr := os.Stat(target); !os.IsNotExist(statErr) {
+		t.Fatalf("declined write must not land, stat err=%v", statErr)
+	}
+}
+
+func TestWriteOutsideScopeIsRefusedWithoutAnApprover(t *testing.T) {
+	project, target := outsideTarget(t)
+	w := writeFile{roots: realRoots(config.Default().WriteRootsForRoot(project))}
+	for name, ctx := range map[string]context.Context{
+		"no approver on the context":         context.Background(),
+		"an approver that only knows config": tool.WithConfigWriteApprover(context.Background(), &stubConfigWriteApprover{allow: true}),
+	} {
+		_, err := w.Execute(ctx, writeArgs(target))
+		if err == nil || !strings.Contains(err.Error(), "outside the workspace write scope") {
+			t.Fatalf("%s: want the plain refusal, got %v", name, err)
+		}
+		if _, statErr := os.Stat(target); !os.IsNotExist(statErr) {
+			t.Fatalf("%s: file must not be written", name)
+		}
+	}
+}
+
+func TestWriteOutsideScopeSkipsTheQuestionForAFolderAllowedThisSession(t *testing.T) {
+	project, target := outsideTarget(t)
+	w := writeFile{roots: realRoots(config.Default().WriteRootsForRoot(project))}
+	approver := &stubScopeApprover{sessionDirs: []string{filepath.Dir(target)}}
+	ctx := tool.WithConfigWriteApprover(context.Background(), approver)
+	if _, err := w.Execute(ctx, writeArgs(target)); err != nil {
+		t.Fatalf("a folder allowed for the session should take the write: %v", err)
+	}
+	if len(approver.scopeAsked) != 0 {
+		t.Fatalf("the user was asked again: %v", approver.scopeAsked)
+	}
+}
+
+func TestWriteOutsideScopeAnswerDoesNotLiftTheSessionDataGuard(t *testing.T) {
+	project, _ := outsideTarget(t)
+	memory := filepath.Join(filepath.Dir(project), "memory-store")
+	if err := os.MkdirAll(memory, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	w := writeFile{roots: realRoots(config.Default().WriteRootsForRoot(project)), guard: NewSessionDataGuard(memory, nil)}
+	ctx := tool.WithConfigWriteApprover(context.Background(), &stubScopeApprover{allowScope: true})
+	target := filepath.Join(memory, "settings.json")
+	if _, err := w.Execute(ctx, writeArgs(target)); err == nil {
+		t.Fatal("an approval must not let a write through the guard on Reasonix's own session stores")
+	}
+	if _, statErr := os.Stat(target); !os.IsNotExist(statErr) {
+		t.Fatalf("guarded file must not be written, stat err=%v", statErr)
 	}
 }
 

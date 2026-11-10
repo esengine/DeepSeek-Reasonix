@@ -20,6 +20,10 @@ const SETTING_TOOL = "setting_change";
 const SETTING_ELEVATED_TOOL = "setting_change_elevated";
 // A call that repeats text from outside; the card says so instead of showing the tool id.
 const ORIGIN_TOOL = "origin_check";
+// A file write the agent's scope refused. The subject is the file; a wider answer covers its folder.
+const WRITE_SCOPE_TOOL = "write_scope";
+// A recursive delete beyond the workspace. The subject is the targets; the answer covers that command only.
+const DELETE_SCOPE_TOOL = "delete_scope";
 
 // Why no posture answers for this call. The kernel names the class and writes
 // the sentence it gave the model; a reader gets that class in their own
@@ -141,13 +145,13 @@ export function ApprovalCard({ item, onApprove, onFullAccess, onPlan }: Props) {
       </div>
       <div className="c">
         <div className="hl">
-          <span className="nm">{item.a.tool === FENCE_TOOL ? t("chat.asking_to_widen_what_it") : isSetting ? t("chat.asks_to_change_a_setting") : t("chat.permission_to_run")}</span>
+          <span className="nm">{item.a.tool === FENCE_TOOL ? t("chat.asking_to_widen_what_it") : item.a.tool === WRITE_SCOPE_TOOL ? t("chat.asking_to_write_outside_the_workspace") : item.a.tool === DELETE_SCOPE_TOOL ? t("chat.asking_to_delete_outside_the_workspace") : isSetting ? t("chat.asks_to_change_a_setting") : t("chat.permission_to_run")}</span>
           <span className="tag" data-pending={sealed ? undefined : ""}>{sealed ? t("chat.handled") : t("chat.needs_you")}</span>
         </div>
         <div className="out">
           <div className="apv" data-sealed={sealed ? item.verdict : undefined} aria-busy={!!submitting}>
             <div className="apv-hd" data-whole={item.a.tool === ORIGIN_TOOL ? "" : undefined}>
-              <span className="tool">{item.a.tool === FENCE_TOOL ? t("chat.a_file_outside_this_subtasks") : isSetting ? t("common.settings") : item.a.tool === ORIGIN_TOOL ? t("chat.text_from_outside") : item.a.tool}</span>
+              <span className="tool">{item.a.tool === FENCE_TOOL ? t("chat.a_file_outside_this_subtasks") : item.a.tool === WRITE_SCOPE_TOOL ? t("chat.a_file_outside_the_workspace") : item.a.tool === DELETE_SCOPE_TOOL ? t("chat.paths_outside_the_workspace") : isSetting ? t("common.settings") : item.a.tool === ORIGIN_TOOL ? t("chat.text_from_outside") : item.a.tool}</span>
               <span className="sub" title={item.a.subject}>{item.a.subject}</span>
             </div>
             {item.a.scope && <ApprovalScope scope={item.a.scope} input={item.a.input} />}

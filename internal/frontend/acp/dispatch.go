@@ -417,7 +417,7 @@ func (s *updateSink) requestPermission(ctx context.Context, a event.Approval) {
 	if a.Subject != "" {
 		title = a.Tool + " " + a.Subject
 	}
-	options := approvalOptions(a.Tool, a.Subject, a.Fresh, a.AllowsPersist)
+	options := permissionOptions(a)
 	params := PermissionRequestParams{
 		SessionID: s.sessionID,
 		ToolCall: PermissionToolCall{

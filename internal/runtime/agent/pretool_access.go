@@ -15,7 +15,7 @@ func (a *Agent) applyTargetAccess(ctx context.Context, plan *toolCallPlan) (tool
 		check = tool.UnconfiguredFileAccess
 	}
 	target, args := plan.executionTarget()
-	if err := check(ctx, target, args); err != nil {
+	if err := check(a.withWriteApprover(ctx), target, args); err != nil {
 		msg := err.Error()
 		var refusal tool.Refusal
 		code := ""
@@ -60,4 +60,12 @@ func (p *toolCallPlan) executionTarget() (tool.Tool, json.RawMessage) {
 		args = json.RawMessage(`{}`)
 	}
 	return p.resolved.Target, args
+}
+
+// withWriteApprover lets the admission check see whether a person can be asked
+// about a write outside the scope. The approver is stamped on a call's own
+// context only after admission, so the check would otherwise refuse what
+// execution could have put to the user.
+func (a *Agent) withWriteApprover(ctx context.Context) context.Context {
+	return tool.WithConfigWriteApprover(ctx, a.svc.configWrite)
 }

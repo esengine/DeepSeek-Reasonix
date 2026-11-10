@@ -315,14 +315,14 @@ func sandboxEscapeApprovalReason(reason string) string {
 	return reason
 }
 
-// managedConfigWriteApprover routes a file tool's Reasonix-managed config write
+// fileWriteApprover routes a file tool's Reasonix-managed config write
 // through the fresh-human approval prompt (see ManagedConfigWriteApprovalTool).
 // A session grant is tool-wide (mirroring sandbox_escape): one "allow for this
 // session" covers the rest of the repair flow across the handful of managed
 // config files without re-prompting on every incremental edit.
-type managedConfigWriteApprover struct{ c *Controller }
+type fileWriteApprover struct{ c *Controller }
 
-func (m managedConfigWriteApprover) ApproveManagedConfigWrite(ctx context.Context, req tool.ConfigWriteRequest) (bool, string, error) {
+func (m fileWriteApprover) ApproveManagedConfigWrite(ctx context.Context, req tool.ConfigWriteRequest) (bool, string, error) {
 	subject := managedConfigWriteApprovalSubject(req.Path)
 	args, _ := json.Marshal(map[string]string{"path": req.Path})
 	reply, err := m.c.requestApprovalDecision(ctx, approvalRequest{tool: ManagedConfigWriteApprovalTool, subject: subject, args: args, reason: i18n.M.ConfigWriteReason, fresh: true})
@@ -338,7 +338,7 @@ func (m managedConfigWriteApprover) ApproveManagedConfigWrite(ctx context.Contex
 	return true, "", nil
 }
 
-func (m managedConfigWriteApprover) ManagedConfigWriteSessionAllowed(_ context.Context, req tool.ConfigWriteRequest) bool {
+func (m fileWriteApprover) ManagedConfigWriteSessionAllowed(_ context.Context, req tool.ConfigWriteRequest) bool {
 	return m.c.approval.preApprovedForDecision(ManagedConfigWriteApprovalTool, managedConfigWriteApprovalSubject(req.Path), nil, true)
 }
 

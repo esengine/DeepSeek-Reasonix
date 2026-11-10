@@ -207,6 +207,9 @@ type Messages struct {
 	ConfigWriteSubjectPrefix       string // subject prefix before the config file path for managed config write approval
 	ConfigWriteReason              string // reason shown for managed config write approval
 	ConfigWriteDeclined            string // model-facing denial when the user declines a managed config write
+	WriteScopeReasonFmt            string // reason on the write-outside-scope card: the folder a wider answer covers
+	ScopeDeclined                  string // model-facing denial when the user declines a write or delete outside the scope
+	DeleteScopeReasonFmt           string // reason on the recursive-delete-outside-scope card: the targets
 	ConfigWriteApprovalChoices     string // approval choice list for managed config write prompts
 	PermissionSavedFmt             string // permission rule saved notice: path, rule
 	PermissionAlreadyAllowedFmt    string // permission rule already covered notice: path, rule

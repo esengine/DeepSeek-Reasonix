@@ -52,7 +52,7 @@ func (w Workspace) TargetAccessCheck() tool.TargetAccessCheck {
 				return fmt.Errorf("no file targets resolved for %s", target.Name())
 			}
 			for _, path := range paths {
-				if err := confinePreview(roots, w.SessionGuard, w.ManagedConfig, w.SessionTemp, path); err != nil {
+				if err := confinePreview(roots, w.SessionGuard, w.ManagedConfig, w.SessionTemp, path); err != nil && !admitsForQuestion(ctx, err) {
 					return err
 				}
 			}

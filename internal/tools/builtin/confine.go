@@ -285,7 +285,7 @@ func confineWrite(ctx context.Context, roots []string, guard SessionDataGuard, m
 		return confineErr
 	}
 	if !managed.Match(target) {
-		return withSessionTempAlternative(temp, confineErr)
+		return askWriteScope(ctx, guard, temp, confineErr, target)
 	}
 	if err := guard.Check(target); err != nil {
 		return err

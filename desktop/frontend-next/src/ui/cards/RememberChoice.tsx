@@ -34,12 +34,20 @@ export function RememberChoice({ options, target, busy, disabled, onChoose }: {
 
 const SESSION_KEPT = "chat.allow_for_this_session_lasts";
 
+// A session answer that is kept differently from the rest. A folder allowed for
+// a write outside the scope lives with the running session, not with the saved
+// conversation, so it must not claim to survive a reopen.
+const SESSION_KEPT_AS: Record<string, string> = {
+  write_scope: "chat.allow_this_folder_lasts_for_the_session",
+};
+
 // Where an always answer is kept, for the questions that do not write a
 // permission rule. Keyed on the tool id the kernel puts on the card.
 const ALWAYS_KEPT_AT: Record<string, string> = {
   paid_search: "chat.always_allow_adds_this_paid",
   network_egress: "chat.always_allow_adds_this_domain",
   mcp_signin: "chat.always_allow_records_this_sign",
+  write_scope: "chat.always_allow_adds_this_folder",
 };
 
 const ALWAYS_KEPT_AS_RULE = "chat.always_allow_is_saved_as";
@@ -50,6 +58,7 @@ const ALWAYS_KEPT_AS_RULE = "chat.always_allow_is_saved_as";
 export function RememberWhere({ options, target, tool }: { options: readonly Remembered[]; target: string; tool?: string }) {
   if (options.length === 0) return null;
   const always = (tool && ALWAYS_KEPT_AT[tool]) || ALWAYS_KEPT_AS_RULE;
-  const text = [options.includes("session") && SESSION_KEPT, options.includes("always") && always].filter((x): x is string => !!x).map((x) => t(x)).join(" ");
+  const session = (tool && SESSION_KEPT_AS[tool]) || SESSION_KEPT;
+  const text = [options.includes("session") && session, options.includes("always") && always].filter((x): x is string => !!x).map((x) => t(x)).join(" ");
   return <div className="apv-note" id={`remember-where-${target}`}>{text}</div>;
 }
