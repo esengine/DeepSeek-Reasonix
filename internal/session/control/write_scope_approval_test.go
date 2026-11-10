@@ -362,12 +362,29 @@ func TestDeleteScopeNeverAsksAboutAPathNoApprovalMayOpen(t *testing.T) {
 	t.Setenv("HOME", userHome)
 	t.Setenv("USERPROFILE", userHome)
 	_, got := h.askDelete(t, []string{userHome}, nil)
-	if !errors.Is(got.err, tool.ErrDeleteTargetProtected) || got.allow {
+	if !errors.Is(got.err, tool.ErrScopeTargetProtected) || got.allow {
 		t.Fatalf("a home directory should be refused as protected: %+v", got)
 	}
 	select {
 	case card := <-h.requests:
 		t.Fatalf("the question was put for a protected path: %+v", card)
+	default:
+	}
+}
+
+func TestWriteScopeNeverAsksAboutAProtectedTarget(t *testing.T) {
+	h := newScopeHarness(t)
+	userHome := testenv.TempDir(t)
+	t.Setenv("HOME", userHome)
+	t.Setenv("USERPROFILE", userHome)
+	target := tool.WriteScopeRequest{Path: filepath.Join(userHome, ".ssh", "authorized_keys"), Dir: filepath.Join(userHome, ".ssh")}
+	allow, _, err := h.approver().ApproveWriteScope(context.Background(), target)
+	if !errors.Is(err, tool.ErrScopeTargetProtected) || allow {
+		t.Fatalf("a credential file should be refused as protected: allow=%v err=%v", allow, err)
+	}
+	select {
+	case card := <-h.requests:
+		t.Fatalf("the question was put for a protected target: %+v", card)
 	default:
 	}
 }

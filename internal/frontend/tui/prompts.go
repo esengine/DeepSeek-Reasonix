@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -36,6 +37,10 @@ func (m *model) approvalChoices(a *eventwire.Approval) []approvalChoice {
 	scope := a.Scope
 	if scope == "" {
 		scope = termrender.ToolDisplayName(a.Tool)
+	}
+	if a.Tool == "write_scope" {
+		// A wider answer covers the file's folder, so the choices name it.
+		scope = filepath.Dir(a.Subject)
 	}
 	tmpl := i18n.M.ToolApprovalChoices
 	l := choiceLabels(fmt.Sprintf(tmpl, repeatArg(scope, strings.Count(tmpl, "%s"))...), 4)

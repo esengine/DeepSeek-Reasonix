@@ -155,7 +155,7 @@ func (b bash) judgeDelete(ctx context.Context, sh sandbox.Shell, command string,
 				case deleteOutside:
 					seen.outside = appendMissing(seen.outside, resolved)
 				default:
-					return deleteRefusal(CodeDestructiveTarget, destructiveTargetMessage)
+					return deleteRefusal(CodeDestructiveTarget, protectedTargetMessage)
 				}
 			}
 		}

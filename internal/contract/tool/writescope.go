@@ -5,10 +5,10 @@ import (
 	"errors"
 )
 
-// ErrDeleteTargetProtected is what a DeleteScopeApprover returns for a target no
+// ErrScopeTargetProtected is what a scope approver returns for a target no
 // approval may open (Reasonix's own storage, a credential directory, a home
 // directory, a filesystem root), so the caller refuses without anyone being asked.
-var ErrDeleteTargetProtected = errors.New("delete target is protected")
+var ErrScopeTargetProtected = errors.New("scope target is protected")
 
 // WriteScopeRequest describes a file-tool write whose target lies outside the
 // workspace write scope (workspace_root plus allow_write and granted roots).

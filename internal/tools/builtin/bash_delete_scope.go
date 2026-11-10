@@ -9,7 +9,9 @@ import (
 	"reasonix/internal/contract/tool"
 )
 
-const destructiveTargetMessage = "Use a target strictly inside the workspace or granted write roots; home, filesystem roots and workspace ancestors are protected in every approval mode, and a target outside the workspace needs the user's approval, which this session cannot ask for."
+const destructiveTargetMessage = "Use a target strictly inside the workspace or granted write roots; a target outside the workspace needs the user's approval, which this session cannot ask for."
+
+const protectedTargetMessage = "Use a target strictly inside the workspace or granted write roots; this path is protected (a filesystem root, a home directory, an ancestor of the workspace, or one that cannot be resolved) and no approval can open it."
 
 const deleteScopeDeclined = "the user declined this recursive delete outside the workspace; do not retry it, ask how they would like to proceed"
 
@@ -43,8 +45,8 @@ func askDeleteOutsideScope(ctx context.Context, paths []string) error {
 		return deleteRefusal(CodeDestructiveTarget, destructiveTargetMessage)
 	}
 	allow, reason, err := approver.ApproveDeleteScope(ctx, tool.DeleteScopeRequest{Paths: paths})
-	if errors.Is(err, tool.ErrDeleteTargetProtected) {
-		return deleteRefusal(CodeDestructiveTarget, destructiveTargetMessage)
+	if errors.Is(err, tool.ErrScopeTargetProtected) {
+		return deleteRefusal(CodeDestructiveTarget, protectedTargetMessage)
 	}
 	if err != nil {
 		return err

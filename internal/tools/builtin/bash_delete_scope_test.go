@@ -141,3 +141,21 @@ func TestRecursiveDeleteOfWhatNobodyShouldDeleteIsNeverAskedAbout(t *testing.T) 
 		t.Fatalf("the question was put (%v) or something ran (%d)", approver.asked, r.terminal.calls)
 	}
 }
+
+// The two reasons a delete is refused have different ways forward, so the model is
+// told which one it hit: nobody could be asked, or no answer would ever allow it.
+func TestRecursiveDeleteRefusalSaysWhetherAnyoneCouldHaveAllowedIt(t *testing.T) {
+	r := newDeleteScopeRig(t)
+	noOne := r.run(context.Background(), "rm -rf '"+filepath.ToSlash(r.victim)+"'")
+	protected := r.run(tool.WithConfigWriteApprover(context.Background(), &stubDeleteApprover{allow: true}), "rm -rf /")
+	var a, b tool.Refusal
+	if !errors.As(noOne, &a) || !errors.As(protected, &b) {
+		t.Fatalf("both should be refusals: %v / %v", noOne, protected)
+	}
+	if !strings.Contains(a.Message, "needs the user's approval") {
+		t.Errorf("a delete nobody could be asked about should say so: %q", a.Message)
+	}
+	if strings.Contains(b.Message, "needs the user's approval") || !strings.Contains(b.Message, "no approval can open it") {
+		t.Errorf("a protected target must not suggest asking the user: %q", b.Message)
+	}
+}

@@ -10,6 +10,8 @@ import (
 	"reasonix/internal/state/sessiontemp"
 )
 
+const protectedWriteMessage = "write refused: this path is protected (Reasonix storage, a credential directory, a home directory or a filesystem root) and no approval can open it; write inside the workspace or ask the user to do it themselves"
+
 const writeScopeDeclined = "the user declined this write outside the workspace; do not retry it, ask how they would like to proceed"
 
 // askWriteScope puts a write outside the write scope to the user, through the
@@ -35,6 +37,9 @@ func askWriteScope(ctx context.Context, guard SessionDataGuard, temp *sessiontem
 		return nil
 	}
 	allow, reason, err := approver.ApproveWriteScope(ctx, req)
+	if errors.Is(err, tool.ErrScopeTargetProtected) {
+		return tool.Refusal{Code: CodeWriteOutsideScope, Message: protectedWriteMessage}
+	}
 	if err != nil {
 		return err
 	}

@@ -778,3 +778,25 @@ func TestConfineRefusalPrintsTheTargetVerbatim(t *testing.T) {
 		t.Errorf("refusal does not name the scope %s: %s", root, msg)
 	}
 }
+
+// protectedScopeApprover refuses every target the way the controller does for a
+// path no approval may open.
+type protectedScopeApprover struct{ stubScopeApprover }
+
+func (protectedScopeApprover) ApproveWriteScope(context.Context, tool.WriteScopeRequest) (bool, string, error) {
+	return false, "", tool.ErrScopeTargetProtected
+}
+
+func TestWriteOutsideScopeToAProtectedTargetIsRefusedWithItsOwnReason(t *testing.T) {
+	project, target := outsideTarget(t)
+	w := writeFile{roots: realRoots(config.Default().WriteRootsForRoot(project))}
+	ctx := tool.WithConfigWriteApprover(context.Background(), &protectedScopeApprover{})
+	_, err := w.Execute(ctx, writeArgs(target))
+	var refusal tool.Refusal
+	if !errors.As(err, &refusal) || refusal.Code != CodeWriteOutsideScope || !strings.Contains(refusal.Message, "no approval can open it") {
+		t.Fatalf("want the protected-target refusal, got %v", err)
+	}
+	if _, statErr := os.Stat(target); !os.IsNotExist(statErr) {
+		t.Fatalf("a protected target must not be written, stat err=%v", statErr)
+	}
+}

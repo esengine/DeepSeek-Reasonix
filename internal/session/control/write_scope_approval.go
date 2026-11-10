@@ -28,11 +28,14 @@ const WriteScopeApprovalTool = "write_scope"
 const DeleteScopeApprovalTool = "delete_scope"
 
 // ApproveWriteScope is the card a file tool puts up when a write lands outside
-// the workspace write scope. Three answers: this write only; this folder for the
+// the workspace write scope; a target no approval may open is refused unasked. Three answers: this write only; this folder for the
 // rest of the session; this folder written down for this project. A wider
 // answer is honoured only for a folder that passes the vetting a stored grant
 // has to pass, whatever the frontend sent — the card never offers the others.
 func (m fileWriteApprover) ApproveWriteScope(ctx context.Context, req tool.WriteScopeRequest) (bool, string, error) {
+	if _, refused := config.RootsForHome("").FolderGrantRefusal(req.Path); refused {
+		return false, "", tool.ErrScopeTargetProtected
+	}
 	args, _ := json.Marshal(map[string]string{"path": req.Path, "dir": req.Dir})
 	reply, err := m.c.requestApprovalDecision(ctx, approvalRequest{
 		tool: WriteScopeApprovalTool, subject: req.Path, args: args, fresh: true,
@@ -158,7 +161,7 @@ func folderHolds(folder, dir string) bool {
 func (m fileWriteApprover) ApproveDeleteScope(ctx context.Context, req tool.DeleteScopeRequest) (bool, string, error) {
 	for _, path := range req.Paths {
 		if _, refused := config.RootsForHome("").FolderGrantRefusal(path); refused {
-			return false, "", tool.ErrDeleteTargetProtected
+			return false, "", tool.ErrScopeTargetProtected
 		}
 	}
 	args, _ := json.Marshal(map[string][]string{"paths": req.Paths})
