@@ -2771,7 +2771,7 @@ button, input, textarea { font-size: var(--fs-ui); }
 .advset,
 .setting {
   background: color-mix(in srgb, var(--float) 90%, var(--surface)) !important;
-  border-color: var(--hair) !important;
+  border-color: var(--rule, var(--hair)) !important;
   box-shadow: 0 1px 0 color-mix(in srgb, var(--text) 4%, transparent);
 }
 .grp { border: 1px solid var(--hair); }
@@ -2977,7 +2977,7 @@ button, input, textarea { font-size: var(--fs-ui); }
 :root[data-theme="dark"] .setting,
 :root[data-theme="dark"] .addp {
   background: color-mix(in srgb, var(--raised) 90%, var(--surface)) !important;
-  border-color: var(--hair) !important;
+  border-color: var(--rule, var(--hair)) !important;
 }
 :root[data-theme="dark"] .grp:focus-within:not(.ext-md-list .grp, [data-setting="market"]) {
   background: color-mix(in srgb, var(--raised) 94%, var(--accent-wash)) !important;

@@ -28,7 +28,7 @@ const offer = (name: string) => fireEvent.contextMenu(pick(name), { clientX: 180
 it("offers a menu on an inactive browser tab without changing the selected page", async () => {
   const pane = draw();
   offer("Beta");
-  expect(screen.getByRole("menu", { name: "浏览器标签" })).toBeTruthy();
+  expect(screen.getByRole("menu", { name: "标签" })).toBeTruthy();
   expect(screen.getByRole("tab", { name: "Alpha" }).getAttribute("aria-selected")).toBe("true");
   await userEvent.click(screen.getByRole("menuitem", { name: "关闭" }));
   expect(screen.queryByRole("tab", { name: "Beta" })).toBeNull();
@@ -50,7 +50,7 @@ it("closes other browser tabs while retaining file tabs and the menu's browser",
   const view = EditorView.findFromDOM(editor)!;
   act(() => view.dispatch({ changes: { from: view.state.doc.length, insert: "\n\n## Unsent edit" } }));
   offer("Beta");
-  await userEvent.click(screen.getByRole("menuitem", { name: "关闭其他浏览器标签" }));
+  await userEvent.click(screen.getByRole("menuitem", { name: "关闭其他标签" }));
   expect(screen.queryByRole("tab", { name: "Alpha" })).toBeNull();
   expect(screen.queryByRole("tab", { name: "Gamma" })).toBeNull();
   expect(screen.getByRole("tab", { name: "Beta" })).toBeTruthy();
@@ -60,16 +60,16 @@ it("closes other browser tabs while retaining file tabs and the menu's browser",
   expect(view.state.doc.toString()).toContain("## Unsent edit");
 });
 
-it("closes only browser tabs to the right and keeps the current selection and files", async () => {
+it("closes the tabs to the right, files included, and keeps the current selection", async () => {
   const pane = draw();
   await userEvent.click(await screen.findByRole("button", { name: "README.md" }));
   await userEvent.click(pick("Alpha"));
   offer("Beta");
-  await userEvent.click(screen.getByRole("menuitem", { name: "关闭右侧浏览器标签" }));
+  await userEvent.click(screen.getByRole("menuitem", { name: "关闭右侧标签" }));
   expect(screen.queryByRole("tab", { name: "Gamma" })).toBeNull();
   expect(screen.getByRole("tab", { name: "Alpha" }).getAttribute("aria-selected")).toBe("true");
   expect(screen.getByRole("tab", { name: "Beta" })).toBeTruthy();
-  expect(screen.getByRole("tab", { name: "README.md" })).toBeTruthy();
+  expect(screen.queryByRole("tab", { name: "README.md" })).toBeNull();
   expect(pane.close).toHaveBeenCalledExactlyOnceWith("c");
 });
 
@@ -78,7 +78,7 @@ it("retains a refused right-side page and disables close controls while awaiting
   const pane = draw();
   pane.close.mockImplementation(() => new Promise<void>((_resolve, reject) => { refuse = reject; }));
   offer("Beta");
-  await userEvent.click(screen.getByRole("menuitem", { name: "关闭右侧浏览器标签" }));
+  await userEvent.click(screen.getByRole("menuitem", { name: "关闭右侧标签" }));
   expect(pane.close).toHaveBeenCalledExactlyOnceWith("c");
   expect(screen.getByRole("tab", { name: "Gamma" })).toBeTruthy();
   expect((screen.getByRole("button", { name: "关闭 Gamma" }) as HTMLButtonElement).disabled).toBe(true);
@@ -93,8 +93,8 @@ it("retains a refused right-side page and disables close controls while awaiting
 it("disables empty bulk choices and offers a new tab with its last browser", async () => {
   const pane = draw([pages[0]!]);
   offer("Alpha");
-  expect((screen.getByRole("menuitem", { name: "关闭其他浏览器标签" }) as HTMLButtonElement).disabled).toBe(true);
-  expect((screen.getByRole("menuitem", { name: "关闭右侧浏览器标签" }) as HTMLButtonElement).disabled).toBe(true);
+  expect((screen.getByRole("menuitem", { name: "关闭其他标签" }) as HTMLButtonElement).disabled).toBe(true);
+  expect((screen.getByRole("menuitem", { name: "关闭右侧标签" }) as HTMLButtonElement).disabled).toBe(true);
   await userEvent.click(screen.getByRole("menuitem", { name: "关闭" }));
   expect(pane.onCloseManual).not.toHaveBeenCalled();
   expect(screen.getByRole("group", { name: "开始" })).toBeTruthy();
@@ -107,7 +107,7 @@ it("supports keyboard opening and menu navigation, then focuses the remaining ta
   await userEvent.keyboard("{Shift>}{F10}{/Shift}");
   expect(document.activeElement).toBe(screen.getByRole("menuitem", { name: "关闭" }));
   await userEvent.keyboard("{ArrowDown}");
-  expect(document.activeElement).toBe(screen.getByRole("menuitem", { name: "关闭其他浏览器标签" }));
+  expect(document.activeElement).toBe(screen.getByRole("menuitem", { name: "关闭其他标签" }));
   await userEvent.keyboard("{Home}{Enter}");
   expect(screen.queryByRole("tab", { name: "Beta" })).toBeNull();
   expect(document.activeElement).toBe(pick("Alpha"));
@@ -123,14 +123,37 @@ it("cancels with Escape without dismissing a tab and restores the trigger's focu
   expect(pane.onCloseManual).not.toHaveBeenCalled();
 });
 
-it("drops a menu whose browser disappears and leaves file context menus native", async () => {
+it("drops a menu whose browser disappears", () => {
   const pane = draw();
   offer("Beta");
   pane.update([pages[0]!, pages[2]!]);
   expect(screen.queryByRole("menu")).toBeNull();
+});
+
+it("offers the same menu on a file tab, so its siblings close in bulk", async () => {
+  draw();
   await userEvent.click(await screen.findByRole("button", { name: "README.md" }));
-  expect(fireEvent.contextMenu(pick("README.md"))).toBe(true);
-  expect(screen.queryByRole("menu")).toBeNull();
+  expect(fireEvent.contextMenu(pick("README.md"), { clientX: 180, clientY: 50 })).toBe(false);
+  await userEvent.click(screen.getByRole("menuitem", { name: "关闭其他标签" }));
+  for (const name of ["Alpha", "Beta", "Gamma"]) expect(screen.queryByRole("tab", { name })).toBeNull();
+  expect(screen.getByRole("tab", { name: "README.md" })).toBeTruthy();
+});
+
+it("keeps a file with unsaved edits through a bulk close and says so", async () => {
+  draw();
+  await userEvent.click(await screen.findByRole("button", { name: "README.md" }));
+  await userEvent.click(screen.getByRole("button", { name: "编辑" }));
+  const editor = await waitFor(() => {
+    const element = document.querySelector<HTMLElement>(".cm-content");
+    if (!element) throw new Error("editor not mounted");
+    return element;
+  });
+  act(() => EditorView.findFromDOM(editor)!.dispatch({ changes: { from: 0, insert: "x" } }));
+  offer("Beta");
+  await userEvent.click(screen.getByRole("menuitem", { name: "关闭全部标签" }));
+  for (const name of ["Alpha", "Beta", "Gamma"]) expect(screen.queryByRole("tab", { name })).toBeNull();
+  expect(screen.getByRole("tab", { name: "README.md" })).toBeTruthy();
+  expect(screen.getByRole("alert").textContent).toContain("1 个文件有未保存的改动，已保留");
 });
 
 it("offers the same actions on manual browser tabs", async () => {
@@ -141,7 +164,7 @@ it("offers the same actions on manual browser tabs", async () => {
   }
   const tabs = screen.getAllByRole("tab", { name: "浏览器" });
   fireEvent.contextMenu(within(tabs[1]!).getByRole("button", { name: "浏览器" }));
-  await userEvent.click(screen.getByRole("menuitem", { name: "关闭其他浏览器标签" }));
+  await userEvent.click(screen.getByRole("menuitem", { name: "关闭其他标签" }));
   expect(screen.getAllByRole("tab", { name: "浏览器" })).toHaveLength(1);
   expect(pane.onCloseManual).not.toHaveBeenCalled();
   await waitFor(() => expect(pane.onSurfaces).toHaveBeenLastCalledWith(1));
@@ -165,7 +188,7 @@ it("dismisses the menu on an outside press and skips disabled menu items by keyb
   draw([pages[0]!]);
   offer("Alpha");
   await userEvent.keyboard("{End}");
-  expect(document.activeElement).toBe(screen.getByRole("menuitem", { name: "关闭全部浏览器标签" }));
+  expect(document.activeElement).toBe(screen.getByRole("menuitem", { name: "关闭全部标签" }));
   await userEvent.keyboard("{ArrowUp}");
   expect(document.activeElement).toBe(screen.getByRole("menuitem", { name: "关闭" }));
   fireEvent.pointerDown(document.body);

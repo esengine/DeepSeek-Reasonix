@@ -507,7 +507,9 @@
 .prefs-card .grp .keys-row { display: flex; align-items: center; justify-content: space-between; padding-block: 7px; }
 .prefs-card .keys-row .ds kbd { min-width: 0; padding: 0; border: 0; background: none; font-family: var(--mono); }
 .prefs-card .keys-row .tx { flex: none; text-align: right; }
-.prefs-card .grp .lrow { border-top-color: color-mix(in srgb, var(--hair) 55%, transparent); }
+.prefs-card { --rule: color-mix(in srgb, var(--hair) 55%, transparent); }
+.prefs-card > .grp, .prefs-card .grp + .grp, .prefs-card > .srow, .prefs-card .grp .lrow, .prefs-card .box .sec + .sec,
+.prefs-card .srow-more .lrow, .prefs-card .changed-keys, .grp[data-setting="global-shortcut"] .srow { border-top-color: var(--rule); }
 
 .studio-icon.icon-tall { transform: scale(1.2); }
 .spill.who { display: inline-flex; align-items: center; gap: 4px; }

@@ -23,3 +23,13 @@ export function labelOf(s: Surface, hosts: Record<string, string>) {
         ? s.name
         : s.path.split("/").at(-1) || s.path;
 }
+
+export type CloseMode = "one" | "others" | "right" | "all";
+
+/** The tabs a close choice names, in strip order. */
+export function closeTargets(mode: CloseMode, target: Surface, surfaces: Surface[]): Surface[] {
+  if (mode === "one") return [target];
+  if (mode === "all") return surfaces;
+  const at = surfaces.findIndex((s) => keyOf(s) === keyOf(target));
+  return mode === "others" ? surfaces.filter((s) => keyOf(s) !== keyOf(target)) : at < 0 ? [] : surfaces.slice(at + 1);
+}

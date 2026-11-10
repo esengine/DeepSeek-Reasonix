@@ -27,7 +27,7 @@ describe("closing browser pages", () => {
     const { close, onCloseManual } = draw();
     fireEvent.click(screen.getByRole("button", { name: "新建标签" }));
     menu("First");
-    fireEvent.click(screen.getByRole("menuitem", { name: "关闭全部浏览器标签" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "关闭全部标签" }));
     await waitFor(() => expect(close).toHaveBeenCalledTimes(2));
     await waitFor(() => expect(screen.queryByRole("tab", { name: "First" })).toBeNull());
     expect(screen.queryByRole("tab", { name: "Second" })).toBeNull();
@@ -59,26 +59,26 @@ describe("closing browser pages", () => {
   it("closes other browser pages while preserving the menu's page", async () => {
     const { close } = draw();
     menu("First");
-    fireEvent.click(screen.getByRole("menuitem", { name: "关闭其他浏览器标签" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "关闭其他标签" }));
     await waitFor(() => expect(close).toHaveBeenCalledWith("b2"));
     expect(close).not.toHaveBeenCalledWith("b1");
     expect(screen.getByRole("button", { name: "First" })).toBeTruthy();
   });
-  it("closes all browser pages but keeps an open file", async () => {
+  it("closes every tab at once, an open file included", async () => {
     const { close, onCloseManual } = draw();
     fireEvent.click(await screen.findByRole("button", { name: "README.md" }));
     menu("First");
-    fireEvent.click(screen.getByRole("menuitem", { name: "关闭全部浏览器标签" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "关闭全部标签" }));
     await waitFor(() => expect(close).toHaveBeenCalledTimes(2));
     await waitFor(() => expect(screen.queryByRole("button", { name: "First" })).toBeNull());
-    expect(screen.getByRole("tab", { name: /README.md/ })).toBeTruthy();
+    expect(screen.queryByRole("tab", { name: /README.md/ })).toBeNull();
     expect(onCloseManual).not.toHaveBeenCalled();
   });
   it("keeps a failed page visible and continues closing the remaining pages", async () => {
     const close = vi.fn(async (id: string) => { if (id === "b1") throw new Error("page is busy"); });
     draw(close);
     menu("First");
-    fireEvent.click(screen.getByRole("menuitem", { name: "关闭全部浏览器标签" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "关闭全部标签" }));
     await waitFor(() => expect(close).toHaveBeenCalledWith("b2"));
     await waitFor(() => expect(screen.queryByRole("button", { name: "Second" })).toBeNull());
     expect(screen.getByRole("button", { name: "First" })).toBeTruthy();

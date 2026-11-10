@@ -24,8 +24,8 @@ describe("the workbench menus, as the WB-Menus board draws them", () => {
     const anchor = document.createElement("button");
     document.body.append(anchor);
     render(<BrowserTabMenu menu={{ surface: { kind: "manual", id: "m1" }, x: 0, y: 0, anchor }} others={2} right={1} all={3} label="localhost:5173" onDismiss={vi.fn()} onClose={vi.fn()} />);
-    expect(document.querySelector(".tabmenu-head")!.textContent).toBe("浏览器标签 · localhost:5173");
-    expect(screen.getByRole("menuitem", { name: "关闭其他浏览器标签" }).querySelector("kbd")!.textContent).toBe("2");
-    expect(screen.getByRole("menuitem", { name: "关闭全部浏览器标签" }).querySelector("kbd")!.textContent).toBe("3");
+    expect(document.querySelector(".tabmenu-head")!.textContent).toBe("标签 · localhost:5173");
+    expect(screen.getByRole("menuitem", { name: "关闭其他标签" }).querySelector("kbd")!.textContent).toBe("2");
+    expect(screen.getByRole("menuitem", { name: "关闭全部标签" }).querySelector("kbd")!.textContent).toBe("3");
   });
 });

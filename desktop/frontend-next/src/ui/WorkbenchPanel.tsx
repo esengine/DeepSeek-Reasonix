@@ -31,7 +31,7 @@ import type { LocalRefs } from "./Markdown";
 import { useGlance } from "./glance";
 import { useWorkbenchFiles } from "./useWorkbenchFiles";
 import { documentRefs, parseGrantedFile } from "./grantedfiles";
-import { keyOf, labelOf, type Surface } from "./workbench_tabs";
+import { closeTargets, keyOf, labelOf, type CloseMode, type Surface } from "./workbench_tabs";
 import { useTabNames } from "./useTabNames";
 import { useTabClose } from "./useTabClose";
 import { BrowserTabMenu } from "./BrowserTabMenu";
@@ -463,10 +463,9 @@ export function WorkbenchPanel({
   const close = (targets: Surface[]) => { supersede(); return terminals.guard(targets, closeTabs); };
   const dismissTabMenu = useCallback(() => setTabMenu(null), []);
   const [tabMenu, setTabMenu] = useState<{ surface: Surface; x: number; y: number; anchor: HTMLElement } | null>(null);
-  const pages = surfaces.filter((s) => s.kind !== "file");
+  const holdsEdits = (s: Surface) => s.kind === "file" && unsaved.includes(s.path);
   const tabAt = tabMenu ? surfaces.findIndex((s) => keyOf(s) === keyOf(tabMenu.surface)) : -1;
-  const tabOthers = tabMenu ? pages.filter((s) => keyOf(s) !== keyOf(tabMenu.surface)) : [];
-  const tabRight = tabAt < 0 ? [] : surfaces.slice(tabAt + 1).filter((s) => s.kind !== "file");
+  const closable = (mode: CloseMode) => (tabMenu ? closeTargets(mode, tabMenu.surface, surfaces).filter((s) => !holdsEdits(s)).length : 0);
   const returning = useRef("");
   useEffect(() => {
     if (tabMenu && tabAt < 0) setTabMenu(null);
@@ -477,7 +476,7 @@ export function WorkbenchPanel({
     (back ?? newTab.current)?.focus();
   }, [tabMenu, tabAt, surfaces, closing]);
   const offerTabMenu = (e: MouseEvent<HTMLElement> | KeyboardEvent<HTMLElement>, surface: Surface) => {
-    if (surface.kind === "file" || closing || document.getSelection()?.isCollapsed === false) return;
+    if (closing || document.getSelection()?.isCollapsed === false) return;
     e.preventDefault();
     e.stopPropagation();
     const anchor = e.currentTarget.matches("button") ? e.currentTarget : e.currentTarget.querySelector<HTMLElement>(".workbench-tab-pick")!;
@@ -786,11 +785,15 @@ export function WorkbenchPanel({
           onSave={async () => { const ok = await saveAt(asking.path); if (ok) { setAsking(null); void close([{ kind: "file", path: asking.path }]); } return ok; }}
           onDrop={() => { dropAt(asking.path); setAsking(null); void close([{ kind: "file", path: asking.path }]); }} />
       )}
-      {tabMenu && <BrowserTabMenu menu={tabMenu} others={tabOthers.length} right={tabRight.length} all={pages.length} label={labelFor(tabMenu.surface)} onDismiss={dismissTabMenu} onClose={(mode) => {
+      {tabMenu && <BrowserTabMenu menu={tabMenu} others={closable("others")} right={closable("right")} all={closable("all")} label={labelFor(tabMenu.surface)} onDismiss={dismissTabMenu} onClose={(mode) => {
         const target = tabMenu.surface;
-        returning.current = keyOf(target);
         setTabMenu(null);
-        void close(mode === "one" ? [target] : mode === "others" ? tabOthers : mode === "right" ? tabRight : pages);
+        if (mode === "one" && target.kind === "file" && holdsEdits(target)) { setAsking({ path: target.path, anchor: tabMenu.anchor }); return; }
+        returning.current = keyOf(target);
+        const want = closeTargets(mode, target, surfaces);
+        if (want.some(holdsEdits)) setFailed(t("workbench.unsaved_files_kept", { n: want.filter(holdsEdits).length }));
+        const go = want.filter((s) => !holdsEdits(s));
+        if (go.length) void close(go);
       }} />}
     </section>
   );
