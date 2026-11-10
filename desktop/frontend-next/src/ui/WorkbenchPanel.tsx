@@ -44,6 +44,7 @@ import { WorkbenchFileBar, type FileMode } from "./WorkbenchFileBar";
 import { OpenWithMenu } from "./OpenWithMenu";
 import type { HubPort } from "../port/hub";
 import { useHtmlPreview } from "./useHtmlPreview";
+import { pageEditor } from "./pageedit";
 import { setShowsHiddenFiles, showsHiddenFiles } from "../state/prefs";
 import { BrowserFullToggle } from "./BrowserFullToggle";
 import { documentView, sourceView } from "./document/registry";
@@ -132,6 +133,7 @@ export function WorkbenchPanel({
   agentRequest?: AgentRequest;
 }) {
   const preview = useHtmlPreview(port, allTabs, remote);
+  const editPage = useMemo(() => (remote ? undefined : pageEditor(port)), [port, remote]);
   const tabs = preview.tabs;
   const [files, setFiles] = useState<string[]>([]),
     [directories, setDirectories] = useState<string[]>([]),
@@ -635,6 +637,7 @@ export function WorkbenchPanel({
               shown={shown && !launcher}
               showTabs={false}
               onOpenDocument={(path) => port.openDocument(path)}
+              editPage={editPage}
             />
           )}
           {active?.kind === "changes" && (
@@ -683,7 +686,7 @@ export function WorkbenchPanel({
                 </Suspense>
               ) : mode === "preview" ? (
                 previewTab ? (
-                  <AgentBrowserPanel tabs={[previewTab]} shown={shown && !launcher} showTabs={false} onOpenDocument={(path) => port.openDocument(path)} />
+                  <AgentBrowserPanel tabs={[previewTab]} shown={shown && !launcher} showTabs={false} onOpenDocument={(path) => port.openDocument(path)} editPage={editPage} />
                 ) : (
                   <div className="workbench-empty">{t("common.loading")}</div>
                 )

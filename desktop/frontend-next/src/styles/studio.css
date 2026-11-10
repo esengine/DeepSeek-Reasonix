@@ -1142,6 +1142,17 @@ body { background: var(--page) !important; }
 .studio-browser-note > button { flex: none; margin-left: auto; padding: 3px 8px; border: 1px solid var(--border); border-radius: var(--r-xs); background: transparent; color: var(--muted); cursor: pointer; font: var(--w-med) var(--fs-micro)/1.45 var(--ui); }
 .studio-browser-note > button:hover { color: var(--text); background: var(--overlay); }
 .studio-browser-error { border-top: 0; border-bottom: 1px solid var(--border); color: #c78a82; }
+.belement { flex: none; display: grid; gap: 6px; padding: 8px 12px; border-top: 1px solid var(--hair); background: var(--surface); color: var(--muted); font: var(--w-reg) var(--fs-micro)/1.45 var(--ui); }
+.belement-head { display: flex; align-items: center; gap: 10px; }
+.belement-head code { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
+.belement-head button, .belement-foot button { flex: none; padding: 3px 8px; border: 1px solid var(--border); border-radius: var(--r-xs); background: transparent; color: var(--muted); cursor: pointer; font: var(--w-med) var(--fs-micro)/1.45 var(--ui); }
+.belement-head button:hover, .belement-foot button:hover:not(:disabled) { color: var(--text); background: var(--overlay); }
+.belement-foot button:disabled { cursor: default; opacity: .5; }
+.belement-field { display: grid; grid-template-columns: 72px minmax(0, 1fr); align-items: center; gap: 8px; }
+.belement-field input { min-width: 0; padding: 3px 6px; border: 1px solid var(--border); border-radius: var(--r-xs); background: var(--page); color: var(--text); font: inherit; }
+.belement-field input:disabled { opacity: .6; }
+.belement-foot { display: flex; align-items: center; gap: 10px; }
+.belement-foot > p { padding: 0; border: 0; background: transparent; }
 .workbench { width: 100%; height: 100%; min-width: 0; min-height: 0; display: flex; flex-direction: column; background: var(--surface); color: var(--text); }
 .pane:has(> .pbody[data-dock]) > .scroll[data-pane="browser"] { padding: 8px 8px 8px 2px; border-left: 0; background: transparent; }
 .pane:has(> .pbody[data-dock]) > .scroll[data-pane="browser"] .workbench-tabs { height: calc(var(--pane-bar-h) - 9px); }
