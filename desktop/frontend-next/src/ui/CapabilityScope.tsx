@@ -1,5 +1,5 @@
 import { StudioIcon } from "./StudioIcon";
-import { useState } from "react";
+import { useLayoutEffect, useRef, useState, type RefObject } from "react";
 import { t } from "../i18n";
 import type { CapabilityScope } from "../port/port";
 
@@ -93,6 +93,31 @@ export function ScopeAway({ scope, onBack }: { scope: CapabilityScope; onBack: (
   );
 }
 
+// The list is drawn against its pill, so where it opens depends on where the pill
+// is: the settings column clips it, and the pill sits at the left of a row but at
+// the right of the extension bar. It prefers the pill's left edge and below, and
+// takes the other side only when the column would cut it off.
+function useFit(list: RefObject<HTMLDivElement | null>) {
+  useLayoutEffect(() => {
+    const el = list.current;
+    const anchor = el?.parentElement;
+    if (!el || !anchor) return;
+    const box = el.getBoundingClientRect();
+    const at = anchor.getBoundingClientRect();
+    const clip = (el.closest(".prefs-main") ?? document.documentElement).getBoundingClientRect();
+    const view = { left: Math.max(clip.left, 0), right: Math.min(clip.right || innerWidth, innerWidth), top: Math.max(clip.top, 0), bottom: Math.min(clip.bottom || innerHeight, innerHeight) };
+    const flushRight = at.left + box.width > view.right && at.right - box.width >= view.left;
+    el.style.left = flushRight ? "auto" : "0px";
+    el.style.right = flushRight ? "0px" : "auto";
+    const below = view.bottom - at.bottom - 8;
+    const above = at.top - view.top - 8;
+    const up = box.height > below && above > below;
+    el.style.top = up ? "auto" : "calc(100% + 4px)";
+    el.style.bottom = up ? "calc(100% + 4px)" : "auto";
+    el.style.maxHeight = `${Math.max(120, Math.min(340, up ? above : below))}px`;
+  }, [list]);
+}
+
 // With a folder or two the list is the whole answer. Past that, the projects
 // worth finding are the ones already carrying an exception — so that is the
 // filter, and search only appears when the list is long enough to need it.
@@ -103,6 +128,8 @@ function ScopePicker({
 }) {
   const [q, setQ] = useState("");
   const [onlyChanged, setOnlyChanged] = useState(false);
+  const list = useRef<HTMLDivElement>(null);
+  useFit(list);
   const searchable = scopes.length > 8;
   const shown = scopes.filter((sc) => {
     if (onlyChanged && !sc.overrides) return false;
@@ -110,7 +137,7 @@ function ScopePicker({
     return !needle || (sc.label || sc.name).toLowerCase().includes(needle) || sc.root.toLowerCase().includes(needle);
   });
   return (
-    <div className="scope-pick" role="listbox">
+    <div className="scope-pick" role="listbox" ref={list}>
       {searchable && (
         <input
           className="q"
