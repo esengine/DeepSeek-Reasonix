@@ -1,14 +1,16 @@
 import { useEffect, useLayoutEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
-import { ArrowLeft, ArrowRight, ExternalLink, Globe, RotateCw } from "lucide-react";
+import { ArrowLeft, ArrowRight, ExternalLink, Globe, MousePointerClick, RotateCw } from "lucide-react";
 import { t } from "../i18n";
 import { reason } from "../i18n/kernel";
 import type { AgentPort, BrowserTab } from "../port/port";
-import { host, type BrowserControl, type BrowserLoadFailure, type BrowserRefusal } from "../port/host";
+import { host, type BrowserControl, type BrowserLoadFailure, type BrowserPickEnd, type BrowserRefusal, type PickedElement } from "../port/host";
 import { SWAP_MARK } from "./swap";
 import { occluded, visibleBox } from "./occlusion";
 import { BrowserFailure } from "./BrowserFailure";
 import { AgentPageNote } from "./AgentPageNote";
 import { readPageTabs } from "./browser_open";
+import { BrowserElementEdit } from "./BrowserElementEdit";
+import type { PageEditor } from "./pageedit";
 
 const START = "reasonix://start";
 
@@ -181,13 +183,20 @@ export function localFilePath(url: string): string {
 
 type OpenDocument = (path: string) => Promise<void>;
 
-export function AgentBrowserPanel(props: { tabs: BrowserTab[]; shown: boolean; showTabs?: boolean; onOpenDocument?: OpenDocument }) {
+export function AgentBrowserPanel(props: { tabs: BrowserTab[]; shown: boolean; showTabs?: boolean; onOpenDocument?: OpenDocument; editPage?: PageEditor }) {
   if (host().drawsBrowserViews()) return <AgentBrowserView {...props} />;
   const current = props.tabs.find((tab) => tab.active) ?? props.tabs[0];
   return <div className="bpanel">{current && <AgentPageNote tab={current} />}</div>;
 }
 
-function AgentBrowserView({ tabs, shown, showTabs = true, onOpenDocument }: { tabs: BrowserTab[]; shown: boolean; showTabs?: boolean; onOpenDocument?: OpenDocument }) {
+const PICK_ENDED: Partial<Record<BrowserPickEnd, () => string>> = {
+  timeout: () => t("workbench.pick_ended_timeout"),
+  hidden: () => t("workbench.pick_ended_hidden"),
+  navigation: () => t("workbench.pick_ended_navigation"),
+  gone: () => t("workbench.pick_ended_gone"),
+};
+
+function AgentBrowserView({ tabs, shown, showTabs = true, onOpenDocument, editPage }: { tabs: BrowserTab[]; shown: boolean; showTabs?: boolean; onOpenDocument?: OpenDocument; editPage?: PageEditor }) {
   const slot = useRef<HTMLDivElement>(null);
   const [picked, setPicked] = useState("");
   const current = tabs.find((tab) => tab.target === picked) ?? tabs.find((tab) => tab.active) ?? tabs[0];
@@ -196,6 +205,9 @@ function AgentBrowserView({ tabs, shown, showTabs = true, onOpenDocument }: { ta
   const [refused, setRefused] = useState<BrowserRefusal>("");
   const [docFailed, setDocFailed] = useState("");
   const [frame, setFrame] = useState("");
+  const [picking, setPicking] = useState(false);
+  const [element, setElement] = useState<PickedElement | null>(null);
+  const [pickEnd, setPickEnd] = useState("");
   const target = current?.target ?? "";
   const failure = failures[target];
 
@@ -276,6 +288,41 @@ function AgentBrowserView({ tabs, shown, showTabs = true, onOpenDocument }: { ta
     };
   }, [shown, target, failure]);
 
+  // A pick belongs to the page it was armed on: another page, or another
+  // address on the same one, leaves it nothing to point at.
+  useEffect(() => {
+    setElement(null);
+    setPickEnd("");
+    if (!picking) return;
+    setPicking(false);
+    if (target) host().cancelBrowserPick(target);
+  }, [target, current?.url]);
+  const pick = () => {
+    if (!target) return;
+    if (picking) {
+      host().cancelBrowserPick(target);
+      return;
+    }
+    setPicking(true);
+    setPickEnd("");
+    const armed = target;
+    void host()
+      .pickBrowserElement(armed, {
+        color: t("workbench.edit_color"),
+        background: t("workbench.edit_background"),
+        font: t("workbench.edit_font_size"),
+        frame: t("workbench.pick_ended_gone"),
+        shadow: t("workbench.pick_ended_gone"),
+      })
+      .then((answer) => {
+        setPicking(false);
+        if (answer.cancelled) {
+          setPickEnd(PICK_ENDED[answer.reason]?.() ?? "");
+          return;
+        }
+        setElement(answer.element);
+      });
+  };
   const control = (action: BrowserControl) => target && host().controlBrowserView(target, action);
   const open = (to: string) => {
     if (!target) return;
@@ -308,6 +355,9 @@ function AgentBrowserView({ tabs, shown, showTabs = true, onOpenDocument }: { ta
           <button className="bbtn" data-action="browser.control" data-target={current?.id} data-value="back" aria-label={t("workbench.back")} title={t("workbench.back")} onClick={() => control("back")}><ArrowLeft size={16} /></button>
           <button className="bbtn" data-action="browser.control" data-target={current?.id} data-value="forward" aria-label={t("workbench.forward")} title={t("workbench.forward")} onClick={() => control("forward")}><ArrowRight size={16} /></button>
           <button className="bbtn" data-action="browser.control" data-target={current?.id} data-value="reload" aria-label={t("common.reload")} title={t("common.reload")} onClick={() => control("reload")}><RotateCw size={16} /></button>
+          {host().picksBrowserElements() && (
+            <button className="bbtn" data-action="browser.pick" aria-pressed={picking} disabled={!target || !!failure} aria-label={t("workbench.pick_element")} title={t("workbench.pick_element")} onClick={pick}><MousePointerClick size={16} /></button>
+          )}
           <button className="bbtn" data-action="browser.external" disabled={!documentPath && !/^https?:\/\//i.test(current?.url ?? "")} aria-label={documentPath ? t("workbench.open_this_file_with_the") : t("workbench.open_this_page_in_the")} title={documentPath ? t("workbench.open_this_file_with_the") : t("workbench.open_this_page_in_the")} onClick={() => (documentPath ? openDocument() : current && void host().openExternal(current.url))}><ExternalLink size={16} /></button>
           <form className="baddr" data-action="browser.navigate" data-target={current?.id} onSubmit={go}>
             <input data-action="browser.navigate" data-target={current?.id} value={address} spellCheck={false} aria-label={t("workbench.address")} onChange={(event) => { setAddress(event.target.value); setRefused(""); }} />
@@ -316,6 +366,18 @@ function AgentBrowserView({ tabs, shown, showTabs = true, onOpenDocument }: { ta
       </div>
       {documentPath && <p className="studio-browser-note" data-action="browser.document-hint">{t("workbench.opens_this_file_with_the")}</p>}
       {docFailed && <p className="studio-browser-error" role="alert">{docFailed}</p>}
+      {picking && <p className="studio-browser-note" role="status">{t("workbench.picking_element")}</p>}
+      {pickEnd && <p className="studio-browser-note" role="status">{pickEnd}</p>}
+      {element && (
+        <BrowserElementEdit
+          key={element.selector}
+          element={element}
+          filePath={localFilePath(current?.url ?? "")}
+          editor={editPage}
+          onSaved={() => control("reload")}
+          onClose={() => setElement(null)}
+        />
+      )}
       {refused && (
         <p className="studio-browser-error" role="alert">
           {refused === "network_file" ? t("workbench.a_network_share_cannot_be") : t("workbench.enter_a_valid_http_or")}
@@ -337,6 +399,6 @@ function AgentBrowserView({ tabs, shown, showTabs = true, onOpenDocument }: { ta
   );
 }
 
-export function BrowserPanel(props: ManualProps | { tabs: BrowserTab[]; shown: boolean; onOpenDocument?: OpenDocument }) {
+export function BrowserPanel(props: ManualProps | { tabs: BrowserTab[]; shown: boolean; onOpenDocument?: OpenDocument; editPage?: PageEditor }) {
   return "tabs" in props ? <AgentBrowserPanel {...props} /> : <ManualBrowserPanel {...props} />;
 }

@@ -123,6 +123,11 @@ export interface HostPort {
   answerBrowserLogin(id: string, username: string, password: string): void;
   /** Proceed past the certificate this page was refused for, for this run. */
   trustBrowserCertificate(target: string): Promise<boolean>;
+  /** Whether this shell can let a person point at an element of a page. */
+  picksBrowserElements(): boolean;
+  /** Arm the page's picker and wait for the element pointed at, or for why none was. */
+  pickBrowserElement(target: string, labels: BrowserPickLabels): Promise<BrowserPick>;
+  cancelBrowserPick(target: string): void;
 }
 
 /** Why the shell will not load a typed address: a scheme it never opens, or a
@@ -178,6 +183,22 @@ export interface ViewRect {
   height: number;
 }
 
+/** What the shell reports of an element the person pointed at. */
+export interface PickedElement {
+  selector: string;
+  tagName: string;
+  text?: string;
+  pageUrl?: string;
+  style?: Partial<Record<"color" | "backgroundColor" | "fontSize" | "fontWeight", string>>;
+}
+
+/** The words the page-side hover card draws; the window owns them. */
+export type BrowserPickLabels = Record<"color" | "background" | "font" | "frame" | "shadow", string>;
+
+export type BrowserPickEnd = "escape" | "dismissed" | "timeout" | "hidden" | "navigation" | "gone";
+
+export type BrowserPick = { cancelled: false; element: PickedElement } | { cancelled: true; reason: BrowserPickEnd };
+
 export type BrowserControl = "back" | "forward" | "reload" | "stop";
 
 // The preload bridge. Verbs only: the origin the page was loaded from and the
@@ -217,6 +238,8 @@ interface ElectronBridge {
   onBrowserLogin?(listener: (ask: BrowserLogin) => void): () => void;
   answerBrowserLogin?(id: string, username: string, password: string): Promise<void>;
   trustBrowserCertificate?(target: string): Promise<boolean>;
+  pickBrowserElement?(target: string, labels: BrowserPickLabels): Promise<BrowserPick>;
+  cancelBrowserPick?(target: string): Promise<boolean>;
 }
 
 const bridge = () => (window as unknown as { reasonixHost?: ElectronBridge }).reasonixHost;
@@ -354,6 +377,16 @@ class ElectronHost implements HostPort {
   trustBrowserCertificate(target: string) {
     return this.api.trustBrowserCertificate?.(target) ?? Promise.resolve(false);
   }
+  picksBrowserElements() {
+    return typeof this.api.pickBrowserElement === "function";
+  }
+  pickBrowserElement(target: string, labels: BrowserPickLabels): Promise<BrowserPick> {
+    const gone: BrowserPick = { cancelled: true, reason: "gone" };
+    return this.api.pickBrowserElement?.(target, labels).catch(() => gone) ?? Promise.resolve(gone);
+  }
+  cancelBrowserPick(target: string) {
+    void this.api.cancelBrowserPick?.(target);
+  }
 }
 
 class BrowserHost implements HostPort {
@@ -454,6 +487,13 @@ class BrowserHost implements HostPort {
   trustBrowserCertificate() {
     return Promise.resolve(false);
   }
+  picksBrowserElements() {
+    return false;
+  }
+  pickBrowserElement(): Promise<BrowserPick> {
+    return Promise.resolve({ cancelled: true, reason: "gone" });
+  }
+  cancelBrowserPick() {}
 }
 
 function pick(): HostPort {

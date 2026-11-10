@@ -627,7 +627,7 @@ export function WorkbenchPanel({
             <AgentBrowserPanel
               tabs={[active.tab]}
               shown={shown && !launcher}
-              showTabs={false}
+              showTabs={false} editPage={preview.edit}
               onOpenDocument={(path) => port.openDocument(path)}
             />
           )}
@@ -677,7 +677,7 @@ export function WorkbenchPanel({
                 </Suspense>
               ) : mode === "preview" ? (
                 previewTab ? (
-                  <AgentBrowserPanel tabs={[previewTab]} shown={shown && !launcher} showTabs={false} onOpenDocument={(path) => port.openDocument(path)} />
+                  <AgentBrowserPanel tabs={[previewTab]} shown={shown && !launcher} showTabs={false} onOpenDocument={(path) => port.openDocument(path)} editPage={preview.edit} />
                 ) : (
                   <div className="workbench-empty">{t("common.loading")}</div>
                 )

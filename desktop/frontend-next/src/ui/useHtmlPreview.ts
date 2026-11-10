@@ -2,6 +2,7 @@ import { useCallback, useMemo, useRef, useState } from "react";
 import { host } from "../port/host";
 import type { AgentPort, BrowserTab } from "../port/port";
 import { preparePage } from "./browser_open";
+import { pageEditor, type PageEditor } from "./pageedit";
 import { UNREAD_TABS } from "./BrowserPanel";
 
 const HTML = /\.html?$/i;
@@ -40,6 +41,8 @@ export interface HtmlPreview {
   tabFor(path: string): BrowserTab | undefined;
   /** Puts the file in a page beside the agent's, or finds the one already there. */
   open(path: string, revision: string | undefined): Promise<void>;
+  /** Writes an edit made on a previewed page back to its file; none for a remote workspace. */
+  edit: PageEditor | undefined;
   /** Reloads the page when the file on disk is no longer the one it loaded. */
   sync(path: string, revision: string): void;
 }
@@ -112,5 +115,7 @@ export function useHtmlPreview(port: AgentPort, all: BrowserTab[], remote: boole
     [owned],
   );
 
-  return { tabs, pending: claim !== null, can, tabFor, open, sync };
+  const edit = useMemo(() => (remote ? undefined : pageEditor(port)), [port, remote]);
+
+  return { tabs, pending: claim !== null, can, tabFor, open, sync, edit };
 }
