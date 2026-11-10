@@ -204,7 +204,7 @@ func WriteSessionDisplayIndex(path string, idx *SessionDisplayIndex) error {
 	if path == "" {
 		return fmt.Errorf("empty session display index path")
 	}
-	b, err := json.MarshalIndent(idx, "", "  ")
+	b, err := json.Marshal(idx)
 	if err != nil {
 		return fmt.Errorf("encode session display index: %w", err)
 	}

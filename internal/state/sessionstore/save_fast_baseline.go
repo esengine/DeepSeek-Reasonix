@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"io"
 	"os"
 	"strings"
 
@@ -96,24 +97,35 @@ func digestSizeAndPrefix(ctx context.Context, msgs []provider.Message, k int) (d
 	if k == 0 {
 		copy(prefix[:], h.Sum(nil))
 	}
-	for i, m := range msgs {
+	w := &countingWriter{w: h}
+	enc := json.NewEncoder(w)
+	var m provider.Message
+	for i := range msgs {
 		if err := ctx.Err(); err != nil {
 			return digest, 0, prefix, err
 		}
-		m = messageForSessionIdentity(m)
-		b, err := json.Marshal(m)
-		if err != nil {
+		m = messageForSessionIdentity(msgs[i])
+		if err := enc.Encode(&m); err != nil {
 			return digest, 0, prefix, err
 		}
-		h.Write(b)
-		h.Write([]byte{'\n'})
-		size += int64(len(b)) + 1
 		if i+1 == k {
 			copy(prefix[:], h.Sum(nil))
 		}
 	}
 	copy(digest[:], h.Sum(nil))
-	return digest, size, prefix, nil
+	return digest, w.n, prefix, nil
+}
+
+// countingWriter lets the encoder write each message and its newline straight
+// into the hash, so the digest holds no per-message copy of the encoding.
+type countingWriter struct {
+	w io.Writer
+	n int64
+}
+
+func (c *countingWriter) Write(p []byte) (int, error) {
+	c.n += int64(len(p))
+	return c.w.Write(p)
 }
 
 // snapshotDecision is checkSnapshotWrite, answered from the print when the
