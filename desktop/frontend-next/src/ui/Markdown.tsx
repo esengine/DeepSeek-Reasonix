@@ -46,6 +46,9 @@ const FENCED = /^```[a-zA-Z]/m;
 // remark-math reads only dollars. Rewriting them keeps one parser instead of
 // two. Code is split out first: a \[ inside a fence is text, not an equation.
 const CODE = /(```[\s\S]*?```|`[^`\n]*`)/g;
+// remark-math reads a $$…$$ that shares its line as inline math, and KaTeX
+// refuses \tag outside display mode, so a formula that owns its line becomes a block.
+const ALONE = /^[ \t]*\$\$([^$\n]+)\$\$[ \t]*$/gm;
 
 function normalizeMath(md: string) {
   return md
@@ -54,8 +57,9 @@ function normalizeMath(md: string) {
       i % 2 === 1
         ? part
         : part
-            .replace(/\\\[([\s\S]+?)\\\]/g, (_, m) => `\n\n$$${m}$$\n\n`)
-            .replace(/\\\(([\s\S]+?)\\\)/g, (_, m) => `$${m}$`),
+            .replace(/\\\[([\s\S]+?)\\\]/g, (_, m) => `\n\n$$\n${m.trim()}\n$$\n\n`)
+            .replace(/\\\(([\s\S]+?)\\\)/g, (_, m) => `$${m}$`)
+            .replace(ALONE, (_, m) => `$$\n${m.trim()}\n$$`),
     )
     .join("");
 }
