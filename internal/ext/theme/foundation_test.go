@@ -61,12 +61,10 @@ func TestShippedPackInksReadOnEverySurfaceTheyAreSetOn(t *testing.T) {
 	}
 }
 
-// bgElev is the fill the frontend paints a selected navigation row and a
-// segmented control's track with. Its text contrast is held to AA elsewhere;
-// this holds the other half: the fill has to be told apart from the ground it
-// sits on, or the selected row and the control read as plain text. Navigation
-// sits on the page, so in light that pair is bg; a control sits on a card, so
-// in dark that pair is panel.
+// bgElev fills a selected navigation row and a segmented control's track. Its
+// text contrast is held to AA elsewhere; this holds the fill apart from its
+// ground: bg in light (navigation sits on the page), panel in dark (a control
+// sits on a card).
 func TestShippedPacksKeepTheirSelectionFillApartFromItsGround(t *testing.T) {
 	pairs := map[string]struct {
 		ground string
