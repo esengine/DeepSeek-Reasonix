@@ -405,12 +405,9 @@ describe("WorkbenchPanel", () => {
     expect(container.querySelector(".workbench-body")?.hasAttribute("data-files")).toBe(true);
   });
 
-  // A file opened from the explorer steps the list aside rather than closing it,
-  // so closing that file comes back to the list. Folding the column instead
-  // leaves someone who opened one file with no workbench at all. With no tabs
-  // the launcher draws a "文件" card as well as the toolbar toggle, so the
+  // The launcher draws a "文件" card as well as the toolbar toggle, so the
   // toolbar button is named by its action rather than its label.
-  it("returns to the explorer when a file opened from it is closed", async () => {
+  it("keeps the explorer beside a file opened from it, and after that file is closed", async () => {
     const user = userEvent.setup();
     const onCloseManual = vi.fn();
     const { container } = render(<WorkbenchPanel port={new MockPort()} tabs={[]} manual={false} shown scheme="light" changes={[]} onCloseManual={onCloseManual} onSurfaces={vi.fn()} onExternal={vi.fn()} />);
@@ -420,18 +417,14 @@ describe("WorkbenchPanel", () => {
 
     await user.click(await screen.findByRole("button", { name: "README.md" }));
     expect(screen.getByRole("tab", { name: "README.md" })).toBeTruthy();
-    // The list stepped aside for the file.
-    expect(container.querySelector(".workbench-body")?.hasAttribute("data-files")).toBe(false);
+    expect(container.querySelector(".workbench-body")?.hasAttribute("data-files")).toBe(true);
 
     await user.click(screen.getByRole("button", { name: "关闭 README.md" }));
     expect(onCloseManual).not.toHaveBeenCalled();
     expect(container.querySelector(".workbench-body")?.hasAttribute("data-files")).toBe(true);
   });
 
-  // The list was stepped aside for that file, not closed on behalf of the one
-  // behind it: closing the file leaves the other tab selected and alone, so the
-  // list must stay out of its way and the column must not fold.
-  it("does not bring the explorer back over a tab that is still open", async () => {
+  it("leaves the explorer as it was when the file picked from it is closed over another tab", async () => {
     const user = userEvent.setup();
     const onCloseManual = vi.fn();
     const page = { id: "b1", target: "t1", url: "https://example.com", title: "My page", active: false };
@@ -439,17 +432,14 @@ describe("WorkbenchPanel", () => {
 
     await user.click(container.querySelector<HTMLElement>('[data-action="workbench.files"]')!);
     await user.click(await screen.findByRole("button", { name: "README.md" }));
-    expect(container.querySelector(".workbench-body")?.hasAttribute("data-files")).toBe(false);
+    expect(container.querySelector(".workbench-body")?.hasAttribute("data-files")).toBe(true);
 
     await user.click(screen.getByRole("button", { name: "关闭 README.md" }));
-    expect(container.querySelector(".workbench-body")?.hasAttribute("data-files")).toBe(false);
+    expect(container.querySelector(".workbench-body")?.hasAttribute("data-files")).toBe(true);
     expect(onCloseManual).not.toHaveBeenCalled();
     expect(screen.getByRole("tab", { name: "My page" }).getAttribute("aria-selected")).toBe("true");
   });
 
-  // Closing every browser tab at once while a file from the explorer is still
-  // open leaves that file behind, so the column stays and the list stays away.
-  // The batch goes through the same rule as a single close, which is the point.
   it("keeps the column when every browser tab is closed at once beside an explorer file", async () => {
     const user = userEvent.setup();
     const onCloseManual = vi.fn();
@@ -470,7 +460,7 @@ describe("WorkbenchPanel", () => {
     expect(screen.queryByRole("tab", { name: "Agent page" })).toBeNull();
     expect(screen.getByRole("tab", { name: "README.md" })).toBeTruthy();
     expect(onCloseManual).not.toHaveBeenCalled();
-    expect(container.querySelector(".workbench-body")?.hasAttribute("data-files")).toBe(false);
+    expect(container.querySelector(".workbench-body")?.hasAttribute("data-files")).toBe(true);
   });
 
   it("shows a page the person opened beside the agent's, while the agent's tab stays active", () => {
@@ -518,13 +508,13 @@ describe("WorkbenchPanel", () => {
     localStorage.removeItem("rx-show-hidden-files");
   });
 
-  it("shows the file that was picked from the list rather than leaving the list over it", async () => {
+  it("shows the file picked from the list and keeps the list beside it", async () => {
     const user = userEvent.setup();
     const { container } = render(<WorkbenchPanel port={new MockPort()} tabs={[]} manual={false} shown scheme="light" changes={[]} onCloseManual={vi.fn()} onSurfaces={vi.fn()} onExternal={vi.fn()} />);
     await user.click(screen.getAllByRole("button", { name: "文件" })[0]);
     expect(container.querySelector(".workbench-body")?.hasAttribute("data-files")).toBe(true);
     await user.click(await screen.findByRole("button", { name: "README.md" }));
-    expect(container.querySelector(".workbench-body")?.hasAttribute("data-files")).toBe(false);
+    expect(container.querySelector(".workbench-body")?.hasAttribute("data-files")).toBe(true);
     expect(screen.getByRole("tab", { name: "README.md" }).getAttribute("aria-selected")).toBe("true");
   });
 

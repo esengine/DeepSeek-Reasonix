@@ -101,7 +101,7 @@ it("keeps a superseded successful user tab owned while a separate preview claim 
 });
 
 describe("opening an HTML file from the explorer", () => {
-  it.each(["Files", "launcher"])("does not start a hidden preview after a late file read and newer %s choice", async (choice) => {
+  it.each(["Files", "launcher"])("starts a preview only while its file is in view after a late read and newer %s choice", async (choice) => {
     const user = userEvent.setup();
     const { port, open } = setup();
     let read!: (file: Awaited<ReturnType<MockPort["workspaceFile"]>>) => void;
@@ -113,11 +113,14 @@ describe("opening an HTML file from the explorer", () => {
     if (choice === "Files") await user.click(container.querySelector('[data-action="workbench.files"]')!);
     else await user.click(screen.getByRole("button", { name: "新建标签" }));
     await act(async () => read({ path: "index.html", content: "<h1>Late</h1>", revision: "r1" }));
+    if (choice === "Files") {
+      expect(container.querySelector(".workbench-body")?.hasAttribute("data-files")).toBe(true);
+      await waitFor(() => expect(open).toHaveBeenCalledTimes(1));
+      return;
+    }
     expect(open).not.toHaveBeenCalled();
-    if (choice === "Files") expect(container.querySelector(".workbench-body")?.hasAttribute("data-files")).toBe(true);
-    else expect(screen.getByRole("group", { name: "开始" })).toBeTruthy();
-    if (choice === "Files") await user.click(screen.getByRole("tab", { name: "index.html" }).querySelector(".workbench-tab-pick")!);
-    else await user.keyboard("{Escape}");
+    expect(screen.getByRole("group", { name: "开始" })).toBeTruthy();
+    await user.keyboard("{Escape}");
     await waitFor(() => expect(open).toHaveBeenCalledTimes(1));
   });
 

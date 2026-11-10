@@ -49,7 +49,7 @@ it('retires an opening whose tab was observed then closed before the response', 
   expect(unseenPageOpenings(port)).toHaveLength(0);
 });
 
-it('does not start a preview after its file read finishes behind a newer Files selection', async () => {
+it('starts a preview once its file read finishes with the file still in view beside the tree', async () => {
   vi.spyOn(host(), 'drawsBrowserViews').mockReturnValue(true);
   const port = new MockPort();
   vi.spyOn(port, 'workspaceFiles').mockResolvedValue({files:['index.html'],directories:[]});
@@ -62,9 +62,7 @@ it('does not start a preview after its file read finishes behind a newer Files s
   await waitFor(()=>expect(reading).toHaveBeenCalled());
   fireEvent.click(document.querySelector('[data-action="workbench.files"]')!);
   await act(async()=>read({path:'index.html',content:'hello',revision:'r1'}));
-  expect(open).not.toHaveBeenCalled();
   expect(filesShown()).toBe(true);
-  fireEvent.click(document.querySelector('[data-action-click="workbench.tab"][data-target="file:index.html"]')!);
   await waitFor(()=>expect(open).toHaveBeenCalledOnce());
 });
 

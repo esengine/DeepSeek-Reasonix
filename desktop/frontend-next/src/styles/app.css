@@ -649,8 +649,7 @@
   .app[data-browser="off"] .pane:has(> .pbody[data-dock]) > .scroll[data-pane="browser"] { visibility: hidden; transition-property: visibility; transition-duration: 0s; transition-delay: var(--t-panel) }
   .pane:has(> .pbody[data-dock]) .workbench-body:not([data-files]) { grid-template-columns: minmax(0, 1fr) }
   .pane:has(> .pbody[data-dock]) .workbench-body:not([data-files]) .workbench-explorer { display: none }
-  .pane:has(> .pbody[data-dock]) .workbench-body[data-files] { grid-template-columns: minmax(0, 1fr) }
-  .pane:has(> .pbody[data-dock]) .workbench-body[data-files] .workbench-canvas { display: none }
+  .pane:has(> .pbody[data-dock]) .workbench-body:not([data-files]) .workbench-canvas { grid-column: 1 }
   .bpanel { flex: 1; display: flex; flex-direction: column; min-height: 0 }
   .bbar { flex: none; display: flex; flex-direction: column; gap: 6px; padding: 8px 12px; border-bottom: 1px solid var(--hair) }
   .bbar .vtabs { overflow-x: auto }

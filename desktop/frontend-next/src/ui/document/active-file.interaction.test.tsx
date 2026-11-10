@@ -19,8 +19,10 @@ it("reports actual tab selection and clears it when the canvas is hidden or its 
   fireEvent.click(screen.getAllByRole("button", { name: "one.md" })[0]);
   await waitFor(() => expect(onActiveFile).toHaveBeenLastCalledWith("docs/one.md"));
   fireEvent.click(screen.getByRole("button", { name: "文件" }));
+  await waitFor(() => expect(onActiveFile).toHaveBeenLastCalledWith("docs/one.md"));
+  fireEvent.click(screen.getByRole("button", { name: "新建标签" }));
   await waitFor(() => expect(onActiveFile).toHaveBeenLastCalledWith(undefined));
-  fireEvent.click(screen.getByRole("button", { name: "文件" }));
+  fireEvent.click(screen.getByRole("button", { name: "新建标签" }));
   await waitFor(() => expect(onActiveFile).toHaveBeenLastCalledWith("docs/one.md"));
   fireEvent.click(screen.getAllByRole("button", { name: "关闭 one.md" })[0]);
   await waitFor(() => expect(onActiveFile).toHaveBeenLastCalledWith("other/one.md"));

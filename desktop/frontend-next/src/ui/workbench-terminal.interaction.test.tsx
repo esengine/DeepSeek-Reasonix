@@ -36,12 +36,19 @@ it("offers a terminal in a new tab and opens it as a tab in front", async () => 
   expect((await screen.findByTestId("screen")).getAttribute("data-shown")).toBe("yes");
 });
 
-it("keeps a terminal's screen mounted but not in front when another tab is chosen", async () => {
+it("keeps a terminal's screen mounted but not in front while the new-tab launcher is up", async () => {
+  const port = new MockPort();
+  await openTerminalFromLauncher(port);
+  fireEvent.click(document.querySelector('[data-action="workbench.new"]')!);
+  expect((await screen.findByTestId("screen")).getAttribute("data-shown")).toBe("no");
+});
+
+it("keeps a terminal's screen in front beside the file list", async () => {
   const port = new MockPort();
   await openTerminalFromLauncher(port);
   fireEvent.click(document.querySelector('[data-action="workbench.new"]')!);
   fireEvent.click(document.querySelector('[data-action="workbench.launch-files"]')!);
-  expect((await screen.findByTestId("screen")).getAttribute("data-shown")).toBe("no");
+  expect((await screen.findByTestId("screen")).getAttribute("data-shown")).toBe("yes");
 });
 
 it("numbers terminals once there are two, and names a busy one for the command it runs with a dot", async () => {

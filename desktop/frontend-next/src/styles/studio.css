@@ -1177,12 +1177,13 @@ body { background: var(--page) !important; }
 .workbench-tab:hover .workbench-tab-close, .workbench-tab[aria-selected="true"] .workbench-tab-close { opacity: 1; }
 .workbench-tab-close:hover { color: var(--text); }
 .workbench-tabs svg { width: 13px; height: 13px; flex: none; }
-.workbench-body { flex: 1; min-height: 0; min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr) clamp(190px, 25%, 300px); grid-template-rows: minmax(0, 1fr); }
-.workbench-canvas { min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+.workbench-body { flex: 1; min-height: 0; min-width: 0; display: grid; grid-template-columns: clamp(190px, 36%, 260px) minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); }
+.workbench-canvas { grid-column: 2; grid-row: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
 .workbench-content > .studio-browser, .workbench-content > .bpanel { width: 100%; height: 100%; min-width: 0; }
 .workbench-canvas .bbar > .vtabs { display: none; }
-.workbench-explorer { min-width: 0; display: flex; flex-direction: column; border-left: 1px solid var(--hair); background: var(--page); }
+.workbench-explorer { grid-column: 1; grid-row: 1; min-width: 0; display: flex; flex-direction: column; border-right: 1px solid var(--hair); background: var(--page); }
 .workbench-explorer-head { height: 36px; padding: 0 12px; flex: none; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--hair); color: var(--muted); font: var(--w-med) var(--fs-meta)/1 var(--ui); text-transform: uppercase; }
+.workbench-explorer-head > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .workbench-explorer-head small { color: var(--faint); font-size: var(--fs-micro); }
 .workbench-explorer-head small { margin-left: auto; }
 .workbench-open-editor {
@@ -1251,9 +1252,9 @@ body { background: var(--page) !important; }
 .workbench-error.workbench-close-error { flex: none; font-size: var(--fs-meta); white-space: pre-line; overflow-wrap: anywhere; }
 .workbench-error { padding: 8px 12px; border-bottom: 1px solid var(--err); color: var(--err-ink); font: var(--w-reg) var(--fs-micro)/1.4 var(--ui); }
 @media (max-width: 760px) {
-  .workbench-body { grid-template-columns: minmax(0, 1fr); }
+  .workbench-body:not([data-files]) { grid-template-columns: minmax(0, 1fr); }
   .workbench-body:not([data-files]) .workbench-explorer { display: none; }
-  .workbench-body[data-files] .workbench-canvas { display: none; }
+  .workbench-body:not([data-files]) .workbench-canvas { grid-column: 1; }
 }
 
 /* Settings is one stable layer in the current window. */

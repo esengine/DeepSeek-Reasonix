@@ -137,9 +137,6 @@ export function WorkbenchPanel({
     [directories, setDirectories] = useState<string[]>([]),
     [openFiles, setOpenFiles] = useState<string[]>([]);
   const [showFiles, setShowFiles] = useState(false);
-  // The file picked out of the explorer, if that is how it was opened: closing
-  // it comes back to the list it was stepped aside from.
-  const fromExplorer = useRef("");
   const [launcher, setLauncher] = useState(false);
   const newTab = useRef<HTMLButtonElement>(null);
   const toggleLauncher = () => { supersede(); setLauncher((open) => !open); };
@@ -160,10 +157,10 @@ export function WorkbenchPanel({
   useOnBump(toggleFiles, toggleExplorer);
   const [query, setQuery] = useState(""),
     [selected, setSelected] = useState("");
-  // Docked, the file list hides the canvas a page is drawn in, so choosing any
-  // surface steps the list aside.
+  // The list and the canvas sit side by side, so a file stays beside its tree;
+  // any other surface takes the whole column and steps the list aside.
   const select = useCallback((key: string) => {
-    setShowFiles(false);
+    if (!key.startsWith("file:")) setShowFiles(false);
     setLauncher(false);
     setFailed("");
     setSelected(key);
@@ -333,11 +330,11 @@ export function WorkbenchPanel({
   // source view is one click away.
   const filePath = active?.kind === "file" ? active.path : "";
   useEffect(() => {
-    onActiveFile?.(shown && !launcher && !showFiles && filePath ? filePath : undefined);
+    onActiveFile?.(shown && !launcher && filePath ? filePath : undefined);
     return () => onActiveFile?.(undefined);
-  }, [filePath, shown, launcher, showFiles, onActiveFile]);
+  }, [filePath, shown, launcher, onActiveFile]);
   const textMenu = useWorkbenchTextMenu({
-    path: filePath, mode, scope, shown: shown && !launcher && !showFiles,
+    path: filePath, mode, scope, shown: shown && !launcher,
     onQuote: onQuoteSelection, onError: setFailed,
   });
   const grantedFile = parseGrantedFile(filePath);
@@ -359,7 +356,7 @@ export function WorkbenchPanel({
   const unpreviewableText = !hasDocument && errorCode === "workspace.file_unreadable";
   const revision = file?.revision;
   useEffect(() => {
-    if (mode !== "preview" || !previewable || !shown || showFiles || launcher || previewTab || (!revision && !fileFailed && !failed)) return;
+    if (mode !== "preview" || !previewable || !shown || launcher || previewTab || (!revision && !fileFailed && !failed)) return;
     if (missing) {
       setMode("file");
       return;
@@ -368,7 +365,7 @@ export function WorkbenchPanel({
       setFailed(reason(e));
       setMode("file");
     });
-  }, [mode, previewable, shown, showFiles, launcher, previewTab, revision, fileFailed, missing, failed, filePath, openPreview, tabs]);
+  }, [mode, previewable, shown, launcher, previewTab, revision, fileFailed, missing, failed, filePath, openPreview, tabs]);
   useEffect(() => {
     if (mode === "preview" && revision) syncPreview(filePath, revision);
   }, [mode, filePath, revision, syncPreview]);
@@ -391,8 +388,7 @@ export function WorkbenchPanel({
   useEffect(() => {
     strip.current?.querySelector('[aria-selected="true"]')?.scrollIntoView?.({ block: "nearest", inline: "nearest" });
   }, [activeKey, surfaces.length]);
-  // Picking a file is asking to read it. Docked, the list and the file share one
-  // column, so the list steps aside; side by side it stays where it is.
+  // Picking a file is asking to read it; the list stays where it is.
   const [recentFiles, setRecentFiles] = useState(() => readRecentFiles(workspaceRoot ?? ""));
   const openFile = useCallback((path: string) => {
     setRecentFiles(rememberFile(workspaceRoot ?? "", path));
@@ -402,11 +398,8 @@ export function WorkbenchPanel({
       n.delete(`file:${path}`);
       return n;
     });
-    // A file picked while the explorer is shown leaves that list stepped aside
-    // rather than closed, so closing this file comes back to the list.
-    fromExplorer.current = showFiles ? path : "";
     pick(`file:${path}`);
-  }, [pick, showFiles, workspaceRoot]);
+  }, [pick, workspaceRoot]);
   useEffect(() => { if (fileRequest) { openFile(fileRequest.path); fileRequest.consumed?.(); } }, [fileRequest, openFile]);
   // A rendered document's own links open beside it and its images load from the
   // tree. Held stable per document, so typing re-renders the text alone.
@@ -459,7 +452,7 @@ export function WorkbenchPanel({
       if (openingBrowser.current === page) openingBrowser.current = null;
     }
   };
-  const { close: closeTabs, closing, closeFailure } = useTabClose({ port, surfaces, selected, showFiles: showFiles || launcher, fromExplorer, setBrowsers, setOpenFiles, setAgents, setDismissed, setSelected, setShowFiles, setLauncher, onCloseManual, onCloseSelected: () => setFailed("") });
+  const { close: closeTabs, closing, closeFailure } = useTabClose({ port, surfaces, selected, showFiles: showFiles || launcher, setBrowsers, setOpenFiles, setAgents, setDismissed, setSelected, setLauncher, onCloseManual, onCloseSelected: () => setFailed("") });
   const close = (targets: Surface[]) => { supersede(); return terminals.guard(targets, closeTabs); };
   const dismissTabMenu = useCallback(() => setTabMenu(null), []);
   const [tabMenu, setTabMenu] = useState<{ surface: Surface; x: number; y: number; anchor: HTMLElement } | null>(null);
@@ -628,7 +621,7 @@ export function WorkbenchPanel({
           )}
           <div className="workbench-content" ref={canvas} hidden={launcher || !active} data-action-contextmenu="workbench.quote-selection" {...textMenu.readerProps}>
           <ManualBrowsers ids={browsers} active={active?.kind === "manual" ? active.id : ""} onAddress={noteHost} onExternal={onExternal} scheme={scheme} />
-          <WorkbenchTerminals port={port} hook={terminals} active={active?.kind === "terminal" ? active.id : ""} shown={shown && !launcher && !showFiles}
+          <WorkbenchTerminals port={port} hook={terminals} active={active?.kind === "terminal" ? active.id : ""} shown={shown && !launcher}
             scheme={scheme} onQuote={onQuoteSelection} onClose={(targets) => void close(targets)} />
           {active?.kind === "browser" && (
             <AgentBrowserPanel
@@ -639,11 +632,11 @@ export function WorkbenchPanel({
             />
           )}
           {active?.kind === "changes" && (
-            <WorkbenchChangesPage port={port} changes={changes} branch={gitRepos.repos.find((r) => r.dir === "")?.branch} shown={shown && !launcher && !showFiles}
+            <WorkbenchChangesPage port={port} changes={changes} branch={gitRepos.repos.find((r) => r.dir === "")?.branch} shown={shown && !launcher}
               remote={remote} onOpen={(path) => { openFile(path); setMode("diff"); }} onChanged={onTreeChanged} />
           )}
-          {active?.kind === "job" && <JobRunView key={active.id} port={port} id={active.id} name={active.name} shown={shown && !launcher && !showFiles} />}
-          {active?.kind === "agent" && <AgentRunView key={active.ref} port={port} run={active} shown={shown && !launcher && !showFiles} onShowCall={onShowCall} />}
+          {active?.kind === "job" && <JobRunView key={active.id} port={port} id={active.id} name={active.name} shown={shown && !launcher} />}
+          {active?.kind === "agent" && <AgentRunView key={active.ref} port={port} run={active} shown={shown && !launcher} onShowCall={onShowCall} />}
           {active?.kind === "file" && (
             <>
               <WorkbenchFileBar
@@ -673,7 +666,7 @@ export function WorkbenchPanel({
               )}
               {mode === "document" || unpreviewableText ? (
                 <Suspense fallback={<div className="workbench-empty">{t("common.loading")}</div>}>
-                  <DocumentPreview key={filePath} port={port} path={filePath} shown={shown && !showFiles && !launcher}
+                  <DocumentPreview key={filePath} port={port} path={filePath} shown={shown && !launcher}
                     view={documentState(documentStates, filePath)}
                     refresh={JSON.stringify([changeKey, glance, running, wrote])}
                     onOpenExternal={!remote && port.opensFiles() && /\.(pdf|html?|svg|docx?|xlsx?|pptx?)$/i.test(filePath) ? () => {
