@@ -1618,7 +1618,7 @@ body { background: var(--page) !important; }
    No !important: this sheet already loads after the tokens it is replacing, and
    marking one would outrank the reader's own font and size as well. */
 :root {
-  --ui: "Inter Studio", "PingFang SC", "Microsoft YaHei UI", "Noto Studio", "Noto Studio Full", system-ui, sans-serif;
+  --ui: "Inter Studio", "Noto Studio", "Noto Studio Full", "PingFang SC", "Microsoft YaHei UI", system-ui, sans-serif;
   --mono: "IBM Plex Mono var", "Noto Studio", "Noto Studio Full", Consolas, monospace;
   --fs-lead: calc(14px * var(--fs-scale, 1));
 }
