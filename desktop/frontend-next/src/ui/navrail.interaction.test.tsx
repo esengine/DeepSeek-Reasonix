@@ -85,9 +85,10 @@ it("draws the rail when it is chosen, with every entry in it", async () => {
   expect(nav()).not.toBeNull();
   expect(app().dataset.nav).toBe("on");
   expect(document.querySelector(".railfoot")).toBeNull();
-  for (const name of ["会话", "用量", "文件", "工具与权限", "扩展", "记忆", "远程", "发送反馈", "账号", "设置"]) {
+  for (const name of ["用量", "文件", "工具与权限", "扩展", "记忆", "远程", "发送反馈", "账号", "设置"]) {
     expect(within(navEl()!).getByRole("button", { name: new RegExp(`^${name}`) }), name).toBeTruthy();
   }
+  expect(within(navEl()!).queryByRole("button", { name: /^会话/ })).toBeNull();
 });
 
 it.each([
@@ -224,20 +225,17 @@ it("opens feedback from the rail like the sidebar entry does, badge included", a
   expect(await screen.findByRole("tab", { name: "我的反馈", selected: true })).toBeTruthy();
 });
 
-it("the conversation item opens and closes the workspace column, and from settings it goes home", async () => {
+it("has no conversation item: the top toggle owns the workspace column, and settings is left by its own back button", async () => {
   await open();
-  const item = () => within(navEl()!).getByRole("button", { name: /^会话/ });
+  expect(within(navEl()!).queryByRole("button", { name: /^会话/ })).toBeNull();
   expect(app().dataset.rail).toBe("on");
-  await userEvent.click(item());
+  await toggleSidebar();
   expect(app().dataset.rail).toBe("off");
-  await userEvent.click(item());
+  await toggleSidebar();
   expect(app().dataset.rail).toBe("on");
   await userEvent.click(within(navEl()!).getByRole("button", { name: /^用量/ }));
-  expect(item().getAttribute("aria-current")).toBeNull();
-  await userEvent.click(item());
-  expect(item().getAttribute("aria-current")).toBe("page");
-  expect(item().hasAttribute("aria-pressed")).toBe(false);
-  expect(app().dataset.rail).toBe("on");
+  await userEvent.click(await screen.findByRole("button", { name: /^关闭 Esc/ }));
+  expect(await screen.findByRole("combobox", { name: "任务输入" })).toBeTruthy();
 });
 
 it("keeps desktop navigation usable after closing settings without a top toggle", async () => {

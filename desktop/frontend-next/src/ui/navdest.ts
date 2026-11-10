@@ -2,7 +2,7 @@ import { useMemo, useSyncExternalStore } from "react";
 import { arranged, navLayout, onNavLayoutChange } from "../state/navEntries";
 import type { Section } from "./prefsnav";
 
-export type Mark = "chat" | "files" | Section;
+export type Mark = "files" | Section;
 export type Destination = [mark: Mark, label: string, section: string, action?: string];
 
 // One list of places the window can go, drawn twice: icon-only on the rail and

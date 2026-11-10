@@ -4,47 +4,62 @@ import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import "./testkit";
 import { PageIndex } from "./PageIndex";
-import { NAV, SETTINGS, pageHome } from "./prefsnav";
+import { t } from "../i18n";
+import { NAV, PAGE_CARDS, SETTINGS, pageHome } from "./prefsnav";
 import { pageIndexOf } from "./settingPageIndex";
 
 afterEach(cleanup);
 
-const entries = (section: string) => SETTINGS.filter((e) => !e.hidden && !e.within && pageHome(e.section) === section);
+const cards = (section: string) => pageIndexOf(SETTINGS.filter((e) => !e.hidden), section as never);
 
 describe("the index at the top of a settings page", () => {
-  it("names every setting the page holds, one button each, so folded-in ones have a visible way in", () => {
-    const items = entries("session");
+  it("names every card the page holds, one button each, so folded-in ones have a visible way in", () => {
+    const items = cards("session");
     render(<PageIndex items={items} onGo={() => {}} />);
     expect(screen.getByRole("navigation", { name: "本页包含" })).toBeTruthy();
     expect(screen.getAllByRole("button")).toHaveLength(items.length);
-    for (const e of items) expect(document.querySelector(`[data-target="${e.anchor}"]`), e.anchor).toBeTruthy();
+    expect(items.map((i) => screen.getByRole("button", { name: t(i.title) }).textContent)).toEqual(["人设与预设", "计划与提问", "协作", "自动化"]);
   });
 
-  it("goes to the setting that was pressed, with the entry it was drawn from", async () => {
+  it("goes to the first setting of the card that was pressed, with the entry it was drawn from", async () => {
     const go = vi.fn();
-    const items = entries("session");
+    const items = cards("session");
     render(<PageIndex items={items} onGo={go} />);
-    const peers = items.find((e) => e.anchor === "peers")!;
-    await userEvent.click(document.querySelector(`[data-target="peers"]`) as HTMLElement);
-    expect(go).toHaveBeenCalledWith(peers);
+    const collab = items.find((i) => i.title === "settings.collaboration")!;
+    await userEvent.click(document.querySelector(`[data-target="${collab.anchor}"]`) as HTMLElement);
+    expect(go).toHaveBeenCalledWith(collab.entry);
   });
 
   it("says nothing on a page too small to need it", () => {
-    const { container } = render(<PageIndex items={entries("session").slice(0, 2)} onGo={() => {}} />);
+    const { container } = render(<PageIndex items={cards("session").slice(0, 1)} onGo={() => {}} />);
     expect(container.innerHTML).toBe("");
   });
 });
 
-describe("which settings a page's index lists", () => {
-  it("is every visible setting of the page that is not drawn inside another one", () => {
-    const shown = pageIndexOf(SETTINGS, "session");
-    expect(shown.map((e) => e.anchor)).toEqual(entries("session").map((e) => e.anchor));
+describe("which cards a page's index lists", () => {
+  it("lands each card on the first visible block it holds", () => {
+    const hidden = SETTINGS.filter((e) => !e.hidden && e.anchor !== "plan-approval");
+    const shown = pageIndexOf(hidden, "session");
+    expect(shown.find((i) => i.title === "settings.plans_and_questions")?.anchor).toBe("ask-timeout");
   });
 
-  it("leaves no setting off every page: each is listed, or sits inside one that is", () => {
+  it("drops a card none of whose blocks is visible", () => {
+    const shown = pageIndexOf(SETTINGS.filter((e) => e.section !== "remote"), "network");
+    expect(shown.map((i) => i.title)).toEqual(["common.network"]);
+  });
+
+  it("leaves no setting off every page: each sits in a card, or inside a block that does", () => {
     const homes = new Set(NAV.flatMap(([, items]) => items.map(([id]) => id as string)));
-    const listed = new Set(SETTINGS.filter((e) => !e.hidden && !e.within && homes.has(pageHome(e.section))).map((e) => e.anchor));
-    const lost = SETTINGS.filter((e) => !e.hidden && !listed.has(e.anchor) && !(e.within && listed.has(e.within))).map((e) => e.anchor);
+    const inCard = new Set(PAGE_CARDS.flatMap(([, , anchors]) => anchors));
+    const lost = SETTINGS.filter((e) => !e.hidden && homes.has(pageHome(e.section)) && !inCard.has(e.within ?? e.anchor)).map((e) => e.anchor);
     expect(lost).toEqual([]);
+  });
+
+  it("puts every card on a page that exists and names only settings that exist", () => {
+    const anchors = new Set(SETTINGS.map((e) => e.anchor));
+    for (const [page, , list] of PAGE_CARDS) {
+      expect(NAV.flatMap(([, items]) => items.map(([id]) => id as string))).toContain(page);
+      for (const a of list) expect(anchors.has(a), a).toBe(true);
+    }
   });
 });

@@ -16,10 +16,9 @@ export function UsageSettings({ port, onChanged }: { port: AgentPort; onChanged:
         title={t("usage.usage_cost")}
         hint={t("settings.usage_hint")}
       >
-        <Usage key={rev} port={port} />
+        <Usage key={rev} port={port} toolbar={<DisplayCurrency bare port={port} onChanged={() => { setRev((n) => n + 1); onChanged(); }} />} />
       </Group>
       <UploadUsage port={port} />
-      <DisplayCurrency port={port} onChanged={() => { setRev((n) => n + 1); onChanged(); }} />
     </>
   );
 }

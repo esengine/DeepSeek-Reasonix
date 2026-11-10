@@ -10,7 +10,7 @@ import { Sidebar } from "./Sidebar";
 import { NO_PAGING } from "./treewindow";
 import { NavEntriesSection } from "./NavEntriesSection";
 
-const props = { at: null, onGo: vi.fn(), onFiles: vi.fn(), onHome: vi.fn(), onRail: vi.fn(), onFeedback: vi.fn(), onNew: vi.fn(), feedbackUnread: 0, shown: true };
+const props = { at: null, onGo: vi.fn(), onFiles: vi.fn(), onFeedback: vi.fn(), onNew: vi.fn(), feedbackUnread: 0, shown: true };
 
 beforeEach(() => { localStorage.clear(); localStorage.setItem("rx-nav-rail", "on"); });
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
@@ -23,7 +23,7 @@ function both() {
 
 it("draws the rail in the declared order until this machine chooses otherwise", () => {
   both();
-  expect(rail()).toEqual(["新建会话", "会话", "用量", "文件", "工具与权限", "扩展", "记忆", "远程"]);
+  expect(rail()).toEqual(["新建会话", "用量", "文件", "工具与权限", "扩展", "记忆", "远程"]);
 });
 
 it("hides a destination from the rail when its switch is turned off, and brings it back", async () => {
@@ -39,7 +39,7 @@ it("moves a destination up and down, and the rail follows", async () => {
   both();
   await userEvent.click(screen.getByRole("button", { name: "上移：远程" }));
   await userEvent.click(screen.getByRole("button", { name: "上移：远程" }));
-  expect(rail()).toEqual(["新建会话", "会话", "用量", "文件", "工具与权限", "远程", "扩展", "记忆"]);
+  expect(rail()).toEqual(["新建会话", "用量", "文件", "工具与权限", "远程", "扩展", "记忆"]);
   await userEvent.click(screen.getByRole("button", { name: "下移：远程" }));
   expect(rail().slice(-3)).toEqual(["扩展", "远程", "记忆"]);
 });

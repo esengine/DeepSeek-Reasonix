@@ -47,16 +47,16 @@ describe("conversation overview rail", () => {
     expect(view.container.querySelector(".srail")).toBeNull();
   });
 
-  it("shades the stretch on screen and draws the marks inside it darker", async () => {
+  it("draws the marks inside the stretch on screen darker, with no block behind them", async () => {
     const { view } = draw(three(), { scrollTop: 1000, scrollHeight: 2400 });
-    await waitFor(() => expect(view.container.querySelector(".srail-band")).not.toBeNull());
-    expect(lines(view).map((b) => b.hasAttribute("data-seen"))).toEqual([false, true, false]);
+    await waitFor(() => expect(lines(view).map((b) => b.hasAttribute("data-seen"))).toEqual([false, true, false]));
+    expect(view.container.querySelector(".srail-band")).toBeNull();
   });
 
-  it("draws no band when the whole conversation fits", async () => {
+  it("marks none as seen when the whole conversation fits", async () => {
     const { view } = draw(three(), { scrollHeight: 600 });
     await waitFor(() => expect(lines(view)[0].style.top).toBe("18px"));
-    expect(view.container.querySelector(".srail-band")).toBeNull();
+    expect(lines(view).some((b) => b.hasAttribute("data-seen"))).toBe(false);
   });
 
   it("draws a message that changed files longer, and magnifies the pointed one and its neighbours", async () => {

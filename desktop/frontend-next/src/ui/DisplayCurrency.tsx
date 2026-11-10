@@ -11,7 +11,7 @@ const MODES: [DisplayCurrencyMode, string][] = [
   ["USD", "usage.us_dollar_usd"],
 ];
 
-export function DisplayCurrency({ port, onChanged }: { port: AgentPort; onChanged: () => void }) {
+export function DisplayCurrency({ port, onChanged, bare }: { port: AgentPort; onChanged: () => void; bare?: boolean }) {
   const [state, setState] = useState<DisplayCurrencySettings | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -35,11 +35,15 @@ export function DisplayCurrency({ port, onChanged }: { port: AgentPort; onChange
   };
 
   if (!state) return <div className="empty">{t("usage.could_not_read_the_currency")}</div>;
+  const choice = (
+    <SegChoice<DisplayCurrencyMode> label={t("usage.display_currency")} value={state.mode} action="currency.mode" disabled={busy}
+      onPick={(m) => void pick(m)} options={MODES.map(([m, label]) => [m, t(label)] as const)} />
+  );
+  if (bare) return <div className="ucurrency" id="set-currency" data-setting="currency">{choice}</div>;
   return (
     <>
       <SettingRow id="currency" title={t("usage.cost_display_currency")} desc={t("settings.which_currency_costs_show")}>
-        <SegChoice<DisplayCurrencyMode> label={t("usage.display_currency")} value={state.mode} action="currency.mode" disabled={busy}
-          onPick={(m) => void pick(m)} options={MODES.map(([m, label]) => [m, t(label)] as const)} />
+        {choice}
       </SettingRow>
       {state.mode !== "auto" && state.unconverted.length > 0 && (
         <div className="why">

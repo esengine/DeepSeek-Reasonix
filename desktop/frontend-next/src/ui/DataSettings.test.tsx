@@ -19,9 +19,9 @@ function draw(signedIn = false) {
   );
 }
 
-it("is three cards: memory and usage, session storage, backup, each setting one row", async () => {
+it("is four cards: memory, usage and cost, session storage, backup, each setting one row", async () => {
   draw();
-  expect([...document.querySelectorAll(".prefs-card > header h3")].map((h) => h.textContent)).toEqual(["记忆与用量", "会话存储", "备份"]);
+  expect([...document.querySelectorAll(".prefs-card > header h3")].map((h) => h.textContent)).toEqual(["记忆", "用量与成本", "会话存储", "备份"]);
   for (const id of ["memory", "usage", "upload-usage", "currency", "storage", "auto-archive", "session-dir", "legacy-sessions", "backup-file"]) {
     await waitFor(() => expect(document.querySelector(`[data-setting="${id}"]`), id).toBeTruthy());
   }

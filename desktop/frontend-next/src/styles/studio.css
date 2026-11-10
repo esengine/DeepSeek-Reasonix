@@ -3018,7 +3018,7 @@ button, input, textarea { font-size: var(--fs-ui); }
 .vway .why,
 .mguide,
 .mdiff,
-.acct-note { font-size: var(--prefs-meta); line-height: 1.65; }
+.acct-note { font-size: var(--prefs-meta); line-height: 1.5; }
 .grp .now,
 .vway .lb,
 .addp .fields > label > span:not(.unit-field),
@@ -3028,12 +3028,12 @@ button, input, textarea { font-size: var(--fs-ui); }
 .addp-section-head strong,
 .mlhead .ttl { font-size: var(--fs-lead); }
 .addp-head p,
-.addp .fields .tip { font-size: var(--prefs-meta); line-height: 1.6; }
+.addp .fields .tip { font-size: var(--prefs-meta); line-height: 1.5; }
 .mline .nm { font-size: var(--fs-ui); }
 .mline .malias { width: 100%; }
 .prefs-main { padding-top: 28px; }
 .prefs-col { max-width: 820px; }
-.grp { padding: 20px 22px 18px; }
+.grp { padding: 16px 24px; }
 .prefs .skgroup + .skgroup { margin-top: 20px; }
 .prefs .skgroup > h4 { margin: 0 0 8px; font: var(--w-med) var(--prefs-body)/1.5 var(--ui); color: var(--text); overflow-wrap: anywhere; }
 

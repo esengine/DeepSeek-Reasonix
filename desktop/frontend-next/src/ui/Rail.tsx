@@ -301,7 +301,6 @@ export function Rail({ marks, total, scroll, flow, onJump, bound, scope, earlier
           onJump(marks[within(tops, view[at], railLocalY(e.clientY, rect.top, rect.height, geom.current.rail))]);
         }}
       >
-        {band && <div className="srail-band" style={{ top: band.top, height: band.height }} />}
         {view.map((v, i) => {
           const m = marks[v.from];
           const folded = !v.single;

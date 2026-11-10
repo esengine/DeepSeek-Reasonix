@@ -29,13 +29,15 @@ interface Props {
 export function DataSettings({ port, homePort, localPort, hub, workspace, cwd, busy, signedIn, onIsolate, onChanged, onRecovered }: Props) {
   return (
     <>
-      <SectionCard title={t("data.memory_and_usage")} hint={t("data.what_the_agent_remembers_and")}>
+      <SectionCard title={t("data.memory")}>
       <Group id="memory"
       title={t("data.memory")}
       hint={t("settings.what_it_remembers")}
     >
       <Memory port={localPort} />
     </Group>
+      </SectionCard>
+      <SectionCard title={t("data.usage_and_cost")}>
       <UsageSettings port={homePort} onChanged={onChanged} />
       </SectionCard>
       <SectionCard title={t("data.session_storage")} hint={t("data.where_sessions_and_indexes_live")}>

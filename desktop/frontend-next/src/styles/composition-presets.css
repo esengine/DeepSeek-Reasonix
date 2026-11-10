@@ -5,7 +5,7 @@
 #set-composition-picker .grp-hd { align-items: center; }
 #set-composition-picker .sw { margin-left: auto; flex-shrink: 0; }
 .composition-list-heading { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 8px 24px; margin-bottom: 24px; }
-.composition-list-heading h2 { margin: 0; font-size: var(--fs-display); }
+.composition-list-heading h2 { margin: 0; font-size: var(--fs-title); }
 .composition-list-heading p { grid-column: 1 / -1; margin: 0; color: var(--muted); line-height: 1.7; }
 .composition-list-heading .btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 36px; padding: 8px 16px; white-space: nowrap; }
 .composition-list-heading svg { width: 16px; height: 16px; flex: none; }

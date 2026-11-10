@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type CSSProperties } from "react";
+import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from "react";
 import { UsageStack, type StackPoint } from "./UsageStack";
 import { usageCsv } from "./usagecsv";
 import { t } from "../i18n";
@@ -130,7 +130,7 @@ function BreakdownTable({ rows, hourly }: { rows: BreakdownRow[]; hourly: boolea
   );
 }
 
-export function Usage({ port }: { port: AgentPort }) {
+export function Usage({ port, toolbar }: { port: AgentPort; toolbar?: ReactNode }) {
   const [range, setRange] = useState<UsageWindow>({ kind: "days", days: DEFAULT_DAYS });
   const [customFrom, setCustomFrom] = useState("");
   const [customTo, setCustomTo] = useState("");
@@ -258,6 +258,7 @@ export function Usage({ port }: { port: AgentPort }) {
           <button type="button" aria-pressed={range.kind === "month"} onClick={openMonth}>{t("usage.calendar_month")}</button>
         </div>
         {report && <span className="uspan">{report.from} → {report.to}</span>}
+        {toolbar}
         {report && (
           <button type="button" className="uexport" data-action="usage.export" onClick={() => {
             const url = URL.createObjectURL(new Blob([usageCsv(report)], { type: "text/csv;charset=utf-8" }));

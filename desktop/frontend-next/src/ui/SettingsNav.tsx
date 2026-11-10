@@ -45,7 +45,7 @@ export function SettingsNav({ at, values, shown, danger, disabled, onSelect, pag
         const rows = items.filter(([id]) => shown(id));
         if (rows.length === 0) return null;
         return (
-          <Fragment key={group}>
+          <Fragment key={group || "first"}>
             {group && <div className="navsec">{t(group)}</div>}
             {rows.map(([id, name]) => (
               <Fragment key={id}>

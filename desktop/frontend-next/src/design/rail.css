@@ -2,10 +2,6 @@
 [data-fold~="rail"][data-fold~="side"] .railhost { display: none; }
 
 .srail { position: absolute; top: 0; right: 8px; width: 30px; height: var(--rail-h, 0px); pointer-events: auto; }
-.srail-band {
-  position: absolute; right: 2px; width: 26px; border-radius: var(--r-sm); background: var(--overlay); pointer-events: none;
-  transition: top 300ms cubic-bezier(.2, 0, 0, 1), height 300ms cubic-bezier(.2, 0, 0, 1);
-}
 
 .srail-m {
   position: absolute; right: 2px; width: 26px; height: 12px; margin-top: -6px; z-index: 1;
@@ -72,7 +68,7 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .srail-band, .srail-m > i, .srail-tip { transition: none; }
+  .srail-m > i, .srail-tip { transition: none; }
   .srail-peek { animation: none; }
 }
 .ds-row .sessword { font-weight: var(--w-med); }

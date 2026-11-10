@@ -4,7 +4,7 @@ import { cleanup, fireEvent, render } from "@testing-library/react";
 import { Nav } from "./Nav";
 import { ICON, type Section } from "./prefsnav";
 
-const props = { at: null, onGo: vi.fn(), onFiles: vi.fn(), onHome: vi.fn(), onRail: vi.fn(), onFeedback: vi.fn(), onNew: vi.fn(), feedbackUnread: 0, shown: true };
+const props = { at: null, onGo: vi.fn(), onFiles: vi.fn(), onFeedback: vi.fn(), onNew: vi.fn(), feedbackUnread: 0, shown: true };
 
 afterEach(cleanup);
 
@@ -47,5 +47,4 @@ it("starts a new session from its own rail button", () => {
   expect(btn.getAttribute("aria-label")).toBe("新建会话");
   btn.click();
   expect(onNew).toHaveBeenCalledTimes(1);
-  expect(props.onRail).not.toHaveBeenCalled();
 });

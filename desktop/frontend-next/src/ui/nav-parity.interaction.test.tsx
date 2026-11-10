@@ -27,7 +27,7 @@ function sidebar(onSettings = vi.fn()) {
 }
 
 const railNames = () => {
-  const props = { at: null, onGo: vi.fn(), onFiles: vi.fn(), onHome: vi.fn(), onRail: vi.fn(), onFeedback: vi.fn(), onNew: vi.fn(), feedbackUnread: 0, shown: true };
+  const props = { at: null, onGo: vi.fn(), onFiles: vi.fn(), onFeedback: vi.fn(), onNew: vi.fn(), feedbackUnread: 0, shown: true };
   const { container, unmount } = render(<Nav {...props} />);
   const names = [...container.querySelectorAll("button[aria-label]")].map((b) => b.getAttribute("aria-label")!);
   unmount();
@@ -40,6 +40,6 @@ it("offers in the sidebar every destination the icon rail offers, under the same
   sidebar();
   fireEvent.click(screen.getByRole("button", { name: "侧栏入口" }));
   const shown = [...screen.getAllByRole("button"), ...screen.getAllByRole("menuitem")].map((b) => `${b.getAttribute("aria-label") ?? ""} ${b.textContent ?? ""}`);
-  const missing = names.filter((n) => !["会话", "新建会话", "账号"].includes(n)).filter((n) => !shown.some((s) => s.includes(n)));
+  const missing = names.filter((n) => !["新建会话", "账号"].includes(n)).filter((n) => !shown.some((s) => s.includes(n)));
   expect(missing).toEqual([]);
 });
