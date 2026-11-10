@@ -16,6 +16,7 @@ func setReleaseProjects(t *testing.T, projects ...string) {
 	t.Setenv("REASONIX_HOME", testenv.TempDir(t))
 	cfg := config.LoadForEdit(config.UserConfigPath())
 	cfg.Peers.Enabled = true
+	cfg.Peers.Dispatch = false
 	cfg.Peers.ReleaseProjects = projects
 	if err := cfg.SaveTo(config.UserConfigPath()); err != nil {
 		t.Fatal(err)

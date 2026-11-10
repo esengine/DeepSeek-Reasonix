@@ -396,7 +396,7 @@ export const CHAT: Messages = {
   "chat.selected_text": { zh: "选中内容", en: "Selected text" },
   "chat.selects_enter_references_tab_completes": { zh: "↑↓ 选择 · 回车引用 · Tab 补全或进入目录 · Esc 关闭", en: "↑↓ selects · Enter references · Tab completes or enters a folder · Esc closes" },
   "chat.selects_tab_or_enter_completes": { zh: "↑↓ 选择 · Tab 或回车补全 · Esc 关闭", en: "↑↓ selects · Tab or Enter completes · Esc closes" },
-  "chat.send_text_to_another_reasonix": { zh: "向本机另一个 Reasonix 会话发送文字；对方用户批准后它的模型才会读到，发送本身不授予任何权限。", en: "Send text to another Reasonix session on this machine; its model reads it only after that session's user approves, and sending grants no permission." },
+  "chat.send_text_to_another_reasonix": { zh: "向本机另一个 Reasonix 会话发送文字；派发开关开着时对方的模型会直接读到，关着时要对方用户批准，发送本身不授予任何权限。", en: "Send text to another Reasonix session on this machine; with the dispatch switch on its model reads it directly, otherwise its user must approve first, and sending grants no permission." },
   "chat.send_the_edit": { zh: "改完重发", en: "Send the edit" },
   "chat.sending": { zh: "正在重发…", en: "Sending…" },
   "chat.sent_to_background": { zh: "放到后台运行", en: "Sent to the background" },

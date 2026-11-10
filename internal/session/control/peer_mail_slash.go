@@ -31,7 +31,7 @@ func (c *Controller) peerCommand(args string) {
 			c.notice("peer send: " + peerErrorText(err))
 			return
 		}
-		c.notice(fmt.Sprintf("sent %s to %s; it waits there until that session's user approves it", rec.ID, peerLabel(rec.To)))
+		c.notice(fmt.Sprintf("sent %s to %s; it reaches that session's model as soon as it is free, unless the dispatch switch is off, when it waits for that session's user", rec.ID, peerLabel(rec.To)))
 	case "approve", "deny":
 		if rest == "" {
 			c.notice("usage: /peer " + verb + " <message id>")

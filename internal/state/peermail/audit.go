@@ -28,6 +28,7 @@ type Consent string
 const (
 	ConsentProject  Consent = "project"
 	ConsentDispatch Consent = "dispatch"
+	ConsentSwitch   Consent = "switch"
 )
 
 // AuditRecord is one line of the audit trail. It names the parties and says

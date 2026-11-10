@@ -37,7 +37,7 @@ func TestEffectPeerMessageAgainstAPausedQueue(t *testing.T) {
 			rec, peersDir, ctrl, held := buildPeerSession(t, true)
 			home := filepath.Dir(peersDir)
 			t.Setenv("REASONIX_HOME", home)
-			config := "[peers]\nenabled = true\n"
+			config := "[peers]\nenabled = true\ndispatch = false\n"
 			if tc.consent == "release" {
 				config += fmt.Sprintf("release_projects = [%q]\n", ctrl.WorkspaceRoot())
 			}

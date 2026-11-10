@@ -52,7 +52,7 @@ type sendPeerMessage struct{ link *tool.PeerLink }
 
 func (*sendPeerMessage) Name() string { return "send_peer_message" }
 func (*sendPeerMessage) Description() string {
-	return "Send text to another Reasonix session on this machine, named by list_peers. The message waits in that session until its own user approves it; only then does its model read it, labelled as coming from you. Sending grants no permission and is not a way to run anything there: it is for passing information. Do not include secrets."
+	return "Send text to another Reasonix session on this machine, named by list_peers. While the user's dispatch switch is on (the default) its model reads it as soon as that session is free, labelled as coming from you; with the switch off it waits there for its user to approve it. Sending grants no permission and is not a way to run anything there: it is for passing information. Do not include secrets."
 }
 func (*sendPeerMessage) Schema() json.RawMessage {
 	return json.RawMessage(`{"type":"object","properties":{"to":{"type":"string","description":"The session's key, or its title, or project/title, as list_peers prints it"},"text":{"type":"string","description":"What to tell that session"}},"required":["to","text"],"additionalProperties":false}`)
@@ -75,5 +75,5 @@ func (t *sendPeerMessage) Execute(_ context.Context, args json.RawMessage) (stri
 	if err != nil {
 		return "", err
 	}
-	return fmt.Sprintf("Delivered to %q as %s. It is read only after that session's user approves it; there is no reply unless that session sends one.", receipt.To.Title, receipt.ID), nil
+	return fmt.Sprintf("Delivered to %q as %s. Its model reads it as soon as that session is free (it waits for its user only if the dispatch switch is off); there is no reply unless that session sends one.", receipt.To.Title, receipt.ID), nil
 }

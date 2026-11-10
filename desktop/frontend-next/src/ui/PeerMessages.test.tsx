@@ -43,7 +43,7 @@ describe("messages between sessions", () => {
     await userEvent.type(box, "迁移完成");
     await userEvent.click(button);
     expect(send).toHaveBeenCalledWith("s-2", "迁移完成");
-    expect(await screen.findByText(/对方的用户批准后才会读到/)).toBeTruthy();
+    expect(await screen.findByText(/对方的模型会直接读到/)).toBeTruthy();
     expect((box as HTMLTextAreaElement).value).toBe("");
   });
 

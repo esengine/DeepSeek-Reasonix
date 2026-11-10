@@ -205,7 +205,7 @@ func TestReleaseProjectsMustBeAbsolutePathsAndAreReplacedWhole(t *testing.T) {
 
 func TestRememberingAnApprovalReleasesThisProjectAndDenyCannotRemember(t *testing.T) {
 	f := newPeerFixture(t)
-	t.Setenv("REASONIX_HOME", testenv.TempDir(t))
+	setDispatchSwitch(t, true, false)
 	f.c.workspaceRoot = testenv.TempDir(t)
 	f.send(t, "m1", "first")
 	f.send(t, "m2", "second")
@@ -229,7 +229,7 @@ func TestRememberingAnApprovalReleasesThisProjectAndDenyCannotRemember(t *testin
 
 func TestRememberingAMessageThatIsNotHeldWritesNothing(t *testing.T) {
 	f := newPeerFixture(t)
-	t.Setenv("REASONIX_HOME", testenv.TempDir(t))
+	setDispatchSwitch(t, true, false)
 	f.c.workspaceRoot = testenv.TempDir(t)
 	if err := f.c.ResolvePeerMessageRemembering("nope", true, PeerRememberProject); !errors.Is(err, ErrPeerNotHeld) {
 		t.Fatalf("unknown id: %v", err)

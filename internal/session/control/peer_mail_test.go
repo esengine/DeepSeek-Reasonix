@@ -26,6 +26,7 @@ type peerFixture struct {
 
 func newPeerFixture(t *testing.T) *peerFixture {
 	t.Helper()
+	setDispatchSwitch(t, true, false)
 	dir := testenv.TempDir(t)
 	peersDir := filepath.Join(dir, "peers")
 	runner := &inboxDispatchRunner{inputs: make(chan string, 8)}

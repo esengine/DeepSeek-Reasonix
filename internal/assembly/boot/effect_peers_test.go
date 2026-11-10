@@ -70,7 +70,7 @@ name = "test-model"
 kind = "`+kind+`"
 model = "x"
 `)
-	writeFile(t, home, "config.toml", fmt.Sprintf("[peers]\nenabled = %t\n", enabled))
+	writeFile(t, home, "config.toml", fmt.Sprintf("[peers]\nenabled = %t\ndispatch = false\n", enabled))
 	approveWorkspaceAt(t, home, dir)
 	ctrl, err := Build(context.Background(), Options{Home: home, WorkspaceRoot: dir, Sink: event.Discard})
 	if err != nil {
@@ -111,8 +111,8 @@ func TestEffectExplicitPeerOptOutStaysUnpublished(t *testing.T) {
 // then as one host-labelled block in the turn's tail, and the cache-stable
 // prefix is the one every other turn of the session sends.
 func TestEffectAHeldPeerMessageReachesTheProviderOnlyAfterApproval(t *testing.T) {
-	t.Parallel()
 	rec, peersDir, ctrl, held := buildPeerSession(t, true)
+	t.Setenv("REASONIX_HOME", filepath.Dir(peersDir))
 	if err := ctrl.Run(context.Background(), "an ordinary turn"); err != nil {
 		t.Fatal(err)
 	}

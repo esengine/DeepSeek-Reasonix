@@ -344,7 +344,7 @@
   },
   {
     "Name": "send_peer_message",
-    "Description": "Send text to another Reasonix session on this machine, named by list_peers. The message waits in that session until its own user approves it; only then does its model read it, labelled as coming from you. Sending grants no permission and is not a way to run anything there: it is for passing information. Do not include secrets.",
+    "Description": "Send text to another Reasonix session on this machine, named by list_peers. While the user's dispatch switch is on (the default) its model reads it as soon as that session is free, labelled as coming from you; with the switch off it waits there for its user to approve it. Sending grants no permission and is not a way to run anything there: it is for passing information. Do not include secrets.",
     "ReadOnly": false,
     "Schema": {
       "additionalProperties": false,
