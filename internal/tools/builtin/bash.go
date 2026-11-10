@@ -101,7 +101,7 @@ func (b bash) Description() string {
 // bashSteerTools are the file built-ins bashToolSteer names. A name the provider
 // schema hides discredits the whole sentence and trains a shell fallback for the
 // tools that are real, so boot's contract test asserts each one reaches it.
-var bashSteerTools = []string{"read_file", "edit_file", "write_file"}
+var bashSteerTools = []string{"read_file", "edit_file", "write_file", "use_capability"}
 
 // BashSteerTools reports the built-ins bashToolSteer recommends.
 func BashSteerTools() []string { return slices.Clone(bashSteerTools) }
@@ -109,9 +109,11 @@ func BashSteerTools() []string { return slices.Clone(bashSteerTools) }
 // An abstract "prefer the dedicated tools" loses to a runnable Get-Content line,
 // so the steer states what read_file returns and what those line numbers buy.
 var bashToolSteer = " Use for builds, tests, git, package managers, etc. To read or modify a file use " +
-	strings.Join(bashSteerTools, " / ") + " — never Get-Content, cat, sed, head/tail or a shell redirect. read_file returns up to " +
+	strings.Join(bashSteerTools[:3], " / ") + " — never Get-Content, cat, sed, head/tail or a shell redirect. read_file returns up to " +
 	strconv.Itoa(readFileDefaultLimit) + " lines per call, each prefixed with its line number, and those numbers are what edit_file targets; " +
-	"paging a file through the shell instead costs one round trip per chunk and yields no line anchors."
+	"paging a file through the shell instead costs one round trip per chunk and yields no line anchors. " +
+	"To search, call tool:grep (contents) or tool:glob (names) through use_capability — not grep, rg or find in the shell; " +
+	"the built-ins honor .gitignore and cap their output. A pipeline over another command's output (git log | grep) is the exception."
 
 // resolved returns the bound shell, resolving lazily for the zero-value instance
 // (e.g. a registry that never went through ConfineBash).

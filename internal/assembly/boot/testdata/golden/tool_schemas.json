@@ -93,7 +93,7 @@
   },
   {
     "Name": "bash",
-    "Description": "Execute a command in the shell and return combined stdout/stderr. Use for builds, tests, git, package managers, etc. To read or modify a file use read_file / edit_file / write_file — never Get-Content, cat, sed, head/tail or a shell redirect. read_file returns up to 2000 lines per call, each prefixed with its line number, and those numbers are what edit_file targets; paging a file through the shell instead costs one round trip per chunk and yields no line anchors.",
+    "Description": "Execute a command in the shell and return combined stdout/stderr. Use for builds, tests, git, package managers, etc. To read or modify a file use read_file / edit_file / write_file — never Get-Content, cat, sed, head/tail or a shell redirect. read_file returns up to 2000 lines per call, each prefixed with its line number, and those numbers are what edit_file targets; paging a file through the shell instead costs one round trip per chunk and yields no line anchors. To search, call tool:grep (contents) or tool:glob (names) through use_capability — not grep, rg or find in the shell; the built-ins honor .gitignore and cap their output. A pipeline over another command's output (git log | grep) is the exception.",
     "ReadOnly": false,
     "Schema": {
       "properties": {
