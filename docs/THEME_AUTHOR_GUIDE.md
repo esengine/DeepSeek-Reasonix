@@ -101,6 +101,12 @@ A more specific code token, such as a function name, still takes its own colour.
 Hold every code colour you set to AA contrast on `codeBg`; the kernel's tests
 check it for the shipped packs.
 
+`bgElev` is the fill of a selected navigation row and of a segmented control's
+track, so it has to be told apart from what it sits on: from `bg` in light, where
+navigation sits on the page, and from `panel` in dark, where controls sit on a
+card. The shipped packs are held to a contrast of 1.02 and 1.04 respectively;
+below that a selected row reads as plain text.
+
 `accent` paints filled controls; `accentFg` is text on that fill. Optional
 `accentInk` paints accent-coloured text on ordinary surfaces and tinted washes.
 

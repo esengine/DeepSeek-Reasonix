@@ -60,3 +60,32 @@ func TestShippedPackInksReadOnEverySurfaceTheyAreSetOn(t *testing.T) {
 		}
 	}
 }
+
+// bgElev is the fill the frontend paints a selected navigation row and a
+// segmented control's track with. Its text contrast is held to AA elsewhere;
+// this holds the other half: the fill has to be told apart from the ground it
+// sits on, or the selected row and the control read as plain text. Navigation
+// sits on the page, so in light that pair is bg; a control sits on a card, so
+// in dark that pair is panel.
+func TestShippedPacksKeepTheirSelectionFillApartFromItsGround(t *testing.T) {
+	pairs := map[string]struct {
+		ground string
+		floor  float64
+	}{
+		"light": {ground: "bg", floor: 1.02},
+		"dark":  {ground: "panel", floor: 1.04},
+	}
+	for _, pack := range listBuiltin() {
+		for scheme, want := range pairs {
+			tokens := pack.Tokens[scheme]
+			fill, ground := tokens["bgElev"], tokens[want.ground]
+			if fill == "" || ground == "" {
+				continue
+			}
+			if got := contrastRatio(t, fill, ground); got < want.floor {
+				t.Errorf("%s %s: bgElev %s on %s %s is %.3f, below %.2f — a selected row or segmented control would vanish into its ground",
+					pack.ID, scheme, fill, want.ground, ground, got, want.floor)
+			}
+		}
+	}
+}
