@@ -589,7 +589,7 @@ function WorkspacesView({ hub, tree, treeRead, answered = null, runtimes, active
                         {selection && <input type="checkbox" className="session-select" tabIndex={-1} aria-label={t("session.select_session_name", { name: rowLabel(session) })}
                           data-action-click="session.selection" data-action-change="session.selection" data-target={session.path} checked={selection.has(session.path)}
                           onClick={(ev) => ev.stopPropagation()} onChange={() => toggleSelection(session.path)} />}
-                        <LeadDot unread={session.unread && run !== "running" && run !== "halt"} />
+                        {run === "running" ? <span className="ds-lead" /> : <LeadDot unread={session.unread && run !== "halt"} />}
                         {editing === session.path ? (
                           <input className="sessedit" aria-label={t("common.rename_this_session")} placeholder={t("common.chat_title")} autoFocus
                             defaultValue={session.title || session.name}

@@ -1,4 +1,5 @@
 import { t } from "../i18n";
+import { StudioIcon } from "./StudioIcon";
 import { UnreadDot } from "./UnreadMark";
 
 const DAY = 86_400_000;
@@ -23,6 +24,7 @@ export function SessionAge({ at, unread, dot = true }: { at?: number; unread?: b
 }
 
 export function SessionTail({ run, at, unread, dot }: { run?: string; at?: number; unread?: boolean; dot?: boolean }) {
-  if (run === "running" || run === "halt") return <span className="sessword ds-meta" data-run={run}>{t(run === "running" ? "common.running" : "session.needs_you")}</span>;
+  if (run === "running") return <span className="sessspin ds-meta" data-run={run} role="img" aria-label={t("common.running")} title={t("common.running")}><StudioIcon name="loading" /></span>;
+  if (run === "halt") return <span className="sessword ds-meta" data-run={run}>{t("session.needs_you")}</span>;
   return <SessionAge at={at} unread={unread} dot={dot} />;
 }

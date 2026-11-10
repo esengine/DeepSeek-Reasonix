@@ -79,3 +79,7 @@
 .ds-proj :is(.wsadd, .wsmore) .studio-icon { width: 16px; height: 16px; }
 .ds-proj :is(.wsadd, .wsmore):disabled { opacity: .4; cursor: default; }
 .ds-proj .wsacts > .unread-count { flex: none; min-width: 16px; height: 16px; margin-inline-end: 3px; padding-inline: 4px; box-sizing: border-box; display: inline-grid; place-items: center; border: 1px solid var(--border); border-radius: var(--r-pill); color: var(--muted); font: var(--w-med) var(--fs-micro)/1 var(--ui); }
+.ds-row .sessspin { display: inline-grid; place-items: center; flex: none; }
+.ds-row .sessspin .studio-icon { width: 13px; height: 13px; animation: m-spin 1s linear infinite; }
+:root[data-effects="reduced"] .ds-row .sessspin .studio-icon { animation: none; }
+@media (prefers-reduced-motion: reduce) { .ds-row .sessspin .studio-icon { animation: none; } }
