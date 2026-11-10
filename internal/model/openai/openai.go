@@ -32,7 +32,6 @@ import (
 	"slices"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"reasonix/internal/base/netclient"
@@ -300,6 +299,7 @@ type client struct {
 	effort             string        // reasoning_effort for OpenAI; thinking.type for MiniMax; "" = auto/provider default
 	requestEfforts     []string      // depth levels a per-request EffortOverride may take; empty = overrides ignored
 	idleTimeout        time.Duration // SSE stall watchdog window; per-provider idle_timeout_seconds, else defaultStreamIdleTimeout
+	postFinishGrace    time.Duration // how long a stream may stay open after its finish_reason; <=0 takes defaultPostFinishGrace
 	openCodeSession    string        // x-opencode-session this client presents to OpenCode Go
 	learned            endpointFacts
 }
@@ -779,45 +779,8 @@ func (c *client) buildPrefixRequest(req provider.Request, content, reasoning str
 func (c *client) readStream(ctx context.Context, resp *http.Response, out chan<- provider.Chunk) (emitted bool, _ error) {
 	defer resp.Body.Close()
 
-	// Close the response body when the context is canceled (user interrupt) or the
-	// stream stalls past c.idleTimeout, so scanner.Scan() unblocks instead of
-	// hanging on a half-open connection. done lets the watchdog exit on a normal
-	// return — otherwise it outlives the call and blocks forever on a non-cancellable
-	// context whose Done() is nil. The watchdog owns the timer; the read loop only
-	// pings the buffered activity channel, so there's no Timer.Reset race.
-	idleTimeout := c.idleTimeout
-	if idleTimeout <= 0 { // zero-value client (constructed without New)
-		idleTimeout = defaultStreamIdleTimeout
-	}
-	done := make(chan struct{})
-	defer close(done)
-	activity := make(chan struct{}, 1)
-	var stalled atomic.Bool
-	go func() {
-		idle := time.NewTimer(idleTimeout)
-		defer idle.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				resp.Body.Close()
-				return
-			case <-idle.C:
-				stalled.Store(true)
-				resp.Body.Close()
-				return
-			case <-activity:
-				if !idle.Stop() {
-					select {
-					case <-idle.C:
-					default:
-					}
-				}
-				idle.Reset(idleTimeout)
-			case <-done:
-				return
-			}
-		}
-	}()
+	watch := c.watchStream(ctx, resp)
+	defer watch.stop()
 
 	acc := map[int]*provider.ToolCall{}
 	started := map[int]bool{}
@@ -831,10 +794,7 @@ func (c *client) readStream(ctx context.Context, resp *http.Response, out chan<-
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 
 	for scanner.Scan() {
-		select { // ping the idle watchdog; non-blocking so a full buffer is fine
-		case activity <- struct{}{}:
-		default:
-		}
+		watch.ping()
 		line := strings.TrimSpace(scanner.Text())
 		if line == "" || !strings.HasPrefix(line, "data:") {
 			continue
@@ -856,6 +816,9 @@ func (c *client) readStream(ctx context.Context, resp *http.Response, out chan<-
 			return emitted, &provider.StreamPayloadError{Provider: c.name, Message: sr.Error.Message, Code: sr.Error.Code.String(), Type: sr.Error.Type, Param: sr.Error.Param}
 		}
 		if len(sr.Choices) > 0 && sr.Choices[0].FinishReason != nil && *sr.Choices[0].FinishReason != "" {
+			if lastFinishReason == "" {
+				watch.finish()
+			}
 			lastFinishReason = *sr.Choices[0].FinishReason
 		}
 		if sr.Usage != nil {
@@ -952,12 +915,12 @@ func (c *client) readStream(ctx context.Context, resp *http.Response, out chan<-
 	if err := ctx.Err(); err != nil {
 		return emitted, err
 	}
-	if stalled.Load() {
+	if watch.stalled.Load() {
 		// A body-phase cut, so the Agent can replay the frozen request.
 		// Providers no longer reconnect here.
-		return emitted, stallCut(c.name, idleTimeout)
+		return emitted, stallCut(c.name, watch.idle)
 	}
-	if err := scanner.Err(); err != nil {
+	if err := scanner.Err(); err != nil && !(watch.graceCut.Load() && lastFinishReason != "") {
 		return emitted, provider.ReadCut(c.name, err)
 	}
 	// A proxy that idle-closes with a clean FIN ends the scan with no error. Without
