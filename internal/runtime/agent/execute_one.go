@@ -436,9 +436,6 @@ func (a *Agent) applyPlanModeAndProxy(ctx context.Context, plan *toolCallPlan) (
 // applyDeliveryPolicyGates enforces global deterministic shell contracts plus
 // delivery-profile-only criteria rules, and classifies mutation/verification.
 func (a *Agent) applyDeliveryPolicyGates(ctx context.Context, turn *turnRuntime, plan *toolCallPlan) (toolOutcome, bool) {
-	if outcome, blocked := a.applyShellShapeGates(ctx, plan); blocked {
-		return outcome, true
-	}
 	plan.mutates = evidence.ToolCallMutates(plan.evidenceName, plan.evidenceArgs, plan.readOnly)
 	persistentWorkflowCall := plan.evidenceName == "remember"
 	if a.deliveryProfile && !persistentWorkflowCall && evidence.ToolCallRequiresDeliveryCriteria(plan.evidenceName, plan.evidenceArgs, plan.readOnly) && !turn.deliveryCriteriaEstablished {

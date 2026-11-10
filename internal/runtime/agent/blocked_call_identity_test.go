@@ -39,20 +39,6 @@ func runBash(t *testing.T, command string) *Agent {
 	return a
 }
 
-func TestAMixedMutationAndVerificationBlockNamesItsIdentity(t *testing.T) {
-	a := runBash(t, "go generate ./... ; go test ./...")
-	if got := refusalOf(t, a, "m1"); got != CodeShellMixedMutationVerification {
-		t.Fatalf("refusal code = %q, want %q", got, CodeShellMixedMutationVerification)
-	}
-}
-
-func TestANonTerminalInlineInterpreterBlockNamesItsIdentity(t *testing.T) {
-	a := runBash(t, `python3 -c 'open("x","w").write("y")' ; node verify_frontend_logic.js`)
-	if got := refusalOf(t, a, "m1"); got != CodeShellInlineInterpreterNotLast {
-		t.Fatalf("refusal code = %q, want %q", got, CodeShellInlineInterpreterNotLast)
-	}
-}
-
 func TestTheBarrierLevelsNameTheirIdentity(t *testing.T) {
 	if got := barrierFull.refusalCode(); got != CodeBatchSkippedAfterFailedChange {
 		t.Fatalf("full barrier = %q, want %q", got, CodeBatchSkippedAfterFailedChange)

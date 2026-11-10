@@ -325,43 +325,6 @@ func hasUnescapedMeta(value, meta string) bool {
 	return false
 }
 
-// CanMaskEarlierFailure reports whether a later part of command can hide the
-// failure of an earlier part, so the shell's final exit status is not evidence
-// that every step succeeded.
-//
-// Only `&&` chains are exempt: bash short-circuits them and reports the first
-// failing command's status, so `build && test` already surfaces a failed build.
-// Everything else can mask — `;` and newlines run the next command regardless,
-// `||` runs it precisely when the previous one failed, `|` reports only the
-// last stage, and `&` detaches the status entirely.
-//
-// ok is false when the command cannot be analyzed statically (parse failure,
-// here-documents, unsupported control syntax); callers must not read canMask
-// as proven-safe in that case.
-func CanMaskEarlierFailure(command string) (canMask bool, ok bool) {
-	if strings.TrimSpace(command) == "" {
-		return false, true
-	}
-	file, err := ParseBash(command)
-	if err != nil || HasHereDoc(file) {
-		return false, false
-	}
-	// Two or more top-level statements are `;`/newline separated.
-	if len(file.Stmts) > 1 {
-		return true, true
-	}
-	for _, stmt := range file.Stmts {
-		masks, stmtOK := stmtCanMaskEarlierFailure(stmt)
-		if !stmtOK {
-			return false, false
-		}
-		if masks {
-			return true, true
-		}
-	}
-	return false, true
-}
-
 func stmtCanMaskEarlierFailure(stmt *syntax.Stmt) (bool, bool) {
 	if stmt == nil || stmt.Negated || stmt.Coprocess || stmt.Disown {
 		return false, false
@@ -389,24 +352,6 @@ func stmtCanMaskEarlierFailure(stmt *syntax.Stmt) (bool, bool) {
 	default:
 		return false, false
 	}
-}
-
-// MasksOnlyInsideFinalPipeline reports whether the last pipeline is the only
-// thing that could hide an earlier failure: every stage outside it short-circuits
-// into the exit status. A caller that recovers per-stage statuses for that one
-// pipeline can then read the whole command, which `;`, `||`, and background
-// stages never allow.
-func MasksOnlyInsideFinalPipeline(command string) bool {
-	if strings.TrimSpace(command) == "" {
-		return false
-	}
-	file, err := ParseBash(command)
-	// More than one top-level statement means `;` or a newline, which drops the
-	// earlier statement's status whatever the last pipeline reports.
-	if err != nil || HasHereDoc(file) || len(file.Stmts) != 1 {
-		return false
-	}
-	return stmtMasksOnlyInFinalPipeline(file.Stmts[0])
 }
 
 func stmtMasksOnlyInFinalPipeline(stmt *syntax.Stmt) bool {

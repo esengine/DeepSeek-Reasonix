@@ -238,39 +238,6 @@ func ReceiptRunsVerification(r Receipt) bool {
 	}
 }
 
-// WholeCommandExitConclusive reports whether a zero exit proves every top-level
-// segment of command succeeded. VerificationExitConclusive asks the same of the
-// segments a name table recognized; this one asks it of the whole line, so a
-// caller that already knows a command is a check can read its exit status as
-// the verdict without the table having an opinion about it.
-func WholeCommandExitConclusive(command string) bool {
-	segments, _, ok := shellparse.SplitTopLevel(command)
-	if !ok || len(segments) == 0 {
-		return false
-	}
-	proven, ok := shellparse.ExitZeroImplies(command)
-	if !ok || len(proven) != len(segments) {
-		return false
-	}
-	// A pipeline is one segment whose proven entry is only its last stage, so
-	// equal counts still need the segments themselves to line up.
-	for i, segment := range segments {
-		if strings.TrimSpace(segment) != strings.TrimSpace(proven[i]) {
-			return false
-		}
-	}
-	return true
-}
-
-// CommandExitShapeReadable reports whether any static pass can decide what a
-// zero exit proves. It is false for a subshell, a here-doc, a background job,
-// or a negation — shapes where the host must say it cannot read the command
-// rather than name a cause it never found.
-func CommandExitShapeReadable(command string) bool {
-	_, ok := shellparse.ExitZeroImplies(command)
-	return ok
-}
-
 // CommandRunsVerification reports whether command runs a verification at all,
 // whatever else it also runs. IsDeliveryVerificationCommand asks the stricter
 // question — whether the command runs *only* verification and read-only work —

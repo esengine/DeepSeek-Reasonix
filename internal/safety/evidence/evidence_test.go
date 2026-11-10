@@ -1021,58 +1021,6 @@ func TestToolCallRequiresDeliveryCriteriaForExecutionCommands(t *testing.T) {
 	}
 }
 
-func TestBashToolCallMixesMutationAndVerification(t *testing.T) {
-	tests := []struct {
-		name    string
-		command string
-		want    bool
-	}{
-		{
-			name:    "temporary JavaScript extraction",
-			command: `python3 -c 'open("/tmp/snake_check.js","w").write("x")' && node --check /tmp/snake_check.js`,
-			want:    true,
-		},
-		{name: "generated code before tests", command: "go generate ./... && go test ./...", want: true},
-		{name: "read-only extraction pipeline", command: "tail -n +2 snake.js | head -n 20 | node --check -"},
-		{name: "plain verifier", command: "go test ./..."},
-		{name: "plain mutation", command: "gofmt -w main.go"},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			args, err := json.Marshal(map[string]string{"command": tt.command})
-			if err != nil {
-				t.Fatal(err)
-			}
-			if got := BashToolCallMixesMutationAndVerification(args); got != tt.want {
-				t.Fatalf("BashToolCallMixesMutationAndVerification(%q) = %v, want %v", tt.command, got, tt.want)
-			}
-		})
-	}
-}
-
-func TestBashToolCallMasksVerificationExit(t *testing.T) {
-	tests := []struct {
-		command string
-		want    bool
-	}{
-		{command: `tail -n +2 snake.html | head -n 20 | node --check -; echo "EXIT: $?"`, want: true},
-		{command: `go test ./...; printf 'status=%s\n' "$?"`, want: true},
-		{command: `tail -n +2 snake.html | head -n 20 | node --check -`},
-		{command: `go test ./...`},
-		{command: `echo "$?"`},
-		{command: `echo done; go test ./...`},
-	}
-	for _, tt := range tests {
-		args, err := json.Marshal(map[string]string{"command": tt.command})
-		if err != nil {
-			t.Fatal(err)
-		}
-		if got := BashToolCallMasksVerificationExit(args); got != tt.want {
-			t.Errorf("BashToolCallMasksVerificationExit(%q) = %v, want %v", tt.command, got, tt.want)
-		}
-	}
-}
-
 func TestBashToolCallUsesOpaqueInlineInterpreter(t *testing.T) {
 	tests := []struct {
 		command string

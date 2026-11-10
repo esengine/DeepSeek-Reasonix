@@ -5,44 +5,6 @@ import (
 	"testing"
 )
 
-func TestDeleteCompoundExitStatus(t *testing.T) {
-	for _, source := range []string{`(rm -rf x) && true`, `true && (rm -rf x)`, `! rm -rf x && true`, `true && ! rm -rf x`} {
-		t.Run(source, func(t *testing.T) {
-			commands, ok := ExitZeroImplies(source)
-			if ok || len(commands) != 0 {
-				t.Fatalf("exit-zero implication = %v, %v", commands, ok)
-			}
-			if MasksOnlyInsideFinalPipeline(source) {
-				t.Fatal("compound status reported readable")
-			}
-		})
-	}
-}
-
-func TestFinalPipelineStructuralBranches(t *testing.T) {
-	for _, tc := range []struct {
-		source string
-		want   bool
-	}{
-		{``, false}, {`'`, false}, {`true; false`, false},
-		{`! true`, false}, {`true &`, false}, {`(true)`, false},
-		{`true || false`, false}, {`(true || false) && cat`, false},
-		{`true && cat | sort`, true}, {`cat | sort && true`, false},
-		{`cat <<EOF
-fixture
-EOF`, false},
-	} {
-		t.Run(tc.source, func(t *testing.T) {
-			if got := MasksOnlyInsideFinalPipeline(tc.source); got != tc.want {
-				t.Fatalf("readable = %v, want %v", got, tc.want)
-			}
-		})
-	}
-	if stmtMasksOnlyInFinalPipeline(nil) {
-		t.Fatal("nil statement reported readable")
-	}
-}
-
 func TestDeleteLiteralEscapes(t *testing.T) {
 	for _, tc := range []struct {
 		input  string

@@ -97,57 +97,6 @@ func sessionHasUserMessageContaining(s *sessionstore.Session, needle string) boo
 	return false
 }
 
-func TestDeliveryProfileBlocksMixedVerificationBeforeItBecomesMutation(t *testing.T) {
-	reg := evidenceRegistry()
-	prov := &scriptedProvider{name: "delivery", turns: [][]provider.Chunk{
-		{toolCallChunk("criteria", "todo_write", `{"todos":[{"content":"Check snake","status":"in_progress"}]}`), {Type: provider.ChunkDone}},
-		// cp rather than an inline interpreter: delivery refuses `python3 -c` for
-		// being unauditable before any shape block sees it, which would make this
-		// a test of the wrong gate.
-		{toolCallChunk("mixed", "bash", `{"command":"cp snake.js /tmp/snake_check.js && node --check /tmp/snake_check.js"}`), {Type: provider.ChunkDone}},
-		{toolCallChunk("safe", "bash", `{"command":"tail -n +2 snake.js | head -n 20 | node --check -"}`), {Type: provider.ChunkDone}},
-		{toolCallChunk("signoff", "complete_step", `{"step":"Check snake","result":"syntax valid","evidence":[{"kind":"verification","summary":"syntax valid","command":"tail -n +2 snake.js | head -n 20 | node --check -"}]}`), {Type: provider.ChunkDone}},
-		{{Type: provider.ChunkText, Text: "checked"}, {Type: provider.ChunkDone}},
-	}}
-	a := New(prov, reg, sessionstore.NewSession(""), Options{DeliveryProfile: true}, event.Discard)
-	if err := a.Run(context.Background(), "check the snake game"); err != nil {
-		t.Fatalf("Run: %v", err)
-	}
-	got := toolResult(a.sess.conversation, "bash")
-	if !strings.Contains(got, "blocked:") {
-		t.Fatalf("mixed command result = %q, want pre-execution split guidance", got)
-	}
-	// Naming the segment is the difference between one block and three: an
-	// unnamed refusal makes the run rewrite whichever part it guesses.
-	if !strings.Contains(got, "cp snake.js /tmp/snake_check.js") {
-		t.Fatalf("delivery block = %q, want the offending segment named", got)
-	}
-	if _, ok := a.task.ledger.LatestSuccessfulMutationIndex(); ok {
-		t.Fatal("blocked scratch-file verification must not become a successful mutation")
-	}
-}
-
-func TestDeliveryProfileExplainsMaskedVerifierExitBeforeExecution(t *testing.T) {
-	reg := evidenceRegistry()
-	prov := &scriptedProvider{name: "delivery", turns: [][]provider.Chunk{
-		{toolCallChunk("criteria", "todo_write", `{"todos":[{"content":"Check snake","status":"in_progress"}]}`), {Type: provider.ChunkDone}},
-		{toolCallChunk("masked", "bash", `{"command":"tail -n +2 snake.js | head -n 20 | node --check -; echo \"EXIT: $?\""}`), {Type: provider.ChunkDone}},
-		{toolCallChunk("safe", "bash", `{"command":"tail -n +2 snake.js | head -n 20 | node --check -"}`), {Type: provider.ChunkDone}},
-		{toolCallChunk("signoff", "complete_step", `{"step":"Check snake","result":"syntax valid","evidence":[{"kind":"verification","summary":"syntax valid","command":"tail -n +2 snake.js | head -n 20 | node --check -"}]}`), {Type: provider.ChunkDone}},
-		{{Type: provider.ChunkText, Text: "checked"}, {Type: provider.ChunkDone}},
-	}}
-	a := New(prov, reg, sessionstore.NewSession(""), Options{DeliveryProfile: true}, event.Discard)
-	if err := a.Run(context.Background(), "check the snake game"); err != nil {
-		t.Fatalf("Run: %v", err)
-	}
-	if got := toolResultByID(a.sess.conversation, "masked"); !strings.Contains(got, "masks the verifier's exit status") {
-		t.Fatalf("masked command result = %q, want precise exit-status guidance", got)
-	}
-	if _, ok := a.task.ledger.LatestSuccessfulMutationIndex(); ok {
-		t.Fatal("blocked masked verifier must not become a successful mutation")
-	}
-}
-
 func TestDeliveryProfileRequiresActiveTodoForLateMutation(t *testing.T) {
 	reg := evidenceRegistry()
 	reg.Add(fakeTool{name: "read_file", readOnly: true})

@@ -10,8 +10,6 @@ afterEach(() => { localStorage.setItem(STORAGE, "zh"); boot(); });
 // The calls the host stops before they run. The model keeps the English text;
 // the person reading the card gets the reason in their own language.
 const BLOCKED = [
-  "shell.mixed_mutation_verification",
-  "shell.inline_interpreter_not_last",
   "batch.skipped_after_failed_change",
   "batch.check_after_stopped_call",
 ];

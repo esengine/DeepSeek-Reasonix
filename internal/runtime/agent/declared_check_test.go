@@ -3,7 +3,6 @@ package agent
 import (
 	"encoding/json"
 	"errors"
-	"strings"
 	"testing"
 
 	"reasonix/internal/contract/tool"
@@ -40,55 +39,5 @@ func TestShellVerificationVerdictHonorsDeclaration(t *testing.T) {
 	}
 	if got := shellVerificationVerdict(script, false, nil, nil); got != tool.ShellVerificationInconclusive {
 		t.Errorf("undeclared script = %q, want %q", got, tool.ShellVerificationInconclusive)
-	}
-}
-
-// The blocked call that cost a real run four rounds had no ';', no pipe and no
-// '||' — it nested a subshell, which the host cannot read at all. Naming a
-// cause the command does not carry sends the model to edit the wrong thing.
-func TestDeclaredCheckShapeMessageNamesTheRealShape(t *testing.T) {
-	subshell := `tmp=$(mktemp -d) && cp ledger.py "$tmp/" && (cd "$tmp" && python3 ledger.py)`
-	if msg := declaredCheckShapeMessage(subshell); !strings.Contains(msg, "subshell") {
-		t.Errorf("subshell command got the separator message:\n%s", msg)
-	}
-	split := `python3 check.py; echo done`
-	if msg := declaredCheckShapeMessage(split); !strings.Contains(msg, "';'") {
-		t.Errorf("split command got the unreadable message:\n%s", msg)
-	}
-}
-
-// The mixed-shape gate below already accepts a check the host reads out of
-// PIPESTATUS; the declared-check gate refused the same shape. A run that
-// declares `verifies` and pipes the suite into tail to keep 200 lines of output
-// out of its context is doing the thing the declaration is for, and the host
-// reads that stage's status directly rather than the pipeline's.
-func TestDeclaredCheckClearsWhenTheHostReadsTheStage(t *testing.T) {
-	gate := func(command string) bool {
-		a := &Agent{}
-		args, err := json.Marshal(map[string]string{"command": command, "verifies": "the suite passes"})
-		if err != nil {
-			t.Fatal(err)
-		}
-		plan := &toolCallPlan{evidenceName: "bash", evidenceArgs: args}
-		_, blocked := a.applyShellShapeGates(t.Context(), plan)
-		return blocked
-	}
-	for _, cmd := range []string{
-		"go test ./handlers/ -run TestCreateOrder -v 2>&1 | tail -20",
-		"python3 -m unittest discover -s tests 2>&1 | tail -5",
-	} {
-		if gate(cmd) {
-			t.Errorf("blocked %q, but the host reads the verifier's own stage status", cmd)
-		}
-	}
-	// The shapes the probe cannot answer for stay blocked: a `;` hands the
-	// status on outside any pipeline, and no probe recovers it.
-	for _, cmd := range []string{
-		`python3 check.py; echo "exit=$?"`,
-		`grep -rn foo pkgs/ > /dev/null; test $? -eq 1`,
-	} {
-		if !gate(cmd) {
-			t.Errorf("allowed %q, but nothing here proves what the check exited with", cmd)
-		}
 	}
 }

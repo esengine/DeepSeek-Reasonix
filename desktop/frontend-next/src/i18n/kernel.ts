@@ -128,8 +128,6 @@ const SAID: Record<string, string> = {
   "workspace.root_not_granted": "kernel.that_folder_has_not_been",
   "workspace.target_access_unconfigured": "kernel.file_access_policy_is_not",
   "workspace.read_forbidden": "kernel.cannot_read_the_target_file_2",
-  "shell.mixed_mutation_verification": "kernel.this_command_puts_a_step",
-  "shell.inline_interpreter_not_last": "kernel.the_inline_interpreter_in_this",
   "batch.skipped_after_failed_change": "kernel.an_earlier_change_in_the",
   "batch.check_after_stopped_call": "kernel.an_earlier_call_in_the",
   "workspace.read_outside_scope": "kernel.cannot_read_the_target_file",
