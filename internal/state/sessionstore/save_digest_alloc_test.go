@@ -78,6 +78,9 @@ func TestDigestSizeAndPrefixKeepsTheTranscriptIdentity(t *testing.T) {
 // A save digests the whole transcript each time, so what it allocates per
 // message is paid again on every turn of a long session.
 func TestDigestSizeAndPrefixDoesNotAllocatePerMessage(t *testing.T) {
+	if raceDetector {
+		t.Skip("the race detector turns off sync.Pool reuse, so allocation counts do not measure the digest")
+	}
 	msgs := digestFixture(2000)
 	allocs := testing.AllocsPerRun(5, func() {
 		if _, _, _, err := digestSizeAndPrefix(context.Background(), msgs, 1000); err != nil {
