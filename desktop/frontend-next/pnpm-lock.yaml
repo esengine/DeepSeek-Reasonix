@@ -4,6 +4,9 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
+overrides:
+  redos-detector: file:./vendor/redos-detector-6.1.4.tgz
+
 importers:
 
   .:
@@ -2475,8 +2478,9 @@ packages:
       react-dom: ^16.0.0 || ^17.0.0 || ^18.0.0 || ^19.0.0
       react-is: ^16.8.0 || ^17.0.0 || ^18.0.0 || ^19.0.0
 
-  redos-detector@6.1.4:
-    resolution: {integrity: sha512-lPlka1rEH6kK42gtgokvvxMmpAvyc28DcRjQbGxeP5RJsJWgAduBOdGedVCDPdSyCr4ay/JDxq3nGYsJZyt8tA==}
+  redos-detector@file:vendor/redos-detector-6.1.4.tgz:
+    resolution: {integrity: sha512-0a7pybN7BYeVkQnDiL0GuELrvrvRYd4cDqV0T7G0+UsRAdg7SfMy60Vf0V4SPeftu6hD60FiDi5VANJsP9+ISg==, tarball: file:vendor/redos-detector-6.1.4.tgz}
+    version: 6.1.4
     engines: {node: '>=16.0.0'}
     hasBin: true
 
@@ -3049,7 +3053,7 @@ snapshots:
       '@lit/context': 1.1.6
       '@preact/signals-core': 1.14.4
       lit: 3.3.3
-      redos-detector: 6.1.4
+      redos-detector: file:vendor/redos-detector-6.1.4.tgz
       validate-color: 2.2.4
       zod: 3.25.76
       zod-to-json-schema: 3.25.2(zod@3.25.76)
@@ -5599,7 +5603,7 @@ snapshots:
       - '@types/react'
       - redux
 
-  redos-detector@6.1.4:
+  redos-detector@file:vendor/redos-detector-6.1.4.tgz:
     dependencies:
       regjsparser: 0.13.0
 

@@ -77,5 +77,10 @@
     "typescript": "^7.0.2",
     "vite": "^8.3.6",
     "vitest": "^5.1.0"
+  },
+  "pnpm": {
+    "overrides": {
+      "redos-detector": "file:./vendor/redos-detector-6.1.4.tgz"
+    }
   }
 }
