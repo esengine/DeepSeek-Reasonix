@@ -120,6 +120,7 @@ const SAID: Record<string, string> = {
   "terminal.not_found": "kernel.that_terminal_is_not_open",
   "terminal.shell_missing": "kernel.that_shell_is_not_on",
   "terminal.start_failed": "kernel.the_shell_could_not_start",
+  "terminal.unsupported": "kernel.this_windows_has_no_built_in_terminal",
   "terminal.exited": "kernel.the_shell_has_ended",
   "terminal.limit": "kernel.too_many_terminals_are_open",
   "workspace.file_missing": "kernel.the_file_was_not_found",

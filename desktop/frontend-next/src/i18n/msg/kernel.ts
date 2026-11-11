@@ -597,6 +597,7 @@ export const KERNEL: Messages = {
   "kernel.the_session_workspace_or_runtime": { zh: "会话、工作区或运行时正在切换，这条消息没能立刻发出；它已排入队列，切换结束后会自动发送，不需要重发", en: "The session, workspace or runtime is switching, so this message could not be sent right away; it is queued and will be sent automatically when the switch ends - no need to send it again" },
   "kernel.the_settings_were_written_but": { zh: "设置已写入，但运行时未能按新设置重建：{detail}", en: "The settings were written, but the runtime could not be rebuilt on them: {detail}" },
   "kernel.the_sharing_listener_is_not": { zh: "共享入口配置不完整，无法接受连接。", en: "The sharing listener is not fully configured and cannot accept connections." },
+  "kernel.this_windows_has_no_built_in_terminal": { zh: "这个 Windows 版本不支持内置终端（需要 Windows 10 1809 或更高版本）", en: "The built-in terminal needs Windows 10 version 1809 or later" },
   "kernel.the_shell_could_not_start": { zh: "终端没能启动", en: "The terminal could not start" },
   "kernel.the_shell_has_ended": { zh: "终端里的程序已经结束，重新启动后再输入", en: "The shell has ended; restart it before typing" },
   "kernel.the_shell_settings_were_not": { zh: "shell 设置未能保存：{detail}", en: "The shell settings were not saved: {detail}" },

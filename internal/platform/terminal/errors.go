@@ -10,6 +10,7 @@ const (
 	CodeNotFound     = "terminal.not_found"
 	CodeShellMissing = "terminal.shell_missing"
 	CodeStartFailed  = "terminal.start_failed"
+	CodeUnsupported  = "terminal.unsupported"
 	CodeExited       = "terminal.exited"
 	CodeLimit        = "terminal.limit"
 )

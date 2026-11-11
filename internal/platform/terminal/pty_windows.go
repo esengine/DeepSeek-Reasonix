@@ -4,6 +4,7 @@ package terminal
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"sync"
 	"syscall"
@@ -31,9 +32,19 @@ func startPty(o Options) (pty, error) {
 	}
 	c, err := conpty.Start(strings.Join(parts, " "), opts...)
 	if err != nil {
-		return nil, fail(CodeStartFailed, "%v", err)
+		return nil, ptyStartError(err)
 	}
 	return &winPty{c: c}, nil
+}
+
+// ptyStartError separates a Windows that has no pseudoconsole (before 1809)
+// from a shell that failed to start: the first can never succeed, so a person
+// is told the terminal is unsupported rather than to try again.
+func ptyStartError(err error) *Error {
+	if errors.Is(err, conpty.ErrConPtyUnsupported) {
+		return fail(CodeUnsupported, "%v", err)
+	}
+	return fail(CodeStartFailed, "%v", err)
 }
 
 func (p *winPty) Read(b []byte) (int, error)  { return p.c.Read(b) }

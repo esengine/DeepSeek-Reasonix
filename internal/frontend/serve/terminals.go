@@ -13,12 +13,13 @@ import (
 )
 
 const (
-	codeTerminalNotFound = "terminal.not_found"
-	codeTerminalShell    = "terminal.shell_missing"
-	codeTerminalStart    = "terminal.start_failed"
-	codeTerminalExited   = "terminal.exited"
-	codeTerminalLimit    = "terminal.limit"
-	terminalInputLimit   = 1 << 16
+	codeTerminalNotFound    = "terminal.not_found"
+	codeTerminalShell       = "terminal.shell_missing"
+	codeTerminalStart       = "terminal.start_failed"
+	codeTerminalUnsupported = "terminal.unsupported"
+	codeTerminalExited      = "terminal.exited"
+	codeTerminalLimit       = "terminal.limit"
+	terminalInputLimit      = 1 << 16
 )
 
 // registerWorkbenchRoutes is what the panes beside the conversation call on.
@@ -49,6 +50,8 @@ func refuseTerminal(w http.ResponseWriter, err error) {
 		refuse(w, http.StatusConflict, codeTerminalExited, err.Error(), nil)
 	case terminal.CodeLimit:
 		refuse(w, http.StatusConflict, codeTerminalLimit, err.Error(), nil)
+	case terminal.CodeUnsupported:
+		refuse(w, http.StatusNotImplemented, codeTerminalUnsupported, err.Error(), nil)
 	default:
 		refuse(w, http.StatusInternalServerError, codeTerminalStart, err.Error(), nil)
 	}
