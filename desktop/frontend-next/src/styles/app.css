@@ -3550,7 +3550,7 @@
   }
 
   .md .katex { font-size: 1.02em }
-  .md .katex-display { margin: .6em 0; overflow-x: auto; overflow-y: hidden; padding-bottom: 2px }
+  .md .katex-display { margin: .2em 0; overflow-x: auto; overflow-y: hidden; padding: .6em 0 }
 
   .md-tw { margin: 0 0 .7em; overflow-x: auto }
 

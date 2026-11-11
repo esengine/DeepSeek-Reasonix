@@ -1750,3 +1750,13 @@ A sub-agent row, by the list's own width:
 - Hover waits briefly before opening and closing so the pointer can cross to
   the card. Click and keyboard activation also work; Escape restores focus.
   The portaled card follows its anchor and stays inside the viewport.
+
+## Display math
+
+- A display formula scrolls sideways when it is wider than the column, which
+  makes its vertical overflow hidden as well. KaTeX draws raised exponents, tall
+  delimiters and big-operator limits past the line box, so the block carries
+  `.6em` of padding above and below and only `.2em` of margin: the clip edge
+  sits outside everything a formula draws, and the gap between blocks is
+  unchanged to the eye. Padding on one side only leaves the other flush with
+  the clip.
