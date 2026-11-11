@@ -8,6 +8,7 @@ import (
 // conversation spawned, and one run's conversation, live or stored.
 type SubagentReader interface {
 	Runs(parentSession, workspaceRoot string) ([]delegation.RunInfo, error)
+	LiveRuns(parentSession, workspaceRoot string) ([]delegation.RunInfo, error)
 	Transcript(ref, parentSession, workspaceRoot string, after, limit int) (delegation.RunTranscript, error)
 }
 

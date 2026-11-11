@@ -30,7 +30,9 @@ type SubagentSpec struct {
 	WorkspaceRoot    string
 	ParentSession    string
 	ParentToolCallID string
-	SystemPrompt     string
+	// ParentTurn is the in-flight marker id of the turn that spawned the run.
+	ParentTurn   string
+	SystemPrompt string
 	// ExecutionID is the execution this run belongs to, allocated before the
 	// work was opened. A store ref cannot stand in for it: work the scheduler
 	// is holding back has an execution and no transcript yet.

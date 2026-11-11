@@ -32,6 +32,7 @@ import (
 	"reasonix/internal/ext/skill"
 	"reasonix/internal/runtime/agent"
 	"reasonix/internal/runtime/coordinator"
+	"reasonix/internal/runtime/delegation"
 	"reasonix/internal/runtime/guardian"
 	"reasonix/internal/runtime/usecap"
 	"reasonix/internal/safety/permission"
@@ -5242,5 +5243,25 @@ func TestCacheColdAfterFailureFallsBackTo24h(t *testing.T) {
 	c2.modelRef = "definitely-not-a-real-model-xyz"
 	if got := c2.cacheColdAfter(); got != 24*time.Hour {
 		t.Fatalf("ResolveModel failure must fall back to 24h, got %v", got)
+	}
+}
+
+func TestBeginTurnHandsTheMarkerIdToTheToolContext(t *testing.T) {
+	dir := testenv.TempDir(t)
+	path := filepath.Join(dir, "session.jsonl")
+	sess := sessionstore.NewSession("sys")
+	exec := agent.New(nil, nil, sess, agent.Options{}, event.Discard)
+	c := New(Options{Executor: exec, SessionDir: dir, SessionPath: path, Label: "test"})
+
+	ctx, marker := c.beginTurn(context.Background(), sess.Len(), true)
+	if marker.ID == "" {
+		t.Fatal("in-flight marker was not created")
+	}
+	if got := delegation.TurnIdentity(ctx); got != marker.ID {
+		t.Fatalf("tool context turn = %q, want the persisted marker %q", got, marker.ID)
+	}
+	meta, ok, err := sessionstore.LoadBranchMeta(path)
+	if err != nil || !ok || meta.InFlightTurn == nil || meta.InFlightTurn.ID != delegation.TurnIdentity(ctx) {
+		t.Fatalf("persisted marker = %+v ok=%v err=%v, want the id the context carries", meta.InFlightTurn, ok, err)
 	}
 }

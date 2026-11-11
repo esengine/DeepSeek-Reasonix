@@ -16,7 +16,7 @@ const ROUTES = [
   "/appearance",
   "/agent-presets", "/agent-composition",
   "/events", "/history", "/status", "/balance", "/submit", "/cancel", "/approve", "/answer",
-  "/adjudications", "/execution-graph", "/jobs", "/tool-calls", "/subagents",
+  "/adjudications", "/execution-graph", "/jobs", "/tool-calls", "/subagents", "/processes",
   "/plan", "/plan-decision", "/goal", "/resume", "/models", "/tool-approval-mode", "/workspace-trust", "/preset",
   "/model", "/default-model", "/default-mode", "/effort", "/new", "/sessions", "/session/tail", "/delete-session", "/provider-setup",
   "/tools", "/present-files",

@@ -518,6 +518,7 @@ const SAID: Record<string, string> = {
   "subagent.not_found": "kernel.no_sub_agent_run_was",
   "subagent.not_owned": "kernel.that_sub_agent_belongs_to",
   "subagent.read_failed": "kernel.could_not_read_the_sub",
+  "process.read_failed": "kernel.could_not_read_the_processes",
   "subagent.not_running": "kernel.that_sub_agent_is_no",
   "subagent.steer_empty": "kernel.guidance_cannot_be_empty",
   "subagent.steer_too_large": "kernel.that_guidance_is_longer_than",

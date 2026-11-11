@@ -2,6 +2,7 @@ import type { ChangeDiff, StageRequest, WorkspaceBranches, WorkspaceChanges, Wor
 import type { DiscardRequest, GitCommitFiles, GitHistory, GitRepos, PushPlan, PushRequest, PushResult } from "./workspace";
 import type { JobOutput, ToolOutputPage } from "./session";
 import type { SubagentRun, SubagentTranscript } from "./subagent";
+import type { ProcessEntry } from "./process";
 import { SseFeedback } from "./sse_feedback";
 import { host } from "./host";
 import { HttpError } from "./http_error";
@@ -81,6 +82,9 @@ export class SseWorkspace extends SseFeedback {
   }
   subagents() {
     return this.get<SubagentRun[]>("/subagents");
+  }
+  processes() {
+    return this.get<ProcessEntry[]>("/processes");
   }
   subagentTranscript(ref: string, after = 0, limit = 0) {
     const query = [after ? `after=${after}` : "", limit ? `limit=${limit}` : ""].filter(Boolean).join("&");

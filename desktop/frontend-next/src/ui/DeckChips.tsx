@@ -1,25 +1,31 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { JobEntry, JobOutput } from "../port/port";
+import type { ProcessEntry } from "../port/process";
 import { t } from "../i18n";
+import { reason } from "../i18n/kernel";
 import { StudioIcon } from "./StudioIcon";
 import { agentsIn } from "./panels/derive";
 import { AgentDeck } from "./AgentDeck";
 import { AgentTranscript } from "./panels/AgentTranscript";
 import { JobDeck } from "./JobDeck";
+import { ProcessDeck } from "./ProcessDeck";
 import { JobOutputView } from "./panels/JobOutputView";
 import type { Task } from "./panels/Agents";
 import { useDismiss } from "./dismiss";
 
-export type Deck = "" | "agents" | "jobs";
+export type Deck = "" | "agents" | "jobs" | "processes";
 
 /** What is running on this session's behalf but is not in the transcript: work
  *  handed to a sub-agent, and processes left running in the background. The
  *  readings sit at the right end of the run rail, beside the other numbers
  *  about this turn, and each opens on hover the way the context reading does —
  *  one gesture for every summary on this row. */
-export function DeckChips({ tasks, jobs, open, onOpen, onCancelJob, onReadJob, onOpenRun, onStopCall, onClearJobs, onOpenJob }: { tasks: Task[]; jobs: JobEntry[]; open: Deck; onOpen: (next: (was: Deck) => Deck) => void; onCancelJob?: (id: string) => Promise<void>; onReadJob?: (id: string) => Promise<JobOutput>; onOpenRun?: (call: string) => Promise<boolean>; onStopCall?: (callId: string) => void; onClearJobs?: (ids: string[]) => void; onOpenJob?: (job: JobEntry) => void }) {
+export function DeckChips({ tasks, jobs, open, onOpen, onCancelJob, onReadJob, onOpenRun, onStopCall, onClearJobs, onOpenJob, onReadProcesses }: { tasks: Task[]; jobs: JobEntry[]; open: Deck; onOpen: (next: (was: Deck) => Deck) => void; onCancelJob?: (id: string) => Promise<void>; onReadJob?: (id: string) => Promise<JobOutput>; onOpenRun?: (call: string) => Promise<boolean>; onStopCall?: (callId: string) => void; onClearJobs?: (ids: string[]) => void; onOpenJob?: (job: JobEntry) => void; onReadProcesses?: () => Promise<ProcessEntry[]> }) {
   const agentsBox = useRef<HTMLDivElement>(null);
   const jobsBox = useRef<HTMLDivElement>(null);
+  const processBox = useRef<HTMLDivElement>(null);
+  const [processes, setProcesses] = useState<ProcessEntry[]>([]);
+  const [processError, setProcessError] = useState("");
   const [viewing, setViewing] = useState("");
   const [viewingJob, setViewingJob] = useState("");
   const viewed = viewing ? tasks.find((x) => x.id === viewing) : undefined;
@@ -38,6 +44,16 @@ export function DeckChips({ tasks, jobs, open, onOpen, onCancelJob, onReadJob, o
   };
   useDismiss(open === "agents", agentsBox, shut);
   useDismiss(open === "jobs", jobsBox, shut);
+  useDismiss(open === "processes", processBox, shut);
+  useEffect(() => {
+    if (open !== "processes" || !onReadProcesses) return;
+    let current = true;
+    onReadProcesses().then(
+      (rows) => { if (current) { setProcesses(rows); setProcessError(""); } },
+      (e: unknown) => { if (current) { setProcesses([]); setProcessError(reason(e)); } },
+    );
+    return () => { current = false; };
+  }, [open, onReadProcesses, tasks, jobs]);
   const liveAgents = useMemo(() => agentsIn(tasks.filter((x) => x.running)), [tasks]);
   const liveJobs = useMemo(() => jobs.filter((j) => j.status === "running").length, [jobs]);
   // A failure stays loud until the list has been opened on it.
@@ -78,6 +94,27 @@ export function DeckChips({ tasks, jobs, open, onOpen, onCancelJob, onReadJob, o
       {viewed && <AgentTranscript task={viewed} onClose={closeView} />}
       {viewingJob && onReadJob && jobs.some((j) => j.id === viewingJob) && (
         <JobOutputView job={jobs.find((j) => j.id === viewingJob)!} read={onReadJob} onClose={() => setViewingJob("")} onCancel={onCancelJob} />
+      )}
+      {onReadProcesses && (
+        <div ref={processBox} className="studio-deck-anchor" data-open={open === "processes" ? "" : undefined}>
+          <button
+            type="button"
+            className="studio-deckchip"
+            data-action="deck.processes"
+            aria-label={t("subagent.process.chip")}
+            title={t("subagent.process.chip")}
+            data-live={liveAgents || liveJobs ? "" : undefined}
+            aria-expanded={open === "processes"}
+            aria-haspopup="dialog"
+            onClick={() => onOpen((was) => (was === "processes" ? "" : "processes"))}
+          >
+            <StudioIcon name="play" />
+            <span>{t("subagent.process.chip")}</span>
+          </button>
+          <div className="studio-deck-pop" role="dialog" aria-label={t("subagent.process.chip")}>
+            <ProcessDeck rows={processes} error={processError} />
+          </div>
+        </div>
       )}
       {jobs.length > 0 && (
         <div ref={jobsBox} className="studio-deck-anchor" data-open={open === "jobs" ? "" : undefined}>

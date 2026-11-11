@@ -164,6 +164,7 @@ func (r *Runner) prepare(ctx context.Context, spec RunSpec, system string, subRe
 		WorkspaceRoot:    r.WorkspaceRoot,
 		ParentSession:    parentSession,
 		ParentToolCallID: parentID,
+		ParentTurn:       TurnIdentity(ctx),
 		SystemPrompt:     system,
 		ExecutionID:      executionFor(parentID, spec.Index),
 		Registry:         subReg,

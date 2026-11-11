@@ -200,6 +200,7 @@ function PaneView({ port, hub, rt, title, active, visible, sideHost, side, onFoc
   }, [pacer]);
 
   const readJob = useCallback((id: string) => port.jobOutput(id), [port]);
+  const readProcesses = useCallback(() => port.processes(), [port]);
   const refreshStatus = useStatusRefresh(port, applyStatus, statusRead);
 
   const [wallet, refreshWallet] = useWallet(port, accountOf(status?.modelRef));
@@ -672,6 +673,7 @@ function PaneView({ port, hub, rt, title, active, visible, sideHost, side, onFoc
           wallet={wallet} hideAmounts={hideAmounts} tasks={rail.tasks} jobs={jobs} onSettings={onSettings}
           onCancelJob={(id) => cancelJob(port, id, notify, refreshStatus).then(() => {})}
           onReadJob={readJob}
+          onReadProcesses={readProcesses}
           onOpenRun={openRun} onStopCall={(id) => void port.stopToolCall(id).catch(notify)}
           onClearJobs={(ids) => setClearedJobs((was) => new Set([...was, ...ids]))}
           onOpenJob={jobsLive.open}

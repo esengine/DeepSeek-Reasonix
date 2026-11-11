@@ -1,6 +1,7 @@
 import { MockMcp } from "./mock_mcp";
 import { HttpError, type HookCatalog, type HookDryRun, type HookEntry } from "./port";
 import type { SubagentRun, SubagentTranscript } from "./subagent";
+import type { ProcessEntry } from "./process";
 
 // Hooks, and what a dry run of one reports back.
 export class MockHook extends MockMcp {
@@ -14,6 +15,10 @@ export class MockHook extends MockMcp {
   }
 
   async subagents(): Promise<SubagentRun[]> {
+    return [];
+  }
+
+  async processes(): Promise<ProcessEntry[]> {
     return [];
   }
 

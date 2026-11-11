@@ -54,6 +54,7 @@ type SubagentMeta struct {
 	WorkspaceRoot    string   `json:"workspaceRoot"`
 	ParentSession    string   `json:"parentSession,omitempty"`
 	ParentToolCallID string   `json:"parentToolCallId,omitempty"`
+	ParentTurn       string   `json:"parentTurn,omitempty"`
 	ForkedFrom       string   `json:"forkedFrom,omitempty"`
 	SystemPromptHash string   `json:"systemPromptHash"`
 	ToolScope        []string `json:"toolScope"`

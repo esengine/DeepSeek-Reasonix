@@ -111,6 +111,7 @@ export const KERNEL: Messages = {
   "kernel.could_not_reach_host_detail": { zh: "连接 {host} 失败：{detail}", en: "Could not reach {host}: {detail}" },
   "kernel.could_not_reach_the_account": { zh: "连不上账号服务，请检查网络后重试", en: "Could not reach the account service; check the network and try again" },
   "kernel.could_not_read_the_file": { zh: "文件预览读取失败，请重试", en: "Could not read the file preview. Try again." },
+  "kernel.could_not_read_the_processes": { zh: "读取进程列表失败：{detail}", en: "Could not read the process list: {detail}" },
   "kernel.could_not_read_the_sub": { zh: "读取子代理记录失败：{detail}", en: "Could not read the sub-agent record: {detail}" },
   "kernel.could_not_read_this_commit": { zh: "无法读取这个提交", en: "Could not read this commit" },
   "kernel.could_not_read_this_file": { zh: "无法读取这个文件：{detail}。它可能被其他程序占用、已被移动，或在云盘里尚未下载。", en: "Could not read this file: {detail}. It may be open in another program, moved, or not yet downloaded from cloud storage." },

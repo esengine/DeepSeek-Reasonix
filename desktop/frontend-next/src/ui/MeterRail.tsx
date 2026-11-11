@@ -3,6 +3,7 @@ import { t } from "../i18n";
 import { money } from "../i18n/format";
 import type { ContextBreakdown, JobEntry, JobOutput, McpEntry, SessionUsage } from "../port/port";
 import type { CostQuote } from "../port/wire";
+import type { ProcessEntry } from "../port/process";
 import { cacheRate as rateOf } from "../state/overview";
 import { SessionOverviewCard } from "./SessionOverviewCard";
 import type { CurrencyAmount, Metrics } from "../state/session_types";
@@ -20,7 +21,7 @@ import { MASK, type Wallet } from "./wallet";
 import type { SpeedSummary } from "./speed";
 
 /** The numbers about this turn, in one row under the composer. */
-export function MeterRail({ tps, trail, running, speed, metrics, ctx, mcp, compact, cost, turnCost = [], wallet, hideAmounts, tasks, jobs, onSettings, onCancelJob, onReadJob, onOpenRun, onStopCall, onClearJobs, onOpenJob, usage, quote, tariff, onTariffFlip }: {
+export function MeterRail({ tps, trail, running, speed, metrics, ctx, mcp, compact, cost, turnCost = [], wallet, hideAmounts, tasks, jobs, onSettings, onCancelJob, onReadJob, onReadProcesses, onOpenRun, onStopCall, onClearJobs, onOpenJob, usage, quote, tariff, onTariffFlip }: {
   tps: number;
   trail: number[];
   running: boolean;
@@ -40,6 +41,7 @@ export function MeterRail({ tps, trail, running, speed, metrics, ctx, mcp, compa
   onSettings: (section?: string) => void;
   onCancelJob: (id: string) => Promise<void>;
   onReadJob?: (id: string) => Promise<JobOutput>;
+  onReadProcesses?: () => Promise<ProcessEntry[]>;
   onOpenRun?: (call: string) => Promise<boolean>;
   onStopCall?: (callId: string) => void;
   onClearJobs?: (ids: string[]) => void;
@@ -115,7 +117,7 @@ export function MeterRail({ tps, trail, running, speed, metrics, ctx, mcp, compa
       {cost.length > 0 && turnCost.some((m) => m.amount > 0) && <span className="studio-meter-cost"><span>{t("composer.this_turn")}</span>{hideAmounts ? <b>{MASK}</b> : turnCost.map((m) => <b key={m.currency}>{money(m.amount, m.currency)}</b>)}</span>}
       <button className="studio-meter-mask" type="button" data-action="metrics.hide-amounts" aria-pressed={hideAmounts} aria-label={hideAmounts ? t("composer.show_amounts") : t("composer.hide_amounts")} title={hideAmounts ? t("composer.show_amounts") : t("composer.hide_amounts")} onClick={() => setHidesAmounts(!hideAmounts)}><StudioIcon name={hideAmounts ? "eyeoff" : "eye"} /></button>
       {wallet.kind === "read" && <button className="studio-meter-wallet" data-short={wallet.reading.available ? undefined : "true"} title={wallet.reading.available ? undefined : t("common.insufficient_balance")} data-action="settings.section" data-value="usage" aria-label={wallet.reading.available ? t("composer.view_wallet_balance") : `${t("composer.view_wallet_balance")}, ${t("common.insufficient_balance")}`} onClick={() => onSettings("spend")}><StudioIcon name="wallet" /><b>{hideAmounts ? MASK : wallet.reading.display}</b></button>}
-      <DeckChips tasks={tasks} jobs={jobs} open={deck} onOpen={setDeck} onCancelJob={onCancelJob} onReadJob={onReadJob} onOpenRun={onOpenRun} onStopCall={onStopCall} onClearJobs={onClearJobs} onOpenJob={onOpenJob} />
+      <DeckChips tasks={tasks} jobs={jobs} open={deck} onOpen={setDeck} onCancelJob={onCancelJob} onReadJob={onReadJob} onReadProcesses={onReadProcesses} onOpenRun={onOpenRun} onStopCall={onStopCall} onClearJobs={onClearJobs} onOpenJob={onOpenJob} />
     </div>
   );
 }

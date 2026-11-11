@@ -682,6 +682,7 @@ export const ACTIONS: UIAction[] = [
   { id: "reply.run-detail", kind: "view", target: "none", proof: "interaction" },
   { id: "deck.agents", kind: "view", target: "none", proof: "interaction" },
   { id: "deck.jobs", kind: "view", target: "none", proof: "interaction" },
+  { id: "deck.processes", kind: "view", target: "none", proof: "interaction" },
   { id: "plan.fold", kind: "view", target: "none", proof: "interaction" },
   { id: "plan.collapse", kind: "view", target: "none", proof: "interaction" },
   { id: "plan.jump", kind: "navigation", target: "none", proof: "interaction" },

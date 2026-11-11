@@ -50,6 +50,7 @@ type RunInfo struct {
 	// ParentToolCallID is the call in the parent's transcript that spawned the
 	// run; it is how a reader pairs a task card with its run.
 	ParentToolCallID string
+	ParentTurn       string
 	StartedAt        time.Time
 	UpdatedAt        time.Time
 }
@@ -114,7 +115,7 @@ func (s *SubagentStore) infoOf(meta sessionstore.SubagentMeta) RunInfo {
 	}
 	return RunInfo{
 		Ref: meta.Ref, Name: meta.Name, Kind: meta.Kind, Model: meta.Model, Effort: meta.Effort,
-		State: state, ParentSession: meta.ParentSession, ParentToolCallID: meta.ParentToolCallID,
+		State: state, ParentSession: meta.ParentSession, ParentToolCallID: meta.ParentToolCallID, ParentTurn: meta.ParentTurn,
 		StartedAt: meta.CreatedAt, UpdatedAt: meta.UpdatedAt,
 	}
 }
@@ -135,6 +136,40 @@ func (s *SubagentStore) Runs(parentSession, workspaceRoot string) ([]RunInfo, er
 		}
 		meta := a.Meta
 		meta.Ref = a.Ref
+		out = append(out, s.infoOf(meta))
+	}
+	slices.SortFunc(out, func(a, b RunInfo) int { return b.StartedAt.Compare(a.StartedAt) })
+	return out, nil
+}
+
+// LiveRuns lists the runs of parentSession that this process is executing now.
+// It reads the in-memory registry and one small record per live run, never the
+// store's directory, so asking often costs what is running and not what ran.
+func (s *SubagentStore) LiveRuns(parentSession, workspaceRoot string) ([]RunInfo, error) {
+	parentSession = strings.TrimSpace(parentSession)
+	if s == nil || parentSession == "" {
+		return nil, nil
+	}
+	s.mu.Lock()
+	refs := make([]string, 0, len(s.live))
+	for ref := range s.live {
+		refs = append(refs, ref)
+	}
+	s.mu.Unlock()
+	want := strings.TrimSpace(workspaceRoot)
+	out := make([]RunInfo, 0, len(refs))
+	for _, ref := range refs {
+		meta, err := s.LoadMeta(ref)
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				continue
+			}
+			return nil, err
+		}
+		if strings.TrimSpace(meta.ParentSession) != parentSession || (want != "" && strings.TrimSpace(meta.WorkspaceRoot) != want) {
+			continue
+		}
+		meta.Ref = ref
 		out = append(out, s.infoOf(meta))
 	}
 	slices.SortFunc(out, func(a, b RunInfo) int { return b.StartedAt.Compare(a.StartedAt) })

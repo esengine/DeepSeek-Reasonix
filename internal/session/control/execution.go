@@ -5,6 +5,7 @@ import (
 	"reasonix/internal/state/sessionstore"
 	"strings"
 
+	"reasonix/internal/runtime/delegation"
 	"reasonix/internal/state/execjournal"
 )
 
@@ -15,6 +16,9 @@ func (c *Controller) beginTurn(ctx context.Context, startMessageIndex int, prese
 	c.applyPeerSwitches()
 	c.settings.proposals.Store(0)
 	marker := c.markInFlightTurn(startMessageIndex, preserveUser)
+	if marker.ID != "" {
+		ctx = delegation.WithTurnIdentity(ctx, marker.ID)
+	}
 	return ctx, marker
 }
 
