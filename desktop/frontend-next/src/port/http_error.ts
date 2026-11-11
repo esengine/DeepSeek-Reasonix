@@ -31,8 +31,8 @@ export type DeliveryFault = "kernel_busy" | "unreachable" | "ui_stalled";
 // may not have landed, so the identity is the fault: the kernel was slow, could
 // not be reached, or this window's own event loop was too starved to say which.
 export class DeliveryError extends Error {
-  constructor(readonly fault: DeliveryFault) {
-    super("request unconfirmed: " + fault);
+  constructor(readonly fault: DeliveryFault, readonly path?: string) {
+    super("request unconfirmed: " + fault + (path ? " " + path : ""));
     this.name = "DeliveryError";
   }
 }

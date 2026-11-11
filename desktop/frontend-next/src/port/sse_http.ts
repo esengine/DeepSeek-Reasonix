@@ -142,9 +142,20 @@ export class SseHttp {
   // A read the caller can abandon: it is not shared with another caller's, so
   // abandoning it frees its connection instead of leaving it to run out.
   protected async getUntil<T>(path: string, signal: AbortSignal): Promise<T> {
-    const res = await fetch(this.base + path, { credentials: "same-origin", signal });
+    const res = await SseHttp.reach(path, () => fetch(this.base + path, { credentials: "same-origin", signal }), signal);
     if (!res.ok) await SseHttp.fail(path, res);
     return (await res.json()) as T;
+  }
+
+  // A transport failure on a read is the kernel being unreachable, and the
+  // browser's own "Failed to fetch" names neither that nor which read it was.
+  private static async reach(path: string, send: () => Promise<Response>, signal?: AbortSignal): Promise<Response> {
+    try {
+      return await send();
+    } catch (e) {
+      if (e instanceof TypeError && !signal?.aborted) throw new DeliveryError("unreachable", path);
+      throw e;
+    }
   }
 
   private startRead<T>(path: string): Promise<T> {
@@ -159,7 +170,7 @@ export class SseHttp {
   }
 
   private async fetchRead<T>(path: string): Promise<T> {
-    const res = await fetch(this.base + path, { credentials: "same-origin" });
+    const res = await SseHttp.reach(path, () => fetch(this.base + path, { credentials: "same-origin" }));
     if (!res.ok) await SseHttp.fail(path, res);
     return (await res.json()) as T;
   }

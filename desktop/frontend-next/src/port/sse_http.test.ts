@@ -89,8 +89,18 @@ describe("idempotent reads", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
     const probe = new Probe();
-    await expect(probe.read("/status")).rejects.toBeInstanceOf(TypeError);
+    await expect(probe.read("/status")).rejects.toBeInstanceOf(DeliveryError);
     expect(await probe.read("/status")).toEqual({ n: 2 });
+  });
+
+  it("names an unreachable kernel and the read, not the browser's bare fetch failure", async () => {
+    vi.stubGlobal("fetch", async () => {
+      throw new TypeError("Failed to fetch");
+    });
+    const err = (await new Probe().read("/status").catch((e) => e)) as DeliveryError;
+    expect(err).toBeInstanceOf(DeliveryError);
+    expect(err.fault).toBe("unreachable");
+    expect(err.path).toBe("/status");
   });
 });
 
