@@ -78,6 +78,9 @@ export interface PaneProps {
   onDockW: (w: number) => void;
   manualBrowser?: boolean;
   onManualBrowser?: (on: boolean) => void;
-  // The window's failed-request notice, handed only to the pane in front.
+  // The window's passing notes, handed only to the pane in front.
   alert?: ReactNode;
+  // The window's refused-action reason, handed only to the pane in front; it joins
+  // the stack above the composer rather than a corner the composer paints over.
+  failure?: ReactNode;
 }

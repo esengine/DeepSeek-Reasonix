@@ -5,8 +5,7 @@ import { keepSame } from "./stable";
 import { usePaneCallbacks } from "./usePaneCallbacks";
 import { watchTreeWake } from "./treewake";
 import { usePinnedSessions } from "./usePinnedSessions";
-import { AutoArchiveNotice } from "./AutoArchiveNotice";
-import { LevelUpNotice } from "./LevelUpNotice";
+import { useWindowNotices } from "./useWindowNotices";
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from "react";
 import { reason } from "../i18n/kernel";
 import { t } from "../i18n";
@@ -20,7 +19,6 @@ import { Nav } from "./Nav";
 import { useTreeWindow, type TreePaging } from "./treewindow";
 import { useNavRail } from "./navrail";
 import { feedbackEntryTab } from "./feedbackentry";
-import { ErrorBar } from "./ErrorBar";
 import { noteFault } from "./fault";
 import { ToastStack } from "./ToastStack";
 import { useLinkRouting } from "./links";
@@ -481,11 +479,8 @@ export function App({ hub }: { hub: HubPort }) {
   // A failed request floats above the composer of the pane in front, where the
   // eye already is; with no pane on screen it takes the main area's corner.
   const activePaneShown = !!activeRuntime && panePorts.has(activeRuntime.id);
-  const errorBar = useMemo(() => (error ? <ErrorBar text={error} onDismiss={() => setError("")} onReport={() => setFeedback("send")} /> : null), [error]);
-  const bar = useMemo(
-    () => errorBar ?? <LevelUpNotice port={machineRt ? machinePort : null} tick={feedback === null ? 0 : 1} fallback={<AutoArchiveNotice tree={tree} />} />,
-    [errorBar, tree, machineRt, machinePort, feedback],
-  );
+  const reportError = useCallback(() => setFeedback("send"), []);
+  const { errorBar, note, bar } = useWindowNotices({ error, setError, onReport: reportError, tree, port: machineRt ? machinePort : null, feedbackOpen: feedback !== null });
   const activeWorkspace = tree.find((ws) => !activeRuntime?.host && workspaceContains(ws, activeRuntime?.root)) ?? tree[0];
   const newSessionRoot = activeWorkspace?.root;
   const startConversation = useNewConversation(active, runtimes, newSessionRoot, openPane, openRemotePane);
@@ -704,7 +699,8 @@ export function App({ hub }: { hub: HubPort }) {
                   terminalPulse={terminalRequests[rt.id] ?? 0}
                   viewRequest={viewRequests[rt.id]}
                   sessionRef={sessionRefs[rt.id]}
-                  alert={rt.id === active ? bar : undefined}
+                  alert={rt.id === active && !errorBar ? note : undefined}
+                  failure={rt.id === active ? errorBar : undefined}
                   connect={first.connect}
                   needsProject={needsProject}
                   onOpenProject={openProject}
