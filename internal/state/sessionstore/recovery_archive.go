@@ -148,7 +148,7 @@ func recoveryArchiveLineage(sessionPath string, except []string) ([]string, erro
 	root := recoveryArchiveRoot(target, byID)
 	paths := []string{abs}
 	for _, info := range listed {
-		if info.Path == abs || excluded[CanonicalSessionPath(info.Path)] || !info.Recovered || recoveryArchiveRoot(info, byID) != root {
+		if info.Path == abs || !info.Recovered || recoveryArchiveRoot(info, byID) != root || (len(excluded) > 0 && excluded[CanonicalSessionPath(info.Path)]) {
 			continue
 		}
 		paths = append(paths, info.Path)
