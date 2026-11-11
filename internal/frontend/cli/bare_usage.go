@@ -24,3 +24,14 @@ func bareUsage(bare bool) int {
 	}
 	return 2
 }
+
+// bareOutsideConsole answers a bare invocation that has no console: a Cygwin
+// or MSYS terminal is told why the UI cannot run there, anything else gets the
+// usage text.
+func bareOutsideConsole(bare bool) int {
+	if hint := minttyHint(os.Stdin, os.Stdout, onCygwinPty); hint != "" {
+		fmt.Fprint(os.Stderr, hint)
+		return 2
+	}
+	return bareUsage(bare)
+}

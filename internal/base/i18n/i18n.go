@@ -758,6 +758,8 @@ type Messages struct {
 	// usage / help
 	UsageBody             string // full multi-line help text
 	StandaloneConsoleHint string
+	// MinttyConsoleHint is shown instead of the usage text when stdin or stdout is a Cygwin or MSYS terminal, which a Windows program cannot drive as a console.
+	MinttyConsoleHint string
 
 	// Feedback is the /feedback list standing and refusal wording.
 	Feedback FeedbackText

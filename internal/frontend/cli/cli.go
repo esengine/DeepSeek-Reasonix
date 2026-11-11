@@ -83,7 +83,7 @@ func RunWithBuildInfo(args []string, info BuildInfo) int {
 		if term.IsTerminal(int(os.Stdin.Fd())) && term.IsTerminal(int(os.Stdout.Fd())) {
 			return runTUI(args, version)
 		}
-		return bareUsage(len(args) == 0)
+		return bareOutsideConsole(len(args) == 0)
 	}
 
 	rest := args[1:]

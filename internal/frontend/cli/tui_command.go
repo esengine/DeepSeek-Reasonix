@@ -36,6 +36,10 @@ func runTUI(args []string, version string) int {
 		return code
 	}
 	if !term.IsTerminal(int(os.Stdin.Fd())) || !term.IsTerminal(int(os.Stdout.Fd())) {
+		if hint := minttyHint(os.Stdin, os.Stdout, onCygwinPty); hint != "" {
+			fmt.Fprint(os.Stderr, hint)
+			return 2
+		}
 		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, "reasonix tui needs an interactive terminal; use `reasonix run` for scripts")
 		return 2
 	}
