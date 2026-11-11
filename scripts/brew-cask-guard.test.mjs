@@ -105,3 +105,16 @@ test("the step rewrites an older cask", () => {
   assert.equal(r.status, 0, `${r.stdout} ${r.stderr}`);
   assert.match(r.cask, /version "2\.27\.0"/);
 });
+
+test("the rendered cask's postflight_steps use the install-steps DSL, not cask methods", () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "cask-render-"));
+  const sums = path.join(dir, "SHA256SUMS");
+  const names = ["darwin-arm64.tar.gz", "darwin-amd64.tar.gz", "linux-arm64.tar.gz", "linux-amd64.tar.gz"];
+  writeFileSync(sums, names.map((n) => `${"a".repeat(64)}  reasonix-${n}`).join("\n") + "\n");
+  const out = spawnSync("bash", [path.join(here, "render-brew-cask.sh"), "2.27.0", "v2.27.0", sums], { encoding: "utf8" });
+  assert.equal(out.status, 0, out.stderr);
+  const block = out.stdout.match(/postflight_steps do\n([\s\S]*?)\n  end\n/)?.[1];
+  assert.ok(block, "no postflight_steps block");
+  assert.doesNotMatch(block, /system_command|#\{/);
+  assert.match(block, /run "\/usr\/bin\/xattr".*\{\{staged_path\}\}\/reasonix/);
+});
