@@ -51,12 +51,13 @@ const runtimePrefix = "/rt/"
 // published under /rt/{id}/; the hub owns only what they share — the auth gate,
 // the workspace tree, and the rule that one session file gets one runtime.
 type Hub struct {
-	legacy   *hubLegacyListings
-	currency control.DisplayCurrencyGroup
-	mu       sync.RWMutex
-	runtimes map[string]*Runtime
-	order    []string
-	seq      int
+	skillNotices skillNotices
+	legacy       *hubLegacyListings
+	currency     control.DisplayCurrencyGroup
+	mu           sync.RWMutex
+	runtimes     map[string]*Runtime
+	order        []string
+	seq          int
 
 	opts HubOptions
 	// notes answers the release-notes route; its state outlives one request. Nil reads
@@ -230,14 +231,21 @@ func (h *Hub) AuthToken() string { return h.auth.Token() }
 // AuthMode reports the shared gate's mode.
 func (h *Hub) AuthMode() string { return h.auth.Mode() }
 
+// share gives a pane what every pane of this hub holds in common: the gate, the
+// surface it files usage under, and the record of skill warnings already shown.
+func (h *Hub) share(srv *Server) {
+	srv.auth = h.auth
+	srv.surface = h.surface()
+	srv.skillNotices = &h.skillNotices
+}
+
 // Adopt takes over a runtime the host assembled before the hub existed — the
 // window's first session — and publishes it under an ID.
 func (h *Hub) Adopt(srv *Server, bc *Broadcaster) (*Runtime, error) {
 	if srv == nil {
 		return nil, nil
 	}
-	srv.auth = h.auth
-	srv.surface = h.surface()
+	h.share(srv)
 	srv.stance = h.stance
 	srv.page = h.opts.Page
 	srv.resolver = h.opts.ProviderResolver
@@ -354,7 +362,7 @@ func (h *Hub) openBound(ctx context.Context, req OpenRequest, inherited *agentco
 			Sink:                     paneSink,
 			NativeSurfaces:           h.opts.NativeSurfaces,
 			Stderr:                   os.Stderr,
-			DiagnosticSink:           paneSink,
+			DiagnosticSink:           h.skillNotices.once(paneSink),
 			StatsSource:              h.surface(),
 			FeedbackSurface:          feedbackSurface(h.surface()),
 			AccountsURL:              accountsBaseURL(),
@@ -387,8 +395,7 @@ func (h *Hub) openBound(ctx context.Context, req OpenRequest, inherited *agentco
 	}
 	srv.SetPaneSink(paneSink)
 	srv.AdoptRuntime(built)
-	srv.auth = h.auth
-	srv.surface = h.surface()
+	h.share(srv)
 	srv.resolver = h.opts.ProviderResolver
 	srv.page = h.opts.Page
 	if h.opts.Grant != nil {

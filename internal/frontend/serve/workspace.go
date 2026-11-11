@@ -241,7 +241,7 @@ func (s *Server) statsSurface() surface.Surface { return s.surface.Or(surface.Se
 // switch would quietly serve another project's conversations.
 func (s *Server) rebuildOptions(cur control.SessionAPI, ref string) boot.Options {
 	opts := boot.Options{Model: ref, Sink: s.rebuildSink(), NativeSurfaces: true, Stderr: os.Stderr, StatsSource: s.statsSurface(), FeedbackSurface: feedbackSurface(s.statsSurface()), AccountsURL: accountsBaseURL(), ProviderResolver: s.resolver, CleanupPendingReconciler: BackgroundCleanupReconciler}
-	opts.DiagnosticSink = s.rebuildSink()
+	opts.DiagnosticSink = s.diagnosticSink()
 	if s.lastBuild != nil {
 		opts.ComputerDriver = s.lastBuild.ComputerDriver
 	}

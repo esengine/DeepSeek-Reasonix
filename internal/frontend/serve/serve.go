@@ -55,8 +55,10 @@ type Server struct {
 	ctrl     control.SessionAPI
 	bc       *Broadcaster
 	paneSink event.Sink // what the controller emits into; see SetPaneSink
-	currency *control.DisplayCurrencyGroup
-	projects projectBindings
+	// skillNotices is the hub's record of skill warnings already shown; nil for a server no hub claimed.
+	skillNotices *skillNotices
+	currency     *control.DisplayCurrencyGroup
+	projects     projectBindings
 	// buildController builds the replacement controller during a model switch.
 	// Nil in production (switchModel falls back to boot.Build); tests inject a
 	// fake so switchModel can be exercised without real provider IO.
