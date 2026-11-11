@@ -743,8 +743,9 @@ var English = Messages{
 	CLITelemetryConsentSaveFailedFmt:    "CLI telemetry remains disabled because the preference could not be saved: %v",
 	CLITelemetryConsentCleanupFailedFmt: "CLI telemetry is disabled, but pending statistics could not be deleted: %v",
 
-	MinttyConsoleHint:     "The Reasonix terminal UI needs a Windows console, and this terminal (Git Bash / mintty) is not one.\nRun it from cmd, PowerShell or Windows Terminal. `reasonix run \"task\"` still works from here.\n",
-	StandaloneConsoleHint: "This is the Reasonix command-line tool; run it from a terminal such as PowerShell.\nFor the desktop app, install Reasonix Studio (ReasonixStudio-windows-amd64-installer.exe):\n  https://github.com/esengine/DeepSeek-Reasonix/releases?q=studio-v&expanded=true\n\nPress Enter to close this window.\n",
+	MinttyConsoleHint:            "The Reasonix terminal UI needs a Windows console, and this terminal (Git Bash / mintty) is not one.\nRun it from cmd, PowerShell or Windows Terminal. `reasonix run \"task\"` still works from here.\n",
+	OpenedNestedWithoutAskingFmt: "Opened %d folder(s) inside this project without asking, as the setting allows (Settings > Agent behavior > Messages between sessions): %s",
+	StandaloneConsoleHint:        "This is the Reasonix command-line tool; run it from a terminal such as PowerShell.\nFor the desktop app, install Reasonix Studio (ReasonixStudio-windows-amd64-installer.exe):\n  https://github.com/esengine/DeepSeek-Reasonix/releases?q=studio-v&expanded=true\n\nPress Enter to close this window.\n",
 	UsageBody: `reasonix — a config- and plugin-driven coding agent (multi-model)
 
 Usage:

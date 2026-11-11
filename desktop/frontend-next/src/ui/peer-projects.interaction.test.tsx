@@ -25,7 +25,7 @@ function Projects({ port, hub }: { port: AgentPort; hub: Parameters<typeof PeerP
 }
 
 const settings = (over: Partial<PeersSettings> = {}): PeersSettings => ({
-  enabled: true, dispatch: false, release_projects: [], max_dispatch_depth: 1, max_dispatched_sessions: 8, path: "/home/me/.reasonix/config.toml", applies: "next_turn", pending: false, available: true, ...over,
+  enabled: true, dispatch: false, release_projects: [], max_dispatch_depth: 1, max_dispatched_sessions: 8, open_nested: false, path: "/home/me/.reasonix/config.toml", applies: "next_turn", pending: false, available: true, ...over,
 });
 const ws = (root: string, name: string, remembered = true): TreeWorkspace => ({ root, name, remembered, sessions: [] });
 

@@ -18,7 +18,7 @@ afterEach(() => {
 });
 
 const base: PeersSettings = {
-  enabled: false, dispatch: false, release_projects: [{ path: "/work/site", name: "site" }], max_dispatch_depth: 1, max_dispatched_sessions: 8,
+  enabled: false, dispatch: false, release_projects: [{ path: "/work/site", name: "site" }], max_dispatch_depth: 1, max_dispatched_sessions: 8, open_nested: false,
   path: "/home/me/.reasonix/config.toml", applies: "next_turn", pending: false, available: true,
 };
 

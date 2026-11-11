@@ -150,9 +150,10 @@ allow = ["Bash(go test:*)"]                  # never prompted
 
 [peers]
 # enabled = true               # your sessions on this machine can message each other; unpaired messages wait for the receiving session's user to approve them; also a switch in Settings, applied at the next turn (user config only)
-# dispatch = true              # the model may hand a task to a session in another of your projects, via dispatch_to_project (the session it opens sends its final answer back on its own), and ask you to open folders as projects with open_projects (one card lists every path; nothing is added or trusted until you approve it, and no mode answers it for you); needs enabled; turning it on is your consent for those sessions' tasks and replies, no card, and a project in your sidebar you have not decided about is trusted by being named; the opened session keeps the sender's model, preset, approval mode and planning, so a YOLO sender opens a YOLO session that answers the target project's ask rules too (deny rules still hold) (user config only)
+# dispatch = true              # the model may hand a task to a session in another of your projects, via dispatch_to_project (the session it opens sends its final answer back on its own), and ask you to open folders as projects with open_projects (one card lists every path; nothing is added or trusted until you approve it, and no mode answers it for you, except the open_nested switch below); needs enabled; turning it on is your consent for those sessions' tasks and replies, no card, and a project in your sidebar you have not decided about is trusted by being named; the opened session keeps the sender's model, preset, approval mode and planning, so a YOLO sender opens a YOLO session that answers the target project's ask rules too (deny rules still hold) (user config only)
 # max_dispatch_depth = 1       # how many sessions deep a dispatch may chain; 0 removes the ceiling (user config only)
 # max_dispatched_sessions = 8  # sessions one session may keep open from its dispatches; 0 removes the ceiling (user config only)
+# open_nested = false          # open_projects adds folders inside the session's own workspace without a card; also a switch in Settings (user config only)
 # release_projects = []        # projects that take messages from your other sessions without the card; their own approvals and sandbox still apply; they start over a pause the host set itself (session switch, unreadable @ reference, reopen) but never over one you pressed (user config only)
 
 [mods]
@@ -2659,6 +2660,13 @@ question and the task is **not sent**: answer there, then ask to dispatch again.
 For a folder not yet in your project list, add it yourself, or let the model
 request `open_projects`; its card lists the paths and requires your explicit
 approval even in YOLO mode before adding or trusting them.
+
+One setting relaxes this:
+
+- With the user-only `peers.open_nested = true` (also a switch in Settings), a call whose folders are all strictly inside the asking session's own workspace, after links are resolved, is added and trusted without the card, and a notice lists the paths.
+- Any folder outside the workspace brings the card for the whole call.
+- It is off by default, and a project's `reasonix.toml` cannot turn it on.
+- A trusted folder's configuration can run programs, so turn it on only for a repository you trust.
 
 `open_projects` is unavailable in plan mode until the plan is approved.
 

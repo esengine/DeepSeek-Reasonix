@@ -109,3 +109,23 @@ func TestANetworkedClientCannotAllowAProjectThrough(t *testing.T) {
 		t.Fatalf("the refused save still wrote the user file: %v", got)
 	}
 }
+
+func TestOpeningFoldersWithoutAskingRoundTripsAndANetworkedClientCannotTurnItOn(t *testing.T) {
+	srv := standbyServer(t, true)
+	if getSettings(t, srv.URL).OpenNested {
+		t.Fatal("on by default")
+	}
+	if status, raw := postSide(t, srv.URL+"/peers/settings", map[string]any{"open_nested": true}); status != http.StatusOK {
+		t.Fatalf("save = %d %s", status, raw)
+	}
+	if !getSettings(t, srv.URL).OpenNested || !config.UserPeers().OpenNested {
+		t.Fatal("open_nested was not saved")
+	}
+	locked := standbyServer(t, false)
+	if status, raw := postSide(t, locked.URL+"/peers/settings", map[string]any{"open_nested": true}); status != http.StatusForbidden {
+		t.Fatalf("save without the grant = %d %s", status, raw)
+	}
+	if config.UserPeers().OpenNested {
+		t.Fatal("the refused save still wrote the user file")
+	}
+}

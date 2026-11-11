@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"reasonix/internal/base/i18n"
 	"reasonix/internal/contract/config"
 	"reasonix/internal/contract/tool"
 )
@@ -46,9 +47,12 @@ func (c *Controller) SetProjectOpener(o ProjectOpener) {
 
 // OpenProjects asks the user whether to add the folders to their project list,
 // and on a yes has the host add and trust exactly the ones the card named. The
-// card is fresh: no mode, grant or hook answers it for the user.
+// card is fresh: no mode, grant or hook answers it for the user. The one
+// exception is the user's own open_nested setting, which skips it for folders
+// inside this session's workspace and says so in a notice.
 func (c *Controller) OpenProjects(ctx context.Context, paths []string) ([]tool.OpenedProject, error) {
-	if !config.LoadForEdit(config.UserConfigPath()).PeersDispatch() {
+	user := config.LoadForEdit(config.UserConfigPath())
+	if !user.PeersDispatch() {
 		return nil, ErrDispatchDisabled
 	}
 	if c.PlanMode() {
@@ -61,6 +65,10 @@ func (c *Controller) OpenProjects(ctx context.Context, paths []string) ([]tool.O
 	clean, err := cleanProjectPaths(paths)
 	if err != nil {
 		return nil, err
+	}
+	if user.PeersOpenNested() && insideWorkspace(c.WorkspaceRoot(), clean) {
+		c.notice(fmt.Sprintf(i18n.M.OpenedNestedWithoutAskingFmt, len(clean), strings.Join(clean, ", ")))
+		return (*hook)(ctx, c, clean)
 	}
 	args, _ := json.Marshal(map[string]any{"paths": clean})
 	subject := clean[0]

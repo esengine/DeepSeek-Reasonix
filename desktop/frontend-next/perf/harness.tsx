@@ -87,7 +87,7 @@ class BenchPort extends MockPort {
     // ?peerset=1 starts with session messages on and two projects already allowed through.
     if (query.has("peerset")) {
       this.peerSettings = {
-        enabled: true, dispatch: true, max_dispatch_depth: 1, max_dispatched_sessions: 8, applies: "next_turn", pending: query.has("pending"), available: true,
+        enabled: true, dispatch: true, max_dispatch_depth: 1, max_dispatched_sessions: 8, open_nested: false, applies: "next_turn", pending: query.has("pending"), available: true,
         path: "/Users/you/.reasonix/config.toml",
         release_projects: [{ path: "/Users/you/work/site", name: "site" }, { path: "/Users/you/work/api-gateway", name: "api-gateway" }],
       };

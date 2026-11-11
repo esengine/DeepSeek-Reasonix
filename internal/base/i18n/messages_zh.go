@@ -743,8 +743,9 @@ var Chinese = Messages{
 	CLITelemetryConsentSaveFailedFmt:    "由于无法保存偏好设置，CLI 使用统计仍保持关闭：%v",
 	CLITelemetryConsentCleanupFailedFmt: "CLI 使用统计已关闭，但无法删除待发送统计：%v",
 
-	MinttyConsoleHint:     "Reasonix 的终端界面需要 Windows 控制台，而当前终端（Git Bash / mintty）不是。\n请在 cmd、PowerShell 或 Windows Terminal 里运行；在这里仍可用 `reasonix run \"任务\"` 执行单个任务。\n",
-	StandaloneConsoleHint: "这是 Reasonix 命令行工具，需要在 PowerShell 等终端里运行。\n要用桌面应用，请安装 Reasonix Studio（ReasonixStudio-windows-amd64-installer.exe）：\n  https://github.com/esengine/DeepSeek-Reasonix/releases?q=studio-v&expanded=true\n\n按回车关闭此窗口。\n",
+	MinttyConsoleHint:            "Reasonix 的终端界面需要 Windows 控制台，而当前终端（Git Bash / mintty）不是。\n请在 cmd、PowerShell 或 Windows Terminal 里运行；在这里仍可用 `reasonix run \"任务\"` 执行单个任务。\n",
+	OpenedNestedWithoutAskingFmt: "按设置（设置 > 智能体行为 > 会话间消息）的允许，已在不询问的情况下打开本项目内的 %d 个文件夹：%s",
+	StandaloneConsoleHint:        "这是 Reasonix 命令行工具，需要在 PowerShell 等终端里运行。\n要用桌面应用，请安装 Reasonix Studio（ReasonixStudio-windows-amd64-installer.exe）：\n  https://github.com/esengine/DeepSeek-Reasonix/releases?q=studio-v&expanded=true\n\n按回车关闭此窗口。\n",
 	UsageBody: `reasonix — 由配置和插件驱动的 coding agent（多模型）
 
 用法：

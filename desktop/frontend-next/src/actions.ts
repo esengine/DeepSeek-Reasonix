@@ -745,6 +745,7 @@ export const ACTIONS: UIAction[] = [
   { id: "peers.approve-project", kind: "kernel-mutation", target: "none", proof: "authority-effect" },
   { id: "peers.enable", kind: "kernel-mutation", target: "none", proof: "authority-effect" },
   { id: "peers.dispatch", kind: "kernel-mutation", target: "none", proof: "authority-effect" },
+  { id: "peers.open-nested", kind: "kernel-mutation", target: "none", proof: "authority-effect" },
   { id: "peers.release-revoke", kind: "kernel-mutation", target: "entity", proof: "authority-effect" },
   { id: "peers.release-add", kind: "kernel-mutation", target: "none", proof: "authority-effect" },
   { id: "peers.release-pick", kind: "view", target: "none", proof: "interaction" },

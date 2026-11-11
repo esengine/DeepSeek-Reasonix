@@ -27,6 +27,10 @@ type PeersConfig struct {
 	// dispatches at once, 0 for no ceiling. Each is a kernel and a lease, so it
 	// bounds a loop that keeps opening panes. User file only.
 	MaxDispatchedSessions int `toml:"max_dispatched_sessions"`
+	// OpenNested lets open_projects add folders inside the asking session's own
+	// workspace without the approval card. A folder outside it still asks. Off
+	// unless the user turns it on; user file only.
+	OpenNested bool `toml:"open_nested"`
 }
 
 func defaultPeers() PeersConfig {
@@ -45,6 +49,10 @@ func (c *Config) PeersEnabled() bool { return c != nil && c.Peers.Enabled }
 
 // PeersDispatch reports whether the model may dispatch a task to another project.
 func (c *Config) PeersDispatch() bool { return c.PeersEnabled() && c.Peers.Dispatch }
+
+// PeersOpenNested reports whether open_projects may add folders inside the
+// asking session's workspace without a card.
+func (c *Config) PeersOpenNested() bool { return c != nil && c.Peers.OpenNested }
 
 // PeersMaxDispatchDepth is the user's depth ceiling for chained dispatches, 0 for none.
 func (c *Config) PeersMaxDispatchDepth() int {
@@ -91,7 +99,7 @@ func renderServeAndPeers(b *strings.Builder, c *Config) {
 func renderPeersSection(b *strings.Builder, c *Config) {
 	p := c.Peers
 	customCeilings := p.MaxDispatchDepth != DefaultMaxDispatchDepth || p.MaxDispatchedSessions != DefaultMaxDispatchedSessions
-	if p.Enabled && p.Dispatch && len(p.ReleaseProjects) == 0 && !customCeilings {
+	if p.Enabled && p.Dispatch && len(p.ReleaseProjects) == 0 && !customCeilings && !p.OpenNested {
 		return
 	}
 	b.WriteString("[peers]\n")
@@ -99,6 +107,9 @@ func renderPeersSection(b *strings.Builder, c *Config) {
 	fmt.Fprintf(b, "dispatch = %v   # the model may hand a task to a session in another of your projects; needs enabled\n", p.Dispatch)
 	if len(p.ReleaseProjects) > 0 {
 		fmt.Fprintf(b, "release_projects = %s   # projects that take messages from your other sessions without a card\n", renderStringArray(p.ReleaseProjects))
+	}
+	if p.OpenNested {
+		b.WriteString("open_nested = true   # open_projects adds folders inside the asking session's workspace without a card; user file only\n")
 	}
 	if customCeilings {
 		fmt.Fprintf(b, "max_dispatch_depth = %d   # how many sessions deep a dispatch may chain; 0 for no ceiling\n", p.MaxDispatchDepth)

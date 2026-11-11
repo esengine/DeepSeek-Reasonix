@@ -51,13 +51,14 @@ func (s *Server) savePeersSettings(w http.ResponseWriter, r *http.Request) {
 		ReleaseProjects *[]string `json:"release_projects"`
 		MaxDepth        *int      `json:"max_dispatch_depth"`
 		MaxSessions     *int      `json:"max_dispatched_sessions"`
+		OpenNested      *bool     `json:"open_nested"`
 	}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&body); err != nil ||
-		(body.Enabled == nil && body.Dispatch == nil && body.ReleaseProjects == nil && body.MaxDepth == nil && body.MaxSessions == nil) {
+		(body.Enabled == nil && body.Dispatch == nil && body.ReleaseProjects == nil && body.MaxDepth == nil && body.MaxSessions == nil && body.OpenNested == nil) {
 		badBody(w)
 		return
 	}
-	got, err := s.ctl().SavePeersSettings(control.PeersPatch{Enabled: body.Enabled, Dispatch: body.Dispatch, ReleaseProjects: body.ReleaseProjects, MaxDispatchDepth: body.MaxDepth, MaxDispatchedSessions: body.MaxSessions})
+	got, err := s.ctl().SavePeersSettings(control.PeersPatch{Enabled: body.Enabled, Dispatch: body.Dispatch, ReleaseProjects: body.ReleaseProjects, MaxDispatchDepth: body.MaxDepth, MaxDispatchedSessions: body.MaxSessions, OpenNested: body.OpenNested})
 	if err != nil {
 		refusePeer(w, err)
 		return

@@ -281,3 +281,13 @@ func TestTheDesktopScreenTableNamesOnlyDeclaredSettings(t *testing.T) {
 		}
 	}
 }
+
+func TestSkippingTheOpenFoldersCardIsNeverTheModelsToWrite(t *testing.T) {
+	e, ok := Lookup("peers.open_nested")
+	if !ok {
+		t.Fatal("peers.open_nested is not declared")
+	}
+	if e.Class != Guarded {
+		t.Fatalf("class = %v, want Guarded: a setting that removes a trust card must not be written on the model's say-so", e.Class)
+	}
+}

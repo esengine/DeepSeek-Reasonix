@@ -204,6 +204,9 @@ export interface PeersSettings {
   // Ceilings on chained and simultaneous dispatches; 0 removes a ceiling.
   max_dispatch_depth: number;
   max_dispatched_sessions: number;
+  // The user's standing yes for open_projects to add folders inside the session's
+  // own workspace without a card; it applies at the next call.
+  open_nested: boolean;
   path: string;
   applies: "next_turn";
   pending: boolean;
@@ -218,6 +221,7 @@ export interface PeersSettingsEdit {
   release_projects?: string[];
   max_dispatch_depth?: number;
   max_dispatched_sessions?: number;
+  open_nested?: boolean;
 }
 
 export type PeerRemember = "project" | "none";

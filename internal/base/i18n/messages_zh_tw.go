@@ -666,8 +666,9 @@ var ChineseTraditional = Messages{
 	CLITelemetryConsentSaveFailedFmt:    "由於無法儲存偏好設定，CLI 使用統計仍維持關閉：%v",
 	CLITelemetryConsentCleanupFailedFmt: "CLI 使用統計已關閉，但無法刪除待傳送統計：%v",
 
-	MinttyConsoleHint:     "Reasonix 的終端介面需要 Windows 主控台，而目前的終端機（Git Bash / mintty）不是。\n請在 cmd、PowerShell 或 Windows Terminal 裡執行；在這裡仍可用 `reasonix run \"任務\"` 執行單一任務。\n",
-	StandaloneConsoleHint: "這是 Reasonix 命令列工具，需要在 PowerShell 等終端機裡執行。\n要使用桌面應用程式，請安裝 Reasonix Studio（ReasonixStudio-windows-amd64-installer.exe）：\n  https://github.com/esengine/DeepSeek-Reasonix/releases?q=studio-v&expanded=true\n\n按 Enter 關閉此視窗。\n",
+	MinttyConsoleHint:            "Reasonix 的終端介面需要 Windows 主控台，而目前的終端機（Git Bash / mintty）不是。\n請在 cmd、PowerShell 或 Windows Terminal 裡執行；在這裡仍可用 `reasonix run \"任務\"` 執行單一任務。\n",
+	OpenedNestedWithoutAskingFmt: "依設定（設定 > 智慧代理行為 > 會話間訊息）的允許，已在不詢問的情況下開啟本專案內的 %d 個資料夾：%s",
+	StandaloneConsoleHint:        "這是 Reasonix 命令列工具，需要在 PowerShell 等終端機裡執行。\n要使用桌面應用程式，請安裝 Reasonix Studio（ReasonixStudio-windows-amd64-installer.exe）：\n  https://github.com/esengine/DeepSeek-Reasonix/releases?q=studio-v&expanded=true\n\n按 Enter 關閉此視窗。\n",
 	UsageBody: `reasonix — 由設定和插件驅動的 coding agent（多模型）
 
 用法：

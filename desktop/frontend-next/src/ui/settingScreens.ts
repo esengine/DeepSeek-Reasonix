@@ -9,6 +9,7 @@ export const SETTING_SCREEN: Record<string, string> = {
   "agent.persona.include_runtime_context": "persona:persona",
   "peers.enabled": "peers:peers",
   "peers.dispatch": "peers:peers",
+  "peers.open_nested": "peers:peers",
   "peers.release_projects": "peers:peer-projects",
   "desktop.default_tool_approval_mode": "tools:approval",
   "agent.plan_approval": "session:plan-approval",

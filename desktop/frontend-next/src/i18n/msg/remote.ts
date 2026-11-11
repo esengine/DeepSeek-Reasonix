@@ -79,6 +79,8 @@ export const REMOTE: Messages = {
   "remote.last_used_at": { zh: "最近使用 {at}", en: "Last used {at}" },
   "remote.leave_empty_to_let_the": { zh: "留空则每次开启时由系统随机选择，范围 1024–65535。更改端口后，手机需要重新扫码配对。", en: "Leave empty to let the system pick a port each time, or choose one from 1024 to 65535. After changing the port, phones need to scan a new code to pair again." },
   "remote.left_blank_it_tries_in": { zh: "留空时按这个顺序尝试：先 ssh-agent 持有的密钥，再 ~/.ssh 下的默认密钥；只有填了下面的环境变量或该机器要求交互时，才会走密码。", en: "Left blank, it tries in this order: keys held by ssh-agent, then the default keys under ~/.ssh. A password is only used when one of the variables below is set, or the machine asks interactively." },
+  "remote.open_nested_folders_without_asking": { zh: "不询问直接打开本项目内的文件夹", en: "Open folders inside this project without asking" },
+  "remote.open_nested_folders_without_asking_ds": { zh: "模型用 open_projects 把本项目目录下的子文件夹加为项目时，直接添加并标为可信，不再弹确认卡；项目之外的文件夹仍然会询问。被信任的文件夹里的配置可以运行程序，请只在你信任这个仓库时开启。", en: "When the model adds a subfolder of this project as a project with open_projects, it is added and trusted without a card; folders outside the project still ask. A trusted folder's configuration can run programs, so turn this on only for a repository you trust." },
   "remote.let_the_model_hand_a": { zh: "允许模型把任务交给别的会话", en: "Let the model hand a task to another session" },
   "remote.local_pairing_valid_until_time": { zh: "局域网配对 · {time} 前有效", en: "Local pairing · valid until {time}" },
   "remote.lost_the_connection_to_machine": { zh: "与 {machine} 的连接已中断", en: "Lost the connection to {machine}" },

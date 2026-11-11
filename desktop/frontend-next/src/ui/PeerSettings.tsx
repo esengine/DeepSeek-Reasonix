@@ -47,6 +47,13 @@ export function PeerSettings({ port, settings, onSaved }: { port: AgentPort; set
         </span>
         <Switch data-action="peers.dispatch" on={state.dispatch} busy={off || !state.enabled} label={t("remote.let_the_model_hand_a")} onClick={() => void save({ dispatch: !state.dispatch })} />
       </div>
+      <div className="lrow">
+        <span className="tx">
+          <span className="lb">{t("remote.open_nested_folders_without_asking")}</span>
+          <span className="ds">{t("remote.open_nested_folders_without_asking_ds")}</span>
+        </span>
+        <Switch data-action="peers.open-nested" on={state.open_nested} busy={off || !state.enabled || !state.dispatch} label={t("remote.open_nested_folders_without_asking")} onClick={() => void save({ open_nested: !state.open_nested })} />
+      </div>
       {!state.available && <div className="peernote" role="status">{t("remote.not_supported_in_this_session")}</div>}
       {state.pending && <div className="peernote" role="status">{t("remote.saved_takes_effect_from_the")}</div>}
       <div className="peernote">{t("remote.these_switches_are_kept_in")}<code>{state.path}</code></div>

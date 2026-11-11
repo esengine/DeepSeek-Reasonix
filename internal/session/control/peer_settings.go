@@ -44,12 +44,15 @@ type PeersSettings struct {
 	ReleaseProjects []PeerReleased `json:"release_projects"`
 	// MaxDispatchDepth and MaxDispatchedSessions are the user's ceilings on chained
 	// and simultaneous dispatches; 0 removes a ceiling.
-	MaxDispatchDepth      int    `json:"max_dispatch_depth"`
-	MaxDispatchedSessions int    `json:"max_dispatched_sessions"`
-	Path                  string `json:"path"`
-	Applies               string `json:"applies"`
-	Pending               bool   `json:"pending"`
-	Available             bool   `json:"available"`
+	MaxDispatchDepth      int `json:"max_dispatch_depth"`
+	MaxDispatchedSessions int `json:"max_dispatched_sessions"`
+	// OpenNested is the user's standing yes for open_projects to add folders inside
+	// the session's own workspace without a card; it takes effect at the next call.
+	OpenNested bool   `json:"open_nested"`
+	Path       string `json:"path"`
+	Applies    string `json:"applies"`
+	Pending    bool   `json:"pending"`
+	Available  bool   `json:"available"`
 }
 
 // PeersPatch is a partial update: a nil field is left as it is, and a non-nil
@@ -61,6 +64,7 @@ type PeersPatch struct {
 	// Negative values are refused; 0 removes the ceiling.
 	MaxDispatchDepth      *int
 	MaxDispatchedSessions *int
+	OpenNested            *bool
 }
 
 // PeerRemember says what a decision on a held message also writes down.
@@ -81,7 +85,7 @@ func (c *Controller) peersSettingsFrom(cfg config.PeersConfig) PeersSettings {
 	p := c.peers
 	out := PeersSettings{
 		Enabled: cfg.Enabled, Dispatch: cfg.Enabled && cfg.Dispatch, Path: config.UserConfigPath(),
-		MaxDispatchDepth: max(cfg.MaxDispatchDepth, 0), MaxDispatchedSessions: max(cfg.MaxDispatchedSessions, 0),
+		MaxDispatchDepth: max(cfg.MaxDispatchDepth, 0), MaxDispatchedSessions: max(cfg.MaxDispatchedSessions, 0), OpenNested: cfg.OpenNested,
 		Applies: "next_turn", Available: p != nil && p.root != "", ReleaseProjects: []PeerReleased{},
 	}
 	for _, path := range cfg.ReleaseProjects {
@@ -122,6 +126,9 @@ func (c *Controller) SavePeersSettings(patch PeersPatch) (PeersSettings, error) 
 		}
 		if patch.MaxDispatchedSessions != nil {
 			p.MaxDispatchedSessions = *patch.MaxDispatchedSessions
+		}
+		if patch.OpenNested != nil {
+			p.OpenNested = *patch.OpenNested
 		}
 		return nil
 	})

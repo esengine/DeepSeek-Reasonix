@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 
 	"reasonix/internal/base/testenv"
@@ -168,5 +169,55 @@ func TestCeilingsTheUserSetSurviveAnUnrelatedSave(t *testing.T) {
 	}
 	if got := LoadForEdit(path); got.PeersMaxDispatchDepth() != 0 || got.PeersMaxDispatchedSessions() != 3 {
 		t.Fatalf("ceilings after a save = %d, %d; want 0 and 3", got.PeersMaxDispatchDepth(), got.PeersMaxDispatchedSessions())
+	}
+}
+
+func TestOpeningNestedFoldersWithoutAskingIsOffUnlessTheUserTurnsItOn(t *testing.T) {
+	if Default().PeersOpenNested() {
+		t.Fatal("opening folders without a card is on by default")
+	}
+	cfg, _ := loadScoped(t, "[peers]\nopen_nested = true\n", "")
+	if !cfg.PeersOpenNested() {
+		t.Fatal("the user's own open_nested was not read")
+	}
+}
+
+// The setting skips a card that decides whether a folder is trusted, so a cloned
+// repository must neither switch it on nor undo the user's choice.
+func TestAProjectFileCannotTurnOpeningFoldersWithoutAskingOn(t *testing.T) {
+	cfg, _ := loadScoped(t, "", "[peers]\nopen_nested = true\n")
+	if cfg.PeersOpenNested() {
+		t.Fatal("a cloned repo's reasonix.toml let folders open without a card")
+	}
+	if !slices.Contains(ignoredKeys(cfg), "peers.open_nested") {
+		t.Fatalf("ignored = %v, want peers.open_nested reported", ignoredKeys(cfg))
+	}
+	if kept, _ := loadScoped(t, "[peers]\nopen_nested = true\n", "[peers]\nopen_nested = false\n"); !kept.PeersOpenNested() {
+		t.Fatal("the project file overrode the user's own choice")
+	}
+}
+
+func TestSavingTheUserFileKeepsOpenNestedAndWritesNothingWhenItIsOff(t *testing.T) {
+	t.Setenv("REASONIX_HOME", testenv.TempDir(t))
+	path := UserConfigPath()
+	cfg := LoadForEdit(path)
+	cfg.Peers.OpenNested = true
+	if err := cfg.SaveTo(path); err != nil {
+		t.Fatal(err)
+	}
+	if !LoadForEdit(path).Peers.OpenNested {
+		t.Fatal("open_nested did not survive a save")
+	}
+	off := LoadForEdit(path)
+	off.Peers.OpenNested = false
+	if err := off.SaveTo(path); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "open_nested") {
+		t.Fatalf("an off setting was written out:\n%s", raw)
 	}
 }

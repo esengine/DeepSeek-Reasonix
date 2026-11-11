@@ -25,7 +25,7 @@ afterEach(() => {
 });
 
 const settings = (over: Partial<PeersSettings> = {}): PeersSettings => ({
-  enabled: false, dispatch: false, release_projects: [], max_dispatch_depth: 1, max_dispatched_sessions: 8, path: "/home/me/.reasonix/config.toml", applies: "next_turn", pending: false, available: true, ...over,
+  enabled: false, dispatch: false, release_projects: [], max_dispatch_depth: 1, max_dispatched_sessions: 8, open_nested: false, path: "/home/me/.reasonix/config.toml", applies: "next_turn", pending: false, available: true, ...over,
 });
 
 function portWith(initial: PeersSettings) {
@@ -37,6 +37,7 @@ function portWith(initial: PeersSettings) {
       ...current,
       enabled: edit.enabled ?? current.enabled,
       dispatch: edit.dispatch ?? current.dispatch,
+      open_nested: edit.open_nested ?? current.open_nested,
       release_projects: edit.release_projects ? current.release_projects.filter((p) => edit.release_projects!.includes(p.path)) : current.release_projects,
       pending: true,
     };
@@ -80,6 +81,27 @@ describe("the session messages switches", () => {
     render(<Messages port={port} />);
     await userEvent.click(await screen.findByRole("switch", { name: "允许模型把任务交给别的会话" }));
     expect(save).toHaveBeenCalledExactlyOnceWith({ dispatch: true });
+  });
+
+  it("offers opening folders inside the project without asking, off until the user turns it on", async () => {
+    const { port, save } = portWith(settings({ enabled: true, dispatch: true }));
+    render(<Messages port={port} />);
+    const name = "不询问直接打开本项目内的文件夹";
+    const sw = await screen.findByRole("switch", { name });
+    expect(sw.getAttribute("aria-checked")).toBe("false");
+    expect(screen.getByText(/项目之外的文件夹仍然会询问/)).toBeTruthy();
+    await userEvent.click(sw);
+    expect(save).toHaveBeenCalledExactlyOnceWith({ open_nested: true });
+    await waitFor(() => expect(screen.getByRole("switch", { name }).getAttribute("aria-checked")).toBe("true"));
+  });
+
+  it("holds the open-folders switch inert until the model may hand off tasks", async () => {
+    const { port, save } = portWith(settings({ enabled: true, dispatch: false }));
+    render(<Messages port={port} />);
+    const sw = await screen.findByRole("switch", { name: "不询问直接打开本项目内的文件夹" });
+    expect((sw as HTMLButtonElement).disabled).toBe(true);
+    await userEvent.click(sw);
+    expect(save).not.toHaveBeenCalled();
   });
 
   it("names the file the switches live in, and shows a refusal beside them", async () => {
