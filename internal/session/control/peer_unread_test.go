@@ -26,6 +26,7 @@ type unreadFixture struct {
 // conversation in it, as one a person has opened before.
 func newUnreadFixture(t *testing.T) *unreadFixture {
 	t.Helper()
+	setDispatchSwitch(t, true, false)
 	root := testenv.TempDir(t)
 	peersDir := filepath.Join(root, "peers")
 	sessions := filepath.Join(root, "sessions")
