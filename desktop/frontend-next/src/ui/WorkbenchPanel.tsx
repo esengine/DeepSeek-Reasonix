@@ -55,6 +55,7 @@ const DocumentPreview = lazy(() => import("./document/DocumentPreview"));
 const CodeEditor = lazy(() => import("./CodeEditor"));
 
 import { treeRows } from "./workbench_tree";
+import { ExplorerResize } from "./ExplorerResize";
 import { AgentRunView } from "./AgentRunView";
 import { JobRunView } from "./JobRunView";
 import { useAgentTabs, type AgentRequest } from "./useAgentTabs";
@@ -713,6 +714,7 @@ export function WorkbenchPanel({
           </div>
         </main>
         <aside className="workbench-explorer">
+          <ExplorerResize />
           <WorkbenchExplorerHead
             port={port}
             count={files.length + directories.length}

@@ -183,6 +183,7 @@ export const WORKBENCH: Messages = {
   "workbench.changes_page_hint": { zh: "勾选＝暂存；悬停文件头出「打开文件」「丢弃」；点差异里的行号打开这个文件。", en: "Tick to stage; hover a file header for Open file and Discard; click a line number to open the file." },
   "workbench.diff_cut_short": { zh: "差异太长，只显示了前一部分。", en: "The diff is long; only its first part is shown." },
   "workbench.expand_section": { zh: "展开{name}", en: "Expand {name}" },
+  "workbench.resize_the_file_tree": { zh: "调整文件树宽度", en: "Resize the file tree" },
   "workbench.collapse_section": { zh: "收起{name}", en: "Collapse {name}" },
   "workbench.name_is_not_saved": { zh: "{name} 还没保存", en: "{name} is not saved" },
   "workbench.dont_save": { zh: "不保存", en: "Don't save" },

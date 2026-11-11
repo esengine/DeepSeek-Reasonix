@@ -42,6 +42,7 @@
 @import "./sessionpin.css" layer(legacy);
 @import "./treerows.css" layer(legacy);
 @import "./workbench-changes.css" layer(legacy);
+@import "./explorer-resize.css" layer(legacy);
 @import "./agentrun.css" layer(legacy);
 @import "./gitgraph.css" layer(legacy);
 @import "./modelmenu.css" layer(legacy);
