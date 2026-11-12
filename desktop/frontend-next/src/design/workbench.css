@@ -162,8 +162,8 @@
 }
 .workbench-explorer .workbench-explorer-head small, .workbench-history > summary small { margin-left: auto; color: var(--faint); font: var(--w-med) var(--fs-meta)/1 var(--ui); }
 .workbench-explorer .workbench-explorer-head small + .btn, .workbench-explorer .workbench-explorer-head small ~ .btn { flex: none; }
-.workbench-changes > .workbench-explorer-head { height: auto; min-height: 34px; padding-block: 5px; flex-wrap: wrap; row-gap: 4px; }
-.workbench-changes > .workbench-explorer-head > :is(span, small, .workbench-section-title) { flex: none; white-space: nowrap; }
+.workbench-explorer .workbench-changes > .workbench-explorer-head { height: auto; min-height: 34px; padding-block: 5px; flex-wrap: wrap; row-gap: 4px; }
+.workbench-explorer .workbench-changes > .workbench-explorer-head > :is(span, small, .workbench-section-title) { flex: none; white-space: nowrap; }
 .workbench-section-fold { width: 18px; height: 18px; padding: 0; display: grid; place-items: center; flex: none; border: 0; background: none; color: var(--faint); cursor: pointer; }
 .workbench-section-fold .studio-icon, .gh-fold { width: 12px; height: 12px; flex: none; color: var(--faint); transition: transform var(--t-line) ease; }
 .workbench-history:not([open]) > summary .gh-fold { transform: rotate(-90deg); }

@@ -1,3 +1,3 @@
-.workbench-tree-resize { position: absolute; top: 0; bottom: 0; right: -4px; width: 8px; z-index: 3; cursor: col-resize; touch-action: none; }
-.workbench-tree-resize:hover, .workbench-tree-resize[data-on] { background: linear-gradient(to right, transparent 3px, var(--accent) 3px, var(--accent) 5px, transparent 5px); }
+.workbench-tree-resize { position: absolute; top: 0; bottom: 0; right: 0; width: 6px; z-index: 3; cursor: col-resize; touch-action: none; }
+.workbench-tree-resize:hover, .workbench-tree-resize[data-on] { background: linear-gradient(to right, transparent 2px, var(--accent) 2px, var(--accent) 4px, transparent 4px); }
 .workbench-tree-resize:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }

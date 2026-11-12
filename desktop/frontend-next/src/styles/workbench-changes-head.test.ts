@@ -7,7 +7,7 @@ const rule = (selector: string): string => {
 };
 
 describe("the changes section's head in a narrow explorer", () => {
-  const head = rule(".workbench-changes > .workbench-explorer-head");
+  const head = rule(".workbench-explorer .workbench-changes > .workbench-explorer-head");
 
   it("wraps its buttons onto a second line instead of overflowing sideways", () => {
     expect(head).toMatch(/flex-wrap:\s*wrap/);
@@ -15,7 +15,7 @@ describe("the changes section's head in a narrow explorer", () => {
   });
 
   it("keeps the title and the file count whole rather than breaking them a character at a time", () => {
-    const labels = rule(".workbench-changes > .workbench-explorer-head > :is(span, small, .workbench-section-title)");
+    const labels = rule(".workbench-explorer .workbench-changes > .workbench-explorer-head > :is(span, small, .workbench-section-title)");
     expect(labels).toMatch(/flex:\s*none/);
     expect(labels).toMatch(/white-space:\s*nowrap/);
   });
