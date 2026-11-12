@@ -21,12 +21,7 @@ try {
     const root = page.locator(".studio-tools");
     const settings = root.locator('[data-action="chrome.settings"]');
     assert.equal(await settings.innerText(), "设置");
-    const alignment = await settings.evaluate((button) => {
-      const icon = button.querySelector('svg').getBoundingClientRect();
-      const feedback = document.querySelector('.studio-feedback svg').getBoundingClientRect();
-      return Math.abs(icon.x - feedback.x);
-    });
-    assert.ok(alignment <= 4, `settings and feedback icons align: ${alignment}`);
+    assert.equal(await page.locator('.studio-feedback').count(), 0, 'the retired feedback row is not drawn');
     if (hidden) {
       assert.equal(await root.locator('.studio-tools-toggle').count(), 0);
       await root.hover();

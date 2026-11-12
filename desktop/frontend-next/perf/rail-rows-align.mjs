@@ -27,17 +27,16 @@ try {
     check(`${scheme}: the shortcut buttons share one size`, spread("w") <= TOLERANCE && spread("h") <= TOLERANCE, JSON.stringify(strip.map((s) => [s.w, s.h])));
     check(`${scheme}: the shortcut rows align and center their icons`, spread("left") <= TOLERANCE && strip.every((s) => Math.abs(s.cy - s.iconCy) <= TOLERANCE), JSON.stringify(strip.map((s) => [s.left, s.cy - s.iconCy])));
     check(`${scheme}: the shortcut icons share one size`, new Set(strip.map((s) => s.icon.join("x"))).size === 1, strip.map((s) => s.icon.join("x")).join(" "));
-    const rows = await page.evaluate(() => [".studio-new-task", ".studio-search", ".studio-tools-row", ".studio-feedback"].map((s) => {
+    const rows = await page.evaluate(() => [".studio-new-task", ".studio-search", ".studio-tools-row"].map((s) => {
       const row = document.querySelector(s);
       if (!row) return null;
       const r = row.getBoundingClientRect();
       const svg = row.querySelector("svg, .studio-icon").getBoundingClientRect();
       return { left: r.left, right: r.right, icon: svg.left - r.left, visible: r.width > 0 && r.height > 0 };
     }));
-    check(`${scheme}: new session, search and feedback are drawn`, rows.every((r) => r?.visible), JSON.stringify(rows));
+    check(`${scheme}: new session, search and tools are drawn`, rows.every((r) => r?.visible), JSON.stringify(rows));
     check(`${scheme}: those rows share the sidebar's left and right edges`, rows.every((r) => r && Math.abs(r.left - rows[0].left) <= TOLERANCE && Math.abs(r.right - rows[0].right) <= TOLERANCE), JSON.stringify(rows.map((r) => [r.left, r.right])));
-    const fill = await page.evaluate(() => getComputedStyle(document.querySelector(".studio-feedback")).backgroundColor);
-    check(`${scheme}: the feedback row has no fill at rest`, /rgba\(0, 0, 0, 0\)|transparent/.test(fill), fill);
+    check(`${scheme}: the retired feedback row is not drawn`, !(await page.locator(".studio-feedback").count()));
     await ctx.close();
   }
 } finally {
