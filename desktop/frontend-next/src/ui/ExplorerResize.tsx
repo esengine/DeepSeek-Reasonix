@@ -105,6 +105,9 @@ export function ExplorerResize() {
       onPointerDown={drag}
       onDoubleClick={reset}
       onKeyDown={key}
+      data-action-pointerdown="workbench.tree-resize"
+      data-action-dblclick="workbench.tree-resize"
+      data-action-keydown="workbench.tree-resize"
     />
   );
 }

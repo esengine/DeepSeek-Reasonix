@@ -96,6 +96,7 @@ export const ACTIONS: UIAction[] = [
   { id: "phone-device.retry", kind: "shell-native", target: "none", proof: "interaction" },
   { id: "phone-device.restart", kind: "shell-native", target: "none", proof: "interaction" },
   { id: "chrome.rail", kind: "view", target: "none", proof: "browser" },
+  { id: "workbench.tree-resize", kind: "view", target: "none", proof: "interaction" },
   { id: "chrome.more", kind: "view", target: "none", proof: "interaction" },
   { id: "chrome.open-project", kind: "shell-native", target: "none", proof: "interaction" },
   { id: "appearance.theme", kind: "view", target: "none", proof: "interaction" },
