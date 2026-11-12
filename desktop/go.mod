@@ -2,7 +2,7 @@ module reasonix/desktop
 
 go 1.26.0
 
-toolchain go1.26.10
+toolchain go1.26.11
 
 // The desktop tools are a nested module so their CGO build never touches the
 // CLI's CGO_ENABLED=0 single-static-binary guarantee. The replace lets them
