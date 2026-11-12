@@ -218,6 +218,9 @@ bash allowlist 或信任提示。Plan 与常规模式使用相同的 Permissions
 
 ### CLI 上报统计
 
+> 项目已停止维护。最后一个版本不再发送任何 ping、计数或报告，
+> `reasonix report send` 会被拒绝；以下内容描述的是此前的行为。
+
 CLI 可以向 `https://crash.reasonix.io` 发送每日最多一次的匿名活跃安装 ping，
 以及有界、完全不含内容的事件计数。使用以下用户全局命令配置：
 

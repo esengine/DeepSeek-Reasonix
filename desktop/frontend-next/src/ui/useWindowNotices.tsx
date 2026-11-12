@@ -1,3 +1,4 @@
+import { FEEDBACK_RETIRED } from "../feedbackchannel";
 import { useMemo, type Dispatch, type ReactNode, type SetStateAction } from "react";
 import type { AgentPort } from "../port/port";
 import type { TreeWorkspace } from "../port/hub";
@@ -10,14 +11,14 @@ import { LevelUpNotice } from "./LevelUpNotice";
 export function useWindowNotices({ error, setError, onReport, tree, port, feedbackOpen }: {
   error: string;
   setError: Dispatch<SetStateAction<string>>;
-  onReport: () => void;
+  onReport?: () => void;
   tree: TreeWorkspace[];
   port: AgentPort | null;
   feedbackOpen: boolean;
 }): { errorBar: ReactNode; note: ReactNode; bar: ReactNode } {
   const errorBar = useMemo(() => (error ? <ErrorBar text={error} onDismiss={() => setError("")} onReport={onReport} /> : null), [error, setError, onReport]);
   const note = useMemo(
-    () => <LevelUpNotice port={port} tick={feedbackOpen ? 1 : 0} fallback={<AutoArchiveNotice tree={tree} />} />,
+    () => <LevelUpNotice port={FEEDBACK_RETIRED ? null : port} tick={feedbackOpen ? 1 : 0} fallback={<AutoArchiveNotice tree={tree} />} />,
     [tree, port, feedbackOpen],
   );
   return { errorBar, note, bar: errorBar ?? note };

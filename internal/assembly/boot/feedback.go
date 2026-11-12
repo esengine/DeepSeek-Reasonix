@@ -12,10 +12,17 @@ import (
 	"reasonix/internal/platform/feedback"
 )
 
+// feedbackRetired is the end of service: the build makes no report client, so
+// every frontend is told feedback is unavailable.
+const feedbackRetired = true
+
 // feedbackService is the install's report client. A build that cannot make one
 // leaves the controller without it, which refuses feedback rather than failing
 // the session.
 func feedbackService(home string, proxy netclient.ProxySpec, accountsURL string) *feedback.Service {
+	if feedbackRetired {
+		return nil
+	}
 	svc, err := feedback.New(feedback.Config{Home: home, Proxy: proxy, Assert: accountAssertion(proxy, accountsURL)})
 	if err != nil {
 		return nil

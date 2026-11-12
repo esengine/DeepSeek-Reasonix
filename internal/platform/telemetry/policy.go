@@ -9,12 +9,17 @@ import (
 
 var releaseVersionPattern = regexp.MustCompile(`^v?\d+\.\d+\.\d+(?:[-+][0-9A-Za-z._-]+)?$`)
 
+// Retired is the project's end of service: no counter is queued and nothing is
+// uploaded whatever the configuration says. Tests of the reporting machinery
+// lift it; the shipped value is true.
+var Retired = true
+
 // Enabled applies the fail-closed CLI telemetry policy. Explicit "on" permits
 // local headless runs, but never overrides CI, development builds, or
 // environment opt-outs.
 func Enabled(mode, version string, interactive bool) bool {
 	mode = strings.ToLower(strings.TrimSpace(mode))
-	if mode == "off" || !releaseVersionPattern.MatchString(strings.TrimSpace(version)) {
+	if Retired || mode == "off" || !releaseVersionPattern.MatchString(strings.TrimSpace(version)) {
 		return false
 	}
 	if envOptOut() || inCI() {
@@ -29,7 +34,7 @@ func Enabled(mode, version string, interactive bool) bool {
 // OptedOut reports the environment-level refusals every anonymous report
 // honours whatever the configuration says: DO_NOT_TRACK, REASONIX_TELEMETRY=off
 // and CI.
-func OptedOut() bool { return envOptOut() || inCI() }
+func OptedOut() bool { return Retired || envOptOut() || inCI() }
 
 // ReleaseVersion reports whether version names a release build; development
 // builds report nothing.

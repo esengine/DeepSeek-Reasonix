@@ -52,7 +52,7 @@ type Reporter struct {
 
 func Start(opts Options) *Reporter {
 	if !Enabled(opts.Mode, opts.Version, opts.Interactive) {
-		if strings.EqualFold(strings.TrimSpace(opts.Mode), "off") || envOptOut() {
+		if Retired || strings.EqualFold(strings.TrimSpace(opts.Mode), "off") || envOptOut() {
 			_ = Cleanup(opts.HomeDir)
 		}
 		return nil

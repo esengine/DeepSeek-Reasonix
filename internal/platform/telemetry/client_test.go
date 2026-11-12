@@ -25,6 +25,7 @@ type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func TestMain(m *testing.M) {
 	endpoint = "http://127.0.0.1:0/v1"
+	Retired = false
 	os.Exit(m.Run())
 }
 

@@ -2,6 +2,9 @@
 import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
+
+// These tests describe the feedback channel while it exists; the shipped build has it retired.
+vi.mock("../feedbackchannel", () => ({ FEEDBACK_RETIRED: false }));
 import "./testkit";
 import { App } from "./App";
 import { MockHub } from "../port/mock_hub";

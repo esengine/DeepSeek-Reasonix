@@ -1,3 +1,4 @@
+import { FEEDBACK_RETIRED } from "../feedbackchannel";
 import { SidebarTools } from "./SidebarTools";
 import { FeedbackBadge, feedbackEntryTab } from "./feedbackentry";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -216,10 +217,12 @@ export function Sidebar({
         run: () => onSettings("providers") },
       { id: "usage", label: t("session.wallet_and_usage"), icon: "wallet", keywords: "usage cost token 用量 费用",
         run: () => onSettings("spend") },
-      { id: "feedback", label: t("common.send_feedback"), icon: "feedback", keywords: "feedback report bug idea suggestion 反馈 报告 问题 建议 意见",
-        run: () => onFeedback("send") },
-      { id: "feedback-mine", label: t("session.my_feedback"), icon: "feedback", keywords: "feedback receipt status my reply 反馈 回执 进展 我的 回复",
-        status: feedbackUnread > 0 ? t("common.n_to_review", { n: feedbackUnread }) : undefined, run: () => onFeedback("mine") },
+      ...(FEEDBACK_RETIRED ? [] : [
+        { id: "feedback", label: t("common.send_feedback"), icon: "feedback" as const, keywords: "feedback report bug idea suggestion 反馈 报告 问题 建议 意见",
+          run: () => onFeedback("send") },
+        { id: "feedback-mine", label: t("session.my_feedback"), icon: "feedback" as const, keywords: "feedback receipt status my reply 反馈 回执 进展 我的 回复",
+          status: feedbackUnread > 0 ? t("common.n_to_review", { n: feedbackUnread }) : undefined, run: () => onFeedback("mine") },
+      ]),
       { id: "community", label: t("common.community_and_contributors"), icon: "globe", keywords: "community discord qq group contributors 社区 交流群 加群 贡献者",
         run: () => onSettings("versions:community") },
       { id: "settings", label: t("common.settings"), icon: "settings", keywords: "settings preferences 设置 偏好",
@@ -382,11 +385,13 @@ export function Sidebar({
       {!navShown && <div className="railfoot">
         <UpdateNotice onOpen={() => onSettings("versions")} />
         <SidebarTools wallet={wallet} approval={approval} online={online} onSettings={onSettings} onFiles={onFiles} />
-        <button className="studio-feedback" data-action="feedback.open" onClick={() => onFeedback(feedbackEntryTab(feedbackUnread))}>
-          <span aria-hidden="true"><StudioIcon name="feedback" /></span>
-          <b>{t("common.send_feedback")}</b>
-          <FeedbackBadge unread={feedbackUnread} />
-        </button>
+        {!FEEDBACK_RETIRED && (
+          <button className="studio-feedback" data-action="feedback.open" onClick={() => onFeedback(feedbackEntryTab(feedbackUnread))}>
+            <span aria-hidden="true"><StudioIcon name="feedback" /></span>
+            <b>{t("common.send_feedback")}</b>
+            <FeedbackBadge unread={feedbackUnread} />
+          </button>
+        )}
       </div>}
     </div>
     </>

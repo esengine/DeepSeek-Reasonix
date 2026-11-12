@@ -1,3 +1,4 @@
+import { FEEDBACK_RETIRED } from "../feedbackchannel";
 import { useLayoutEffect, useState } from "react";
 import { t } from "../i18n";
 import type { AgentPort, Appearance } from "../port/port";
@@ -84,17 +85,19 @@ export function ToastStack({
             key={toast.id}
             actions={
               <>
-                <button
-                  className="act ghost"
-                  data-action="toast.report"
-                  onClick={() => {
-                    reportProblem(toast.text);
-                    onFeedback();
-                    dismissToast(toast.id);
-                  }}
-                >
-                  {t("app.report_this_problem")}
-                </button>
+                {!FEEDBACK_RETIRED && (
+                  <button
+                    className="act ghost"
+                    data-action="toast.report"
+                    onClick={() => {
+                      reportProblem(toast.text);
+                      onFeedback();
+                      dismissToast(toast.id);
+                    }}
+                  >
+                    {t("app.report_this_problem")}
+                  </button>
+                )}
                 <button
                   className="act ghost"
                   data-action="toast.dismiss"

@@ -224,6 +224,10 @@ sandbox and do not carry it.
 
 ### CLI telemetry
 
+> The project is no longer maintained. The final release sends no ping,
+> counter or report, and `reasonix report send` is refused; the text below
+> describes the earlier behaviour.
+
 The CLI can send a once-per-day anonymous active-install ping and bounded,
 content-free event counters to `https://crash.reasonix.io`. Configure the
 user-global policy with:

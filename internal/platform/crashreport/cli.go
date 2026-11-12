@@ -41,6 +41,9 @@ const (
 
 var reportEndpoint = "https://crash.reasonix.io/v1/report"
 
+// reportsRetired is the end of service; tests of the sender lift it.
+var reportsRetired = true
+
 var queueMu sync.Mutex
 
 var (
@@ -198,9 +201,15 @@ func Preview(report Report) ([]byte, error) {
 	return bytes.TrimSuffix(out.Bytes(), []byte("\n")), nil
 }
 
+// ErrRetired is Send's answer once the project no longer receives reports.
+var ErrRetired = errors.New("crash reports are no longer accepted: the project is not maintained")
+
 // Send uploads a single user-reviewed report. It does not remove local state;
 // callers remove the report only after a successful response.
 func Send(ctx context.Context, report Report, proxy netclient.ProxySpec) error {
+	if reportsRetired {
+		return ErrRetired
+	}
 	client, err := netclient.NewHTTPClient(proxy, netclient.TransportOptions{
 		DialTimeout:           3 * time.Second,
 		TLSHandshakeTimeout:   3 * time.Second,

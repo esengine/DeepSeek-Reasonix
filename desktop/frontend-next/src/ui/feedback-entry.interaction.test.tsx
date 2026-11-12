@@ -1,5 +1,8 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
+
+// These tests describe the feedback channel while it exists; the shipped build has it retired.
+vi.mock("../feedbackchannel", () => ({ FEEDBACK_RETIRED: false }));
 import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import "./testkit";

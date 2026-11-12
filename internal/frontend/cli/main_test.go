@@ -7,12 +7,14 @@ import (
 
 	"reasonix/internal/base/i18n"
 	"reasonix/internal/base/testenv"
+	"reasonix/internal/platform/telemetry"
 )
 
 func TestMain(m *testing.M) {
 	if code, ok := scheduleTestHelperProcess(); ok {
 		os.Exit(code)
 	}
+	telemetry.Retired = false
 	cleanupUserState, err := testenv.IsolateUserState()
 	if err != nil {
 		panic(err)

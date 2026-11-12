@@ -19,6 +19,7 @@ import { Nav } from "./Nav";
 import { useTreeWindow, type TreePaging } from "./treewindow";
 import { useNavRail } from "./navrail";
 import { feedbackEntryTab } from "./feedbackentry";
+import { FEEDBACK_RETIRED } from "../feedbackchannel";
 import { noteFault } from "./fault";
 import { ToastStack } from "./ToastStack";
 import { useLinkRouting } from "./links";
@@ -290,7 +291,7 @@ export function App({ hub }: { hub: HubPort }) {
   // Asked on open, on focus (at most every 30 s) and every 10 min while a report
   // is unsettled, never otherwise; a failed refresh stays silent and backs off.
   useEffect(() => startUpdateWatch(machinePort), [machinePort]);
-  useFeedbackUnread(machineRt ? machinePort : null, machineRt?.id ?? "", feedbackUnread, setFeedbackUnread, feedback !== null);
+  useFeedbackUnread(!FEEDBACK_RETIRED && machineRt ? machinePort : null, machineRt?.id ?? "", feedbackUnread, setFeedbackUnread, feedback !== null);
 
   useFirstRunRead(activePort, setSetup, setWelcomed);
 
@@ -479,7 +480,7 @@ export function App({ hub }: { hub: HubPort }) {
   // A failed request floats above the composer of the pane in front, where the
   // eye already is; with no pane on screen it takes the main area's corner.
   const activePaneShown = !!activeRuntime && panePorts.has(activeRuntime.id);
-  const reportError = useCallback(() => setFeedback("send"), []);
+  const reportError = useMemo(() => (FEEDBACK_RETIRED ? undefined : () => setFeedback("send")), []);
   const { errorBar, note, bar } = useWindowNotices({ error, setError, onReport: reportError, tree, port: machineRt ? machinePort : null, feedbackOpen: feedback !== null });
   const activeWorkspace = tree.find((ws) => !activeRuntime?.host && workspaceContains(ws, activeRuntime?.root)) ?? tree[0];
   const newSessionRoot = activeWorkspace?.root;
@@ -706,7 +707,7 @@ export function App({ hub }: { hub: HubPort }) {
                   onOpenProject={openProject}
                   onKeepHere={keepHere}
                   onSettings={openSettings}
-                  onFeedback={openFeedback}
+                  onFeedback={FEEDBACK_RETIRED ? undefined : openFeedback}
                   onOpenSession={openSessionFor(rt.id)}
                   theme={scheme}
                   dockW={shownDockW}
@@ -750,7 +751,7 @@ export function App({ hub }: { hub: HubPort }) {
 
       <ToastStack onFeedback={() => setFeedback("send")} port={machinePort} idle={!running} look={look} onLook={onLook} />
 
-      {feedback && activePort && (
+      {!FEEDBACK_RETIRED && feedback && activePort && (
         <Feedback port={machinePort} tab={feedback} onClose={() => setFeedback(null)} onError={setError} onUnread={setFeedbackUnread} unread={feedbackUnread} />
       )}
 
