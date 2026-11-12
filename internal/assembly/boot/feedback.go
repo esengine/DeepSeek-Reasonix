@@ -13,8 +13,9 @@ import (
 )
 
 // feedbackRetired is the end of service: the build makes no report client, so
-// every frontend is told feedback is unavailable.
-const feedbackRetired = true
+// every frontend is told feedback is unavailable. Tests of the live service
+// lift it.
+var feedbackRetired = true
 
 // feedbackService is the install's report client. A build that cannot make one
 // leaves the controller without it, which refuses feedback rather than failing
