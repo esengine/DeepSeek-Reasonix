@@ -25,26 +25,37 @@ const x = (lane: number) => PAD + lane * COL;
 type Read = { k: "idle" } | { k: "loading" } | { k: "ready"; history: GitHistory } | { k: "failed"; why: string };
 
 // The commit graph beside the changes: what the project's history looks like,
-// read from git on request and never changed from here. It reads when opened and
-// again on demand, so a closed section costs nothing.
-export function WorkbenchHistory({ port, repo, branch }: { port: AgentPort; repo?: string; branch?: string }) {
+// read from git and never changed from here. It reads when opened and again when
+// stamp moves (the agent wrote, the changes or the branch moved), so a closed
+// section costs nothing and an open one does not go on showing a past tip.
+export function WorkbenchHistory({ port, repo, branch, stamp = "" }: { port: AgentPort; repo?: string; branch?: string; stamp?: string }) {
   const [openId, setOpenId] = useState("");
   const [shown, setShown] = useState(true);
   const [read, setRead] = useState<Read>({ k: "idle" });
   const latest = useRef(0);
-  const load = useCallback(async () => {
+  const seen = useRef<string | null>(null);
+  const load = useCallback(async (quiet = false) => {
     const id = ++latest.current;
-    setRead({ k: "loading" });
+    if (!quiet) setRead({ k: "loading" });
     try {
       const history = await port.workspaceGitLog(100, repo);
       if (id === latest.current) setRead({ k: "ready", history });
     } catch (e) {
-      if (id === latest.current) setRead({ k: "failed", why: reason(e) });
+      if (id === latest.current && !quiet) setRead({ k: "failed", why: reason(e) });
     }
   }, [port, repo]);
+  const key = `${branch ?? ""}
+${stamp}`;
   useEffect(() => {
-    if (shown && read.k === "idle") void load();
-  }, [shown, read.k, load]);
+    if (!shown) return;
+    if (read.k === "idle") {
+      seen.current = key;
+      void load();
+    } else if (seen.current !== key) {
+      seen.current = key;
+      void load(true);
+    }
+  }, [shown, read.k, load, key]);
   useEffect(() => () => { latest.current++; }, []);
 
   const history = read.k === "ready" ? read.history : null;

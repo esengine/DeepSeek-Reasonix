@@ -45,14 +45,14 @@ export function WorkbenchGit({ port, workspaceRoot, changes, repos, failure = ""
           {failure}
           {onRetry && <button type="button" className="btn sm" data-action="workbench.repos-reload" onClick={onRetry}>{t("common.read_again")}</button>}
         </p>
-        <RepoSection port={port} workspaceRoot={workspaceRoot} repo="" changes={changes} current={current} onOpen={onOpen} onChanged={onChanged} remote={remote} onOpenPage={onOpenPage} branch={repos.find((r) => r.dir === "")?.branch} />
+        <RepoSection port={port} workspaceRoot={workspaceRoot} repo="" changes={changes} current={current} onOpen={onOpen} onChanged={onChanged} remote={remote} onOpenPage={onOpenPage} branch={repos.find((r) => r.dir === "")?.branch} wrote={wrote} />
       </>
     );
   }
   if (repos.length === 0) return null;
   const several = repos.length > 1 || repos[0].dir !== "";
   if (!several) {
-    return <RepoSection port={port} workspaceRoot={workspaceRoot} repo="" changes={changes} current={current} onOpen={onOpen} onChanged={onChanged} remote={remote} onOpenPage={onOpenPage} branch={repos.find((r) => r.dir === "")?.branch} />;
+    return <RepoSection port={port} workspaceRoot={workspaceRoot} repo="" changes={changes} current={current} onOpen={onOpen} onChanged={onChanged} remote={remote} onOpenPage={onOpenPage} branch={repos.find((r) => r.dir === "")?.branch} wrote={wrote} />;
   }
   return (
     <div className="workbench-git" data-repos={repos.length}>
@@ -75,14 +75,14 @@ function Folder({ port, workspaceRoot, row, wrote, current, onOpen, remote }: { 
         <span>{row.branch}</span>
         <small>{changes.length}</small>
       </button>
-      {open && <RepoSection port={port} workspaceRoot={workspaceRoot} repo={row.dir} changes={changes} current={current} onOpen={onOpen} onChanged={reload} remote={remote} />}
+      {open && <RepoSection port={port} workspaceRoot={workspaceRoot} repo={row.dir} changes={changes} current={current} onOpen={onOpen} onChanged={reload} remote={remote} wrote={wrote} />}
     </section>
   );
 }
 
-function RepoSection({ port, workspaceRoot, repo, changes, current, onOpen, onChanged, remote, onOpenPage, branch }: {
+function RepoSection({ port, workspaceRoot, repo, changes, current, onOpen, onChanged, remote, onOpenPage, branch, wrote }: {
   port: AgentPort; workspaceRoot?: string; repo: string; changes: WorkspaceChange[]; current: string; onOpen: (path: string) => void; onChanged?: () => void; remote: boolean;
-  onOpenPage?: () => void; branch?: string;
+  onOpenPage?: () => void; branch?: string; wrote: number;
 }) {
   const refresh = () => onChanged?.();
   const commit = useCommitCard(port, refresh, repo || undefined);
@@ -103,7 +103,7 @@ function RepoSection({ port, workspaceRoot, repo, changes, current, onOpen, onCh
         below={remote ? null : push.card}
         onOpenPage={onOpenPage}
       />
-      {!remote && <WorkbenchHistory port={port} repo={repo || undefined} branch={branch} />}
+      {!remote && <WorkbenchHistory port={port} repo={repo || undefined} branch={branch} stamp={`${wrote}:${changes.length}`} />}
     </>
   );
 }
