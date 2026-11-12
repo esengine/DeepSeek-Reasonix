@@ -611,7 +611,10 @@ export function WorkbenchPanel({
               {failed}
             </div>
           )}
-          {(launcher || !active) && (
+          {!launcher && !active && showFiles && (
+            <WorkbenchState icon="file" title={t("workbench.pick_a_file")} detail={t("workbench.pick_a_file_detail")} />
+          )}
+          {(launcher || (!active && !showFiles)) && (
             <WorkbenchLauncher
               key={String(launcher)} focus={launcher}
               changes={changes.length}

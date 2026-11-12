@@ -115,6 +115,8 @@ export const WORKBENCH: Messages = {
   "workbench.reveal_in_finder": { zh: "在访达中显示", en: "Reveal in Finder" },
   "workbench.run_interactively": { zh: "交互运行", en: "Run interactively" },
   "workbench.search_files": { zh: "搜索文件", en: "Search files" },
+  "workbench.pick_a_file": { zh: "从左侧选一个文件", en: "Pick a file on the left" },
+  "workbench.pick_a_file_detail": { zh: "要开浏览器或终端,点上方标签栏的 +。", en: "For a browser or a terminal, use + in the tab bar above." },
   "workbench.select_all": { zh: "全选", en: "Select all" },
   "workbench.show_file_tree": { zh: "展开文件树", en: "Show file tree" },
   "workbench.show_hidden_files": { zh: "显示隐藏文件", en: "Show hidden files" },
