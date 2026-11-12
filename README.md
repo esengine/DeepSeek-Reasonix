@@ -2,6 +2,9 @@
   <img src="docs/logo-ghost-wave-effect.svg" alt="Reasonix" width="360"/>
 </p>
 
+> [!WARNING]
+> **Reasonix is no longer maintained as of 2026-11-12.** The final release is v2.61.0; there will be no further releases, fixes or issue triage. The project is MIT-licensed and forks are welcome. See the [announcement](https://github.com/esengine/DeepSeek-Reasonix/issues/15109).
+
 <p align="center">
   <strong>English</strong>
   &nbsp;·&nbsp;
@@ -307,20 +310,4 @@ Special thanks to [**Bernardxu123**](https://github.com/Bernardxu123) for design
   <sub>MIT — see <a href="./LICENSE">LICENSE</a></sub>
   <br/>
   <sub>Built by the community at <a href="https://github.com/esengine/DeepSeek-Reasonix/graphs/contributors">esengine/DeepSeek-Reasonix</a></sub>
-</p>
-
----
-
-<p align="center"><sub><strong>Support this project</strong></sub></p>
-
-If Reasonix has been useful and you'd like to say thanks, you can. It stays a
-coffee, not a contract — donations don't buy feature priority or change how
-issues get triaged.
-
-- **International** — PayPal: [paypal.me/yuhuahui](https://paypal.me/yuhuahui)
-- **国内** — 微信支付 / 支付宝（扫码）
-
-<p align="center">
-  <img src=".github/sponsor/wechat-pay.jpg" alt="WeChat Pay QR code" width="180"/>
-  <img src=".github/sponsor/alipay.jpg" alt="Alipay QR code" width="180"/>
 </p>
